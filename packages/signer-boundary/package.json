@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/signer-boundary",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated MOCK SignerService boundary (Gate B / B0). Never signs/sends; holds no key material; no network; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

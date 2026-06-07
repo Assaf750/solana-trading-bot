@@ -1,0 +1,6 @@
+{
+  "mode": "paper",
+  "signer_profile_id": "dev-signer-profile-1",
+  "signer_profile_status": "ACTIVE",
+  "key_custody_mode": "isolated_signer"
+}
