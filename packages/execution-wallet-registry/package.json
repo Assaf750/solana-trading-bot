@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/execution-wallet-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Execution Wallets registry + execution_wallet_status state machine (Gate C / C0). In-memory; starts WARMING_UP; no keys; no signer; no admission gate; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

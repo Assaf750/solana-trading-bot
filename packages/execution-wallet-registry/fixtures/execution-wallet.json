@@ -1,0 +1,7 @@
+{
+  "execution_wallet_id": "exec-wallet-dev-1",
+  "execution_wallet_address": "ExecWalletAddrDev0000000000000000000000000",
+  "execution_wallet_creation_mode": "manual",
+  "funding_wallet_id": "funding-dev-1",
+  "settlement_wallet_id": "settlement-dev-1"
+}
