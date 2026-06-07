@@ -1,0 +1,7 @@
+{
+  "intent_id": "intent-dev-0001",
+  "intent_type": "BUY_INTENT",
+  "idempotency_key": "idem-dev-0001",
+  "issuing_brain": "brain_a",
+  "request_id": "req-dev-0001"
+}
