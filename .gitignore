@@ -1,0 +1,46 @@
+# === Rust (services/) ===
+target/
+**/target/
+*.rs.bk
+Cargo.lock.orig
+
+# === Node / TypeScript (apps/, packages/) ===
+node_modules/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+.turbo/
+.pnpm-store/
+coverage/
+
+# === Secrets / Local env (NEVER commit — Gate A is non-trading, no secrets) ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.keypair
+*.wallet
+id.json
+secrets/
+**/secrets/
+
+# === Local data / infra runtime (no Docker/migrations content yet) ===
+*.sqlite
+*.db
+pgdata/
+clickhouse-data/
+redis-data/
+*.log
+logs/
+
+# === Editor / OS ===
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

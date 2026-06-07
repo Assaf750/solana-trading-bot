@@ -1,0 +1,11 @@
+# Normalize line endings to LF in the repository to avoid CRLF churn on Windows.
+* text=auto eol=lf
+
+# Keep markdown governance docs as LF.
+*.md text eol=lf
+
+# Binary types (no normalization).
+*.png binary
+*.jpg binary
+*.pdf binary
+*.parquet binary
