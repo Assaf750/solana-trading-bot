@@ -1,0 +1,27 @@
+{
+  "wallets": [
+    { "execution_wallet_id": "exec-wallet-a", "execution_wallet_address": "addr-a", "execution_wallet_creation_mode": "manual" },
+    { "execution_wallet_id": "exec-wallet-b", "execution_wallet_address": "addr-b", "execution_wallet_creation_mode": "manual" },
+    { "execution_wallet_id": "exec-wallet-old", "execution_wallet_creation_mode": "manual" },
+    { "execution_wallet_id": "exec-wallet-new", "execution_wallet_creation_mode": "manual" }
+  ],
+  "activate": ["exec-wallet-a", "exec-wallet-b", "exec-wallet-old", "exec-wallet-new"],
+  "rotate_request": {
+    "rotation_trigger": "wallet_retirement",
+    "rotation_from_execution_wallet_id": "exec-wallet-old",
+    "rotation_to_execution_wallet_id": "exec-wallet-new"
+  },
+  "ctx": { "permission_role": "admin", "audit_actor": "operator-dev-1" },
+  "hard_risk_exhausted": {
+    "risk_config": {
+      "max_daily_loss_pct": 10, "max_daily_loss_usdt": 500, "max_total_drawdown_pct": 25,
+      "max_open_positions": 3, "max_position_size_pct": 5, "max_token_exposure_pct": 10,
+      "max_creator_exposure_pct": 10, "max_cluster_exposure_pct": 15, "max_correlated_meme_exposure_pct": 20
+    },
+    "measured": {
+      "max_daily_loss_pct": 1, "max_daily_loss_usdt": 50, "max_total_drawdown_pct": 2,
+      "max_open_positions": 3, "max_position_size_pct": 1, "max_token_exposure_pct": 1,
+      "max_creator_exposure_pct": 1, "max_cluster_exposure_pct": 1, "max_correlated_meme_exposure_pct": 1
+    }
+  }
+}
