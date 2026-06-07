@@ -1,6 +1,7 @@
-# CI — Hardening Guards (PR-H1). Runs the EXISTING guards automatically.
+# CI — Hardening Guards (PR-H1, extended PR-H2). Runs the guards automatically.
 # No external dependencies, no network runtime calls, no build step, no product logic.
-# Guards: SSOT drift/candidate/forbidden guard + the Node test suite.
+# Guards: SSOT drift/candidate/forbidden guard + mechanism (Gate-D/E live-mechanism) guard
+# + the Node test suite.
 name: CI
 
 on:
@@ -23,6 +24,9 @@ jobs:
       # No `npm install`: the repo has zero runtime dependencies; guards run on plain Node.
       - name: SSOT drift / candidate / forbidden guard
         run: node tools/check-ssot-drift.mjs
+
+      - name: Mechanism guard (no live Gate-D/E mechanisms)
+        run: node tools/check-mechanism-guards.mjs
 
       - name: Unit + integration tests
         run: node --test

@@ -38,7 +38,9 @@ FORBIDDEN CHANGES · IMPLEMENTATION STEPS · TESTS · DONE CRITERIA
 ويرفق عند الإغلاق: diff summary · tests run · docs impact · **No-SSOT-drift check: PASS/FAIL** · open questions.
 
 ## 5.1 CI / Hardening Guards
-`.github/workflows/ci.yml` يشغّل الحُرّاس آلياً على كل push/PR (بلا تبعيات/شبكة): `node tools/check-ssot-drift.mjs` ثم `node --test`. محلياً: `npm run check:all` (= drift guard + tests) أو `npm run check:ssot-drift` / `npm test`.
+`.github/workflows/ci.yml` يشغّل الحُرّاس آلياً على كل push/PR (بلا تبعيات/شبكة): `node tools/check-ssot-drift.mjs` ثم `node tools/check-mechanism-guards.mjs` ثم `node --test`. محلياً: `npm run check:all` (= drift guard + mechanism guard + tests) أو `npm run check:ssot-drift` / `npm run check:mechanism-guards` / `npm test`.
+
+**Mechanism guard (`tools/check-mechanism-guards.mjs`, PR-H2):** حارس مركزي code-only يمنع آليات Gate-D/Gate-E الحيّة قبل وقتها في `packages/*/src/*.mjs`: live asset/token transfer · transaction build/serialize/sign/send · RPC/provider live calls · Solana/Jupiter/Helius/Jito imports/endpoints · KeyManager · key material (private key/seed/keypair/mnemonic) · REAL-LIVE activation calls. يتجاهل التعليقات و(لآليات الكود) السلاسل النصّية لتفادي false positives في نصوص المنع وأسماء SSOT المحوكمة وقوائم الرفض؛ يفحص الـ imports عبر محدّدات import/require فقط؛ يفحص الـ fixtures عن أسرار/مفاتيح. لا يغيّر أي منطق runtime.
 
 ## 6. حُرّاس غير قابلة للتفاوض (تُفحَص في كل PR)
 - **No name before SSOT** — اسم user/API/runtime/config غير مسجّل ⇒ توقّف وارفع `ARCH → SSOT`.
