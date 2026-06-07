@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/execution-wallet-lifecycle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Execution Wallet lifecycle security commands (Gate C / C3): drain/disable/revoke as state transitions only, gated by permission_role with mandatory in-memory append-only audit. No asset transfer; no signing/sending; no KeyManager; no key material; no RPC; no DB; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
