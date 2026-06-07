@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Logical API contract vocabulary derived from docs/01-SSOT.md + docs/03-API-CONTRACT.md. No name before SSOT; no opportunity execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

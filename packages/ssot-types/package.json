@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/ssot-types",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Typed registry of SSOT names/enums derived from docs/01-SSOT.md. No name before SSOT; candidate_* names stay candidate.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "soltrade-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Solana copy-trading engine — workspaces root. PR-A2 scope: ssot-types + contracts (SSOT-derived names only).",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "check:drift": "node tools/check-ssot-drift.mjs",
+    "test": "node --test"
+  }
+}
