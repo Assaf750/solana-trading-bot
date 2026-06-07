@@ -1,0 +1,30 @@
+{
+  "wallet": {
+    "execution_wallet_id": "exec-wallet-dev-1",
+    "execution_wallet_creation_mode": "manual"
+  },
+  "signer": {
+    "signer_profile_id": "signer-profile-dev-1",
+    "key_custody_mode": "isolated_signer"
+  },
+  "request": {
+    "execution_wallet_id": "exec-wallet-dev-1",
+    "signer_profile_id": "signer-profile-dev-1",
+    "permission_role": "admin",
+    "funded": true,
+    "signer_reachable": true,
+    "key_custody_verified": true,
+    "risk_config": {
+      "max_daily_loss_pct": 10,
+      "max_daily_loss_usdt": 500,
+      "max_total_drawdown_pct": 25,
+      "max_open_positions": 3,
+      "max_position_size_pct": 5,
+      "max_token_exposure_pct": 10,
+      "max_creator_exposure_pct": 10,
+      "max_cluster_exposure_pct": 15,
+      "max_correlated_meme_exposure_pct": 20
+    }
+  },
+  "audit_actor": "operator-dev-1"
+}

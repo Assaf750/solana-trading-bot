@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/gate-c-evidence",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Gate C closure evidence harness (PR-C4), test/report-only. In-memory wiring of C0/C1/C2/C3 proving single-execution-wallet lifecycle (register -> admit ACTIVE -> drain/disable/revoke) with append-only audit and admin/signer_control separation. No new runtime feature; no signing/sending; no KeyManager; no key material; no RPC; no DB; no REAL-LIVE; no Gate D/E; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
