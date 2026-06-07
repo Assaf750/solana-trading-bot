@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/execution-paper-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PAPER execution adapter / test harness (Gate B / B4): same order object -> simulator; no sign, no send, no on-chain, no DB. Guards precede the simulator.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
