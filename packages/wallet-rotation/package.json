@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/wallet-rotation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Wallet Rotation orchestration (Gate D / D3): simulated composite flow over C0/C3/D1/D2 by dependency injection. In-memory, deterministic. rotate_execution_wallet -> PENDING; start -> IN_PROGRESS (drain old via C3 + create asset transfer via D1); complete_wallet_rotation -> COMPLETED only when transfer CONFIRMED (+ sweep if required) and old wallet retired; simulateFail -> FAILED. No live transfer/sweep; no token transfer; no funding; no signer creation; no admission gate; no KeyManager; no key material; no tx build/sign/send; no RPC; no DB; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

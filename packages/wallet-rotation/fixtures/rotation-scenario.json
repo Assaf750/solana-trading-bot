@@ -1,0 +1,13 @@
+{
+  "wallets": [
+    { "execution_wallet_id": "exec-wallet-old", "execution_wallet_creation_mode": "manual" },
+    { "execution_wallet_id": "exec-wallet-new", "execution_wallet_creation_mode": "manual" }
+  ],
+  "rotate_request": {
+    "rotation_trigger": "wallet_retirement",
+    "rotation_from_execution_wallet_id": "exec-wallet-old",
+    "rotation_to_execution_wallet_id": "exec-wallet-new",
+    "permission_role": "admin",
+    "audit_actor": "operator-dev-1"
+  }
+}
