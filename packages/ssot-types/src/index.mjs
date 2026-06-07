@@ -2,3 +2,4 @@
 export * from './core-enums.mjs';
 export * from './candidate-enums.mjs';
 export * from './forbidden.mjs';
+export * from './coverage.mjs';

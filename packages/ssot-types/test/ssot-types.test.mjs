@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import * as core from '../src/core-enums.mjs';
 import { CANDIDATE_ENUMS, CANDIDATE_FIELDS } from '../src/candidate-enums.mjs';
 import { FORBIDDEN_NAMES } from '../src/forbidden.mjs';
+import { DEFERRED_CANDIDATES, CLAIMS_FULL_SSOT_COVERAGE } from '../src/coverage.mjs';
 import { runDriftCheck } from '../../../tools/check-ssot-drift.mjs';
 
 test('drift guard passes (no name outside SSOT, no forbidden, candidate prefixes intact)', () => {
@@ -39,6 +40,19 @@ test('forbidden registry includes the always-forbidden execution names', () => {
     'exit_all_positions', 'batch_exit_all_positions', 'current_price', 'realized_pnl', 'HUNTABLE']) {
     assert.ok(forbidden.has(n), `expected ${n} in forbidden registry`);
   }
+});
+
+test('coverage: included and deferred candidates are disjoint', () => {
+  const included = new Set(Object.keys(CANDIDATE_ENUMS));
+  for (const n of DEFERRED_CANDIDATES) {
+    assert.equal(included.has(n), false, `${n} cannot be both included and deferred`);
+    assert.match(n, /^candidate_/, `deferred ${n} must keep candidate_ prefix`);
+  }
+});
+
+test('coverage: package does not claim full SSOT coverage while candidates are deferred', () => {
+  assert.equal(DEFERRED_CANDIDATES.length > 0, true);
+  assert.equal(CLAIMS_FULL_SSOT_COVERAGE, false);
 });
 
 test('known SSOT enum shapes are exact', () => {
