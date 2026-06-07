@@ -1,0 +1,19 @@
+{
+  "wallets": [
+    { "execution_wallet_id": "exec-wallet-owner", "execution_wallet_creation_mode": "manual" }
+  ],
+  "manual_request": {
+    "execution_wallet_id": "exec-wallet-owner",
+    "position_owner_wallet_id": "exec-wallet-owner",
+    "settlement_wallet_id": "settle-wallet-1",
+    "settlement_wallet_address": "settle-addr-1",
+    "profit_sweep_policy": "manual",
+    "candidate_profits_available_to_sweep": 2.5,
+    "candidate_execution_wallet_balance": 12.0,
+    "candidate_settlement_wallet_balance": 100.0,
+    "candidate_balance_provenance": "on_chain",
+    "candidate_balance_reconciliation_status": "reconciled",
+    "permission_role": "admin",
+    "audit_actor": "operator-dev-1"
+  }
+}

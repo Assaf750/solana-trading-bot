@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/profit-sweep",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Profit Sweep orchestration (Gate D / D2): simulated, owner-bound, candidate-flagged. In-memory, deterministic. sweep_profits (admin) under profit_sweep_policy; manual records a candidate_sweep_event requiring simulated confirmation; auto/periodic are eligibility-only; reconciliation + provenance gates; append-only audit + events. No actual sweep; no token transfer; no tx build/sign/send; no KeyManager; no key material; no RPC; no DB; no rotation; no new asset_transfer_intents; no REAL-LIVE; no execution authority; no UX/API/Opportunity-Radar exposure. candidate_ prefixes preserved.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
