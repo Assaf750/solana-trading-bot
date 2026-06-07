@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/real-live-readiness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "REAL-LIVE Readiness Checklist Evaluator (Gate E / E0): pure, in-memory, deterministic aggregation of existing signals into a readiness verdict + blocker list (09-THREAT §7/§7.8). Prerequisite for activate_real_live; never activates. Fail-safe: any missing/unknown input => not ready. No KeyManager; no key material; no signing/sending; no transaction building/serialization; no RPC/provider; no DB; no REAL-LIVE activation; no mechanism-guard carve-out; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

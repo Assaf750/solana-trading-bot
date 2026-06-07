@@ -1,0 +1,16 @@
+{
+  "ready_input": {
+    "real_live_config_valid": true,
+    "validation_status": "valid",
+    "signer_profile_status": "ACTIVE",
+    "execution_wallet_status": "ACTIVE",
+    "operating_state": "ACTIVE",
+    "protocol_constant_status": "green",
+    "provider_degraded": false,
+    "slot_lag": 1,
+    "slot_lag_max": 5,
+    "audit_path_available": true,
+    "admission_complete": true,
+    "operator_checklist_complete": true
+  }
+}
