@@ -1,0 +1,5 @@
+[
+  { "position_ref": "pos-1", "side": "buy", "quantity": 100, "price": 1.0, "fee": 0.5, "slippage": 0.2 },
+  { "position_ref": "pos-1", "side": "buy", "quantity": 100, "price": 1.2, "fee": 0.5, "slippage": 0.2 },
+  { "position_ref": "pos-1", "side": "sell", "quantity": 120, "price": 1.5, "fee": 0.6, "slippage": 0.3 }
+]

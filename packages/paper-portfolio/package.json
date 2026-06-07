@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/paper-portfolio",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Paper Portfolio + P&L read-model (Gate B / B8) CANDIDATE-flagged, backend-only, in-memory, simulated. Not a source of truth; no UX/API; unrealized only when candidate_mark_status=valid.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
