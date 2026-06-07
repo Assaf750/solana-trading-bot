@@ -105,6 +105,27 @@ export const FORBIDDEN_SECRETS = [
   { label: 'base58-key-blob', re: /\b[1-9A-HJ-NP-Za-km-z]{64,}\b/ },
 ];
 
+// ---- carve-out allowlist (PR-H3) ---------------------------------------------
+// CLOSED BY DEFAULT: ALLOWLIST is EMPTY, so no path is exempt and the guard is fail-closed everywhere
+// exactly as before. A future Gate E PR may add ONE explicit isolated signer/execution path prefix here
+// (e.g. 'packages/<isolated-signer>/src/'), per-path, accompanied by its own positive isolation tests.
+//
+// An allowlisted path is exempt from the LIVE-MECHANISM checks (FORBIDDEN_IMPORTS + FORBIDDEN_CODE) ONLY.
+// Hardcoded KEY MATERIAL stays HARD-FORBIDDEN even inside an allowlisted path (keys come from KMS/secret
+// vault at runtime, never from source). There is no general bypass and no wildcard.
+export const ALLOWLIST = Object.freeze([]);
+
+/** True iff `relPath` is under an explicit allowlist directory prefix (path-segment match, no wildcards). */
+export function isAllowlisted(relPath, allowlist = ALLOWLIST) {
+  const p = String(relPath).replace(/\\/g, '/');
+  return allowlist.some((entry) => {
+    if (typeof entry !== 'string' || entry.length === 0) return false;
+    const e = entry.replace(/\\/g, '/');
+    const pref = e.endsWith('/') ? e : e + '/';
+    return p === e || p.startsWith(pref);
+  });
+}
+
 // ---- core scanners -----------------------------------------------------------
 function importSpecifiers(noComments) {
   const specs = [];
@@ -117,10 +138,23 @@ function importSpecifiers(noComments) {
   return specs;
 }
 
-/** Scan one source text for Layer A + Layer B violations. Returns an array of {label, rule, match}. */
-export function scanText(label, text) {
+/**
+ * Scan one source text for violations. Returns an array of {label, rule, match}.
+ * If the path is allowlisted (PR-H3), the live-mechanism checks are skipped, but hardcoded KEY MATERIAL
+ * is STILL forbidden (allowlisted_but_key_material:*). With the default empty ALLOWLIST nothing is exempt.
+ */
+export function scanText(label, text, { allowlist = ALLOWLIST } = {}) {
   const violations = [];
   const { noComments, noStrings } = lex(text);
+
+  if (isAllowlisted(label, allowlist)) {
+    // Carve-out: live mechanisms permitted here, but key material in source is never allowed.
+    for (const rule of FORBIDDEN_SECRETS) {
+      const m = noComments.match(rule.re); // comments removed, strings kept (catch hardcoded key literals)
+      if (m) violations.push({ label, rule: `allowlisted_but_key_material:${rule.label}`, match: m[0].slice(0, 24) });
+    }
+    return violations;
+  }
 
   for (const spec of importSpecifiers(noComments)) {
     for (const rule of FORBIDDEN_IMPORTS) {
@@ -169,11 +203,11 @@ export function collectFixtureFiles(packagesDir) {
   return walk(base, (p) => /[\\/]fixtures[\\/].*\.json$/.test(p), []);
 }
 
-export function runMechanismGuard({ packagesDir } = {}) {
+export function runMechanismGuard({ packagesDir, allowlist = ALLOWLIST } = {}) {
   const violations = [];
   const srcFiles = collectSourceFiles(packagesDir);
   for (const f of srcFiles) {
-    violations.push(...scanText(relative(ROOT, f), readFileSync(f, 'utf8')));
+    violations.push(...scanText(relative(ROOT, f), readFileSync(f, 'utf8'), { allowlist }));
   }
   const fixtureFiles = collectFixtureFiles(packagesDir);
   for (const f of fixtureFiles) {
@@ -182,7 +216,7 @@ export function runMechanismGuard({ packagesDir } = {}) {
   return {
     ok: violations.length === 0,
     violations,
-    counts: { sources: srcFiles.length, fixtures: fixtureFiles.length, violations: violations.length },
+    counts: { sources: srcFiles.length, fixtures: fixtureFiles.length, allowlist: allowlist.length, violations: violations.length },
   };
 }
 
@@ -190,7 +224,7 @@ export function runMechanismGuard({ packagesDir } = {}) {
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] === fileURLToPath(import.meta.url)) {
   const { ok, violations, counts } = runMechanismGuard();
   if (ok) {
-    console.log(`mechanism guard: PASS — sources=${counts.sources} fixtures=${counts.fixtures} violations=0`);
+    console.log(`mechanism guard: PASS — sources=${counts.sources} fixtures=${counts.fixtures} allowlist=${counts.allowlist} violations=0`);
     process.exit(0);
   } else {
     console.error(`mechanism guard: FAIL (${violations.length})`);

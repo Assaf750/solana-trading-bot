@@ -42,6 +42,8 @@ FORBIDDEN CHANGES · IMPLEMENTATION STEPS · TESTS · DONE CRITERIA
 
 **Mechanism guard (`tools/check-mechanism-guards.mjs`, PR-H2):** حارس مركزي code-only يمنع آليات Gate-D/Gate-E الحيّة قبل وقتها في `packages/*/src/*.mjs`: live asset/token transfer · transaction build/serialize/sign/send · RPC/provider live calls · Solana/Jupiter/Helius/Jito imports/endpoints · KeyManager · key material (private key/seed/keypair/mnemonic) · REAL-LIVE activation calls. يتجاهل التعليقات و(لآليات الكود) السلاسل النصّية لتفادي false positives في نصوص المنع وأسماء SSOT المحوكمة وقوائم الرفض؛ يفحص الـ imports عبر محدّدات import/require فقط؛ يفحص الـ fixtures عن أسرار/مفاتيح. لا يغيّر أي منطق runtime.
 
+**Carve-out allowlist (PR-H3):** `ALLOWLIST` في الحارس **مغلق افتراضياً (فارغ)** — لا مسار مُعفى، والسلوك مطابق تماماً للسابق (fail-closed في كل مكان). نموذج الـ carve-out موجود ومُختبَر فقط ليستعمله Gate E لاحقاً بمسار **isolated signer/execution واحد صريح** (`packages/<isolated-signer>/src/`) **مع اختبارات عزل خاصّة به**. المسار المُعفى يُسمح فيه بآليات التنفيذ الحيّة **فقط**، أمّا **مادة المفاتيح في الشيفرة فتبقى ممنوعة حتى داخله** (`allowlisted_but_key_material:*`) — المفاتيح تأتي من KMS/secret vault وقت التشغيل لا من المستودع. لا wildcard ولا bypass عام؛ المطابقة بحدود مقطع المسار فقط. **لا يُفتح أي package موجود، ولا يُغيَّر أي منطق runtime.**
+
 ## 6. حُرّاس غير قابلة للتفاوض (تُفحَص في كل PR)
 - **No name before SSOT** — اسم user/API/runtime/config غير مسجّل ⇒ توقّف وارفع `ARCH → SSOT`.
 - **candidate يبقى candidate** — لا حذف بادئة `candidate_` · skeleton ≠ promotion.
