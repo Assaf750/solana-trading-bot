@@ -40,6 +40,12 @@
 
 **Current state: v1.8 + F-Elimination + Waves 1–5 Documentation Correction Package integrated as `candidate_*` (Cross-Document Audit PASS لكل موجة: Wave 1 Profit & Paper Truth · Wave 2 Discovery & Copy Safety · Wave 3 Reports & Honesty · Wave 4 Execution/Providers+Data · Wave 5 Local Ops & Readiness). المعمارية والقدرات مكتملة، والتطبيق يُبنى كوحدة متكاملة (Safety Activation Gates لا scope deferral). DOCUMENTATION-ONLY** — لا كود، لا migrations، لا live، لا commands، ولا تحويل `candidate_*` إلى implemented أو أسماء نهائية قبل تثبيتها في SSOT والموافقة الحوكمية النهائية.
 
+### Gate A Activation (رفع محدود جداً لـ DOCUMENTATION-ONLY)
+**رُفِع قيد DOCUMENTATION-ONLY رفعاً محدوداً جداً لغرض Gate A (Foundations / non-trading baseline) فقط** — لا يشمل أي مرحلة لاحقة. تفاصيل النطاق في `IMPLEMENTATION-MEMO.md` و`GATE-A-PLAN.md`.
+- **المسموح حالياً: PR-A0 فقط** (repo bootstrap: `git init` · نقل الوثائق إلى `docs/` · skeleton فارغ · `.gitignore`/`.gitattributes` · `CONTRIBUTING.md` + `PULL_REQUEST_TEMPLATE.md`). **بعد دمج PR-A0 يُطلب PR-A1 بقرار منفصل صريح؛ لا PR-A1 أو ما بعده تلقائياً.**
+- **يبقى ممنوعاً حتى مع هذا الرفع:** signing/sending · أي قدرة تداول · secrets/مفاتيح · config حي/تنفيذي · migrations تنفيذية · **Docker قبل موافقة PR-A1** · تحويل أي `candidate_*` إلى implemented · أي اسم خارج SSOT.
+- البوّابات الأعلى (paper · execution wallet · multi-wallet · REAL-LIVE) تبقى مغلقة بشروط readiness كما في `06-BUILD §6`.
+
 ### قاعدة [F]
 **`[F]` وسم تاريخي فقط.** عناصر [F] السابقة **حُسمت**: المُرقّى = **`candidate_*` capability محوكمة** (مسجّلة في SSOT Groups 22–36، لها موضع في ARCH/API/DATA/UX/TEST/RUN/SEC/BUILD)؛ المرفوض = **Rejected/Forbidden**. **لا يجوز التعامل مع أي [F] سابق كعمل غامض مؤجّل، ولا وصف قدرة F-Elimination بأنها future/MVP later/pending.**
 
@@ -80,7 +86,7 @@
 11. **Charts:** مكتبة احترافية؛ **لا custom engine من الصفر** إلا بتبرير معماري. **OHLCV يحتاج provenance**؛ display-only لا يُعرض كحقيقة تنفيذ.
 12. **AMM لا يعني order-book** — استخدم liquidity-drain/expected-slippage حين لا يوجد order-book.
 13. **Integrated Build — Safety Activation Gates, not scope deferral** — المعمارية والقدرات (v1.8 + F-Elimination) مكتملة، والتطبيق يُبنى كوحدة متكاملة. `06-BUILD §6` = Safety Activation Gates (Gates A–E، لا MVP phasing) · `§8` = Build Capability Clusters · `§9` = F-Elimination Build Capabilities + Engineering Quality Standards. **REAL-LIVE = gate/activation بشرط readiness — لا يعلّق research/paper/charts/reports.** لا «MVP later»/«future F»/«pending capability».
-14. **لا كود، لا migrations، لا live** ضمن مرحلة التوثيق هذه.
+14. **لا كود، لا migrations، لا live** ضمن مرحلة التوثيق هذه — **عدا الرفع المحدود جداً لـ Gate A (PR-A0 فقط حالياً)** الموضّح في قسم «Gate A Activation» أعلاه. يبقى ممنوعاً: signing/sending · تداول · secrets/مفاتيح · config حي · migrations تنفيذية · Docker قبل PR-A1 · candidate→implemented.
 
 
 

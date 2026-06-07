@@ -30,7 +30,7 @@ infra/docker/               # skeleton فارغ — لا Docker بعد
 - لا يُدمج فرع PR إلا باجتياز بوّابة القبول الخاصة به (`GATE-A-PLAN.md §5` لـ Gate A).
 
 ## 5. سياسة الـ PR (بسيطة)
-كل PR يحمل وصفاً بشكل task packet (`docs/10-AGENT-BUILD-PLAN.md §8`):
+استخدم `PULL_REQUEST_TEMPLATE.md` في الجذر (يفرض: Goal · Scope · SSOT names · No-SSOT-drift · Candidate guard · Secrets check · Tests/checks · Docs impact · No trading authority introduced). كل PR يحمل وصفاً بشكل task packet (`docs/10-AGENT-BUILD-PLAN.md §8`):
 ```
 TASK · GATE · GOAL · SOURCE DOCS · SSOT NAMES USED · FILES TO TOUCH
 FORBIDDEN CHANGES · IMPLEMENTATION STEPS · TESTS · DONE CRITERIA
