@@ -1,0 +1,81 @@
+# Local development infrastructure — PR-A1 scope ONLY.
+# Services: PostgreSQL · ClickHouse · Redis (local dev datastores only).
+#
+# SCOPE GUARDS (PR-A1):
+#   - Dev-only dummy values · localhost-bound · isolated.
+#   - NO secrets / NO real keys / NO API keys.
+#   - NO RPC/Solana/Jupiter/Helius/Jito connections.
+#   - NO migrations · NO trading config · NO services code · NO signing/sending.
+#   - NO trading authority introduced.
+name: soltrade-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: soltrade-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-soltrade}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
+      POSTGRES_DB: ${POSTGRES_DB:-soltrade_dev}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-soltrade} -d ${POSTGRES_DB:-soltrade_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [soltrade-dev]
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24-alpine
+    container_name: soltrade-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:-soltrade_dev}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-soltrade}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-devpassword}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
+    ports:
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [soltrade-dev]
+
+  redis:
+    image: redis:7-alpine
+    container_name: soltrade-redis
+    restart: unless-stopped
+    # Localhost-bound, no auth (dev only). Persistence kept minimal for local use.
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [soltrade-dev]
+
+volumes:
+  pgdata:
+  clickhouse-data:
+  redis-data:
+
+networks:
+  soltrade-dev:
+    driver: bridge
