@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dashboard shell (Gate A): read-only diagnostic shell with AR/EN + RTL/LTR. No execution controls; no trading; no network.",
+  "exports": {
+    ".": {
+      "default": "./src/main.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

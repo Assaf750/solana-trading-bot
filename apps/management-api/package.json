@@ -1,0 +1,21 @@
+{
+  "name": "@soltrade/management-api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Read-only Management API skeleton (Gate A). GET-only; no command_type; no execution; no opportunity commands; deterministic; local-only.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "start:dev": "node src/server.mjs",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
