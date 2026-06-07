@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/execution-wallet-pool",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Execution Wallet Pool view + Assignment Policy (Gate D / D0): selection only over the C0 registry. Deterministic, in-memory. Supports all wallet_assignment_policy values; selects only ACTIVE-eligible wallets; Hard Risk is global aggregate (mock input) with no bypass via multiplicity. No asset transfer; no rotation; no sweep; no transfer-boundary; no signing/sending; no KeyManager; no key material; no RPC; no DB; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
