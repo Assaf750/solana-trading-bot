@@ -1,7 +1,7 @@
 // @soltrade/management-api — dev-only LOCAL listener (inbound only).
 // Wires the pure read-only router to a local HTTP listener for development.
 // node:http here is an INBOUND local listener — NOT an outbound/external network call.
-// No outbound clients (no fetch/axios/RPC/provider calls). Run: `node src/server.mjs`.
+// No outbound provider clients of any kind. Run via the start:dev script.
 
 import { createServer } from 'node:http';
 import { handleRequest } from './router.mjs';

@@ -14,7 +14,7 @@ API إدارة **read-only** فقط. مشتقّ من `docs/03-API-CONTRACT.md §
 - **GET فقط** · أي كتابة → `405` + `error_message` (بلا تنفيذ، بلا `api_error_code` جديد).
 - **لا `command_type`** · **لا opportunity execution** (`buy_/execute_/submit_opportunity` غير موجودة) · **لا أمر خروج ذرّي**.
 - مسار غير معروف → `RESOURCE_NOT_FOUND` (قائم). **لا `api_error_code` جديد.**
-- `router.mjs` دالة نقيّة (`handleRequest`) قابلة للاختبار بلا منفذ. `server.mjs` مستمع **محلي inbound فقط** (node:http)، بلا أي outbound/RPC/fetch.
+- `router.mjs` دالة نقيّة (`handleRequest`) قابلة للاختبار بلا منفذ. `server.mjs` مستمع **محلي inbound فقط** (node:http)، بلا أي اتصالات صادرة إلى مزوّدين خارجيين.
 
 ## الاستخدام
 ```js
