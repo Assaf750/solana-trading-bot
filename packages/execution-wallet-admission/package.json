@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/execution-wallet-admission",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Admission Gate (Gate C / C2): activate_execution_wallet mock/in-memory. Fail-safe gating WARMING_UP -> ACTIVE only after permission + wallet/signer state + mock readiness + Hard Risk completeness. Admission != signing and != sending; no key material; no KeyManager; no RPC; no DB; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
