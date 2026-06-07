@@ -1,0 +1,23 @@
+{
+  "copy_event": "leader_buy",
+  "wallet_signal": true,
+  "migration_phase": "PRE_MIGRATION",
+  "hunt_status": "ranked",
+  "ev_gate_mode": "strict",
+  "ev_gate_config": {
+    "minimum_net_expectancy": 0.05,
+    "minimum_profit_factor": 1.5,
+    "minimum_lower_confidence_bound": 0.1,
+    "minimum_sample_size": 30,
+    "minimum_exit_success_rate": 70,
+    "max_expected_drawdown_pct": 40
+  },
+  "ev_metrics": {
+    "minimum_net_expectancy": 0.2,
+    "minimum_profit_factor": 2.0,
+    "minimum_lower_confidence_bound": 0.3,
+    "minimum_sample_size": 80,
+    "minimum_exit_success_rate": 85,
+    "max_expected_drawdown_pct": 20
+  }
+}

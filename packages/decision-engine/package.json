@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/decision-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Decision Engine skeleton (Gate B / B6): brain routing + copy_event classification + EV gate -> decision DRAFTS/recommendations only. No execution authority; no order building; no signing/sending.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
