@@ -37,6 +37,9 @@ FORBIDDEN CHANGES · IMPLEMENTATION STEPS · TESTS · DONE CRITERIA
 ```
 ويرفق عند الإغلاق: diff summary · tests run · docs impact · **No-SSOT-drift check: PASS/FAIL** · open questions.
 
+## 5.1 CI / Hardening Guards
+`.github/workflows/ci.yml` يشغّل الحُرّاس آلياً على كل push/PR (بلا تبعيات/شبكة): `node tools/check-ssot-drift.mjs` ثم `node --test`. محلياً: `npm run check:all` (= drift guard + tests) أو `npm run check:ssot-drift` / `npm test`.
+
 ## 6. حُرّاس غير قابلة للتفاوض (تُفحَص في كل PR)
 - **No name before SSOT** — اسم user/API/runtime/config غير مسجّل ⇒ توقّف وارفع `ARCH → SSOT`.
 - **candidate يبقى candidate** — لا حذف بادئة `candidate_` · skeleton ≠ promotion.

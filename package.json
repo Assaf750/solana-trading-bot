@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "check:drift": "node tools/check-ssot-drift.mjs",
-    "test": "node --test"
+    "check:ssot-drift": "node tools/check-ssot-drift.mjs",
+    "test": "node --test",
+    "check:all": "node tools/check-ssot-drift.mjs && node --test"
   }
 }
