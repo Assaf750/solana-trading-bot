@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/paper-e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Paper end-to-end orchestration + Gate B evidence (Gate B / B9). Simulated, in-memory; no live trading, no REAL-LIVE, no Gate C, no signing/sending, no DB.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

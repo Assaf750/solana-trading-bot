@@ -1,0 +1,54 @@
+{
+  "events": [
+    { "event_type": "opportunity_update", "stream_channel": "opportunity", "event_sequence": 1, "event_timestamp": "2026-06-07T00:00:00.000Z", "last_seen_slot": 1000, "last_confirmed_slot": 999 },
+    { "event_type": "position_update", "stream_channel": "position", "event_sequence": 2, "event_timestamp": "2026-06-07T00:00:01.000Z", "copy_event": "leader_buy", "last_seen_slot": 1001, "last_confirmed_slot": 1000 }
+  ],
+  "signal": {
+    "copy_event": "leader_buy",
+    "wallet_signal": true,
+    "migration_phase": "PRE_MIGRATION",
+    "ev_gate_mode": "strict",
+    "ev_gate_config": {
+      "minimum_net_expectancy": 0.05,
+      "minimum_profit_factor": 1.5,
+      "minimum_lower_confidence_bound": 0.1,
+      "minimum_sample_size": 30,
+      "minimum_exit_success_rate": 70,
+      "max_expected_drawdown_pct": 40
+    },
+    "ev_metrics": {
+      "minimum_net_expectancy": 0.2,
+      "minimum_profit_factor": 2.0,
+      "minimum_lower_confidence_bound": 0.3,
+      "minimum_sample_size": 80,
+      "minimum_exit_success_rate": 85,
+      "max_expected_drawdown_pct": 20
+    }
+  },
+  "intent": { "intent_id": "e2e-intent-1", "intent_type": "BUY_INTENT", "idempotency_key": "e2e-idem-1" },
+  "position": { "id": "e2e-pos-1", "entry_brain": "brain_a", "config_version_at_entry": 1 },
+  "exec_ctx": {
+    "risk_config": {
+      "max_daily_loss_pct": 10, "max_daily_loss_usdt": 500, "max_total_drawdown_pct": 25,
+      "max_open_positions": 5, "max_position_size_pct": 10, "max_token_exposure_pct": 15,
+      "max_creator_exposure_pct": 20, "max_cluster_exposure_pct": 20, "max_correlated_meme_exposure_pct": 30
+    },
+    "measured": {
+      "max_daily_loss_pct": 1, "max_daily_loss_usdt": 50, "max_total_drawdown_pct": 5,
+      "max_open_positions": 2, "max_position_size_pct": 4, "max_token_exposure_pct": 8,
+      "max_creator_exposure_pct": 10, "max_cluster_exposure_pct": 9, "max_correlated_meme_exposure_pct": 15
+    },
+    "signer_profile_id": "dev-signer-1",
+    "signer_profile_status": "ACTIVE",
+    "key_custody_mode": "isolated_signer",
+    "position_id": "e2e-pos-1",
+    "to_state": "OPEN",
+    "cost": {
+      "entry_slippage_bps": 30, "price_impact_bps": 20, "base_fee_lamports": 5000,
+      "priority_fee_lamports": 10000, "compute_unit_limit": 200000, "compute_unit_price": 1,
+      "est_exit_slippage_bps": 40, "est_exit_cost": 6000
+    }
+  },
+  "fill": { "side": "buy", "quantity": 100, "price": 1.0, "fee": 0.5, "slippage": 0.2 },
+  "mark": { "candidate_mark_status": "valid", "mark": 1.4 }
+}
