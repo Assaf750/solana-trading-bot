@@ -1,0 +1,29 @@
+{
+  "global_config": {
+    "ev_gate_mode": "loose",
+    "execution_mode": "jito_bundle"
+  },
+  "brain_config": {
+    "strategy_brain": "brain_a",
+    "sizing_mode": "pct_of_capital",
+    "sizing_value": 150
+  },
+  "per_wallet_config": {
+    "DevWalletInvalid22222222222222222222222222222": {
+      "follow_enabled": true,
+      "copy_mode": "follow_entry_user_exit",
+      "scale_in_policy": "limited_add",
+      "partial_sell_low_threshold": 50,
+      "partial_sell_medium_threshold": 25,
+      "partial_sell_high_threshold": 60,
+      "partial_sell_major_threshold": 80,
+      "max_liquidity_share_pct": 0
+    }
+  },
+  "risk_config": {
+    "max_daily_loss_pct": -5
+  },
+  "bogus_object": {
+    "not_a_real_key": 1
+  }
+}

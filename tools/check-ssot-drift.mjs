@@ -20,6 +20,7 @@ import { FORBIDDEN_NAMES } from '../packages/ssot-types/src/forbidden.mjs';
 import { DEFERRED_CANDIDATES, CLAIMS_FULL_SSOT_COVERAGE } from '../packages/ssot-types/src/coverage.mjs';
 import * as api from '../packages/contracts/src/api-vocabulary.mjs';
 import { CANDIDATE_COMMANDS, CANDIDATE_ERRORS } from '../packages/contracts/src/candidate-commands.mjs';
+import { FIELDS as CONFIG_FIELDS, CONFIG_OBJECTS } from '../packages/config/src/schema.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -32,14 +33,17 @@ const FORBIDDEN_EXEC_COMMANDS = [
 function loadDocs() {
   const ssot = readFileSync(join(ROOT, 'docs/01-SSOT.md'), 'utf8');
   const apiDoc = readFileSync(join(ROOT, 'docs/03-API-CONTRACT.md'), 'utf8');
-  const docs = ssot + '\n' + apiDoc;
-  // Tokens inside backticks (official field/value names are backticked in SSOT).
+  const configDoc = readFileSync(join(ROOT, 'docs/02-CONFIG-AND-POLICY-SCHEMA.md'), 'utf8');
+  // Extract backtick tokens PER DOCUMENT (an odd backtick in one doc must not corrupt
+  // code-span pairing in another when concatenated).
   const backtick = new Set();
-  for (const m of docs.matchAll(/`([^`]+)`/g)) {
-    for (const tok of m[1].split(/[^A-Za-z0-9_]+/)) if (tok) backtick.add(tok);
+  const words = new Set();
+  for (const text of [ssot, apiDoc, configDoc]) {
+    for (const m of text.matchAll(/`([^`]+)`/g)) {
+      for (const tok of m[1].split(/[^A-Za-z0-9_]+/)) if (tok) backtick.add(tok);
+    }
+    for (const tok of text.match(/[A-Za-z0-9_]+/g) || []) words.add(tok);
   }
-  // All identifier-like tokens (covers plain `·`-separated allowed_values, e.g. 30d).
-  const words = new Set(docs.match(/[A-Za-z0-9_]+/g) || []);
   return { ssot, backtick, words };
 }
 
@@ -75,7 +79,11 @@ export function runDriftCheck() {
     ...CANDIDATE_COMMANDS,
     ...CANDIDATE_ERRORS,
   ];
-  const fieldNames = [...api.ENVELOPE_FIELDS, ...api.AUDIT_FIELDS];
+  const configFieldNames = [
+    ...CONFIG_OBJECTS,
+    ...CONFIG_OBJECTS.flatMap((o) => Object.keys(CONFIG_FIELDS[o])),
+  ];
+  const fieldNames = [...api.ENVELOPE_FIELDS, ...api.AUDIT_FIELDS, ...configFieldNames];
 
   const values = [
     ...Object.values(core.CORE_ENUMS).flat(),
@@ -151,6 +159,7 @@ export function runDriftCheck() {
     candidateIncluded: includedCandidates.size,
     candidateDeferred: deferredCandidates.size,
     candidateCommands: CANDIDATE_COMMANDS.length,
+    configFields: configFieldNames.length,
     forbidden: forbidden.size,
   } };
 }
@@ -159,7 +168,7 @@ export function runDriftCheck() {
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] === fileURLToPath(import.meta.url)) {
   const { ok, errors, counts } = runDriftCheck();
   if (ok) {
-    console.log(`SSOT drift check: PASS — core=${counts.coreEnums} api=${counts.apiVocab} candidate(ssot=${counts.candidateEnumsInSsot}, included=${counts.candidateIncluded}, deferred=${counts.candidateDeferred}) cmd=${counts.candidateCommands} forbidden=${counts.forbidden}`);
+    console.log(`SSOT drift check: PASS — core=${counts.coreEnums} api=${counts.apiVocab} config=${counts.configFields} candidate(ssot=${counts.candidateEnumsInSsot}, included=${counts.candidateIncluded}, deferred=${counts.candidateDeferred}) cmd=${counts.candidateCommands} forbidden=${counts.forbidden}`);
     process.exit(0);
   } else {
     console.error(`SSOT drift check: FAIL (${errors.length})`);

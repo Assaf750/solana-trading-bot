@@ -1,0 +1,43 @@
+{
+  "global_config": {
+    "ev_gate_mode": "strict",
+    "execution_mode": "auto"
+  },
+  "brain_config": {
+    "strategy_brain": "brain_b",
+    "sizing_mode": "fixed_sol",
+    "sizing_value": 1
+  },
+  "per_wallet_config": {
+    "DevWalletWatch3333333333333333333333333333333": {
+      "follow_enabled": true,
+      "copy_mode": "full_mirror"
+    }
+  },
+  "risk_config": {
+    "max_daily_loss_pct": 10,
+    "max_daily_loss_usdt": 500,
+    "max_total_drawdown_pct": 25,
+    "max_open_positions": 5,
+    "max_position_size_pct": 10,
+    "max_token_exposure_pct": 15
+  },
+  "ev_gate_config": {
+    "minimum_net_expectancy": 0.05,
+    "minimum_profit_factor": 1.5,
+    "minimum_lower_confidence_bound": 0.1,
+    "minimum_sample_size": 30,
+    "minimum_exit_success_rate": 70,
+    "max_expected_drawdown_pct": 40
+  },
+  "execution_config": {
+    "bundle_ttl_slots": 150,
+    "platform_fee_bps": 0
+  },
+  "paper_config": {
+    "user_enabled_paper_gate": false
+  },
+  "config_versioning": {
+    "config_version": 1
+  }
+}

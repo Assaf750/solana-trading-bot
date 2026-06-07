@@ -1,0 +1,62 @@
+{
+  "global_config": {
+    "user_enabled_paper_gate": false,
+    "ev_gate_mode": "strict",
+    "execution_mode": "jito_bundle",
+    "usdc_quote_enabled": false
+  },
+  "brain_config": {
+    "strategy_brain": "brain_a",
+    "sizing_mode": "fixed_usd",
+    "sizing_value": 50
+  },
+  "per_wallet_config": {
+    "DevWallet1111111111111111111111111111111111": {
+      "follow_enabled": true,
+      "copy_mode": "follow_entry_user_exit",
+      "take_profit_pct": 40,
+      "partial_sell_policy": "risk_modifier_only",
+      "min_mirror_sell_pct": 5,
+      "partial_sell_low_threshold": 10,
+      "partial_sell_medium_threshold": 25,
+      "partial_sell_high_threshold": 50,
+      "partial_sell_major_threshold": 75,
+      "transfer_exit_policy": "no_auto_exit",
+      "scale_in_policy": "no_add",
+      "conflict_resolution": "risk_signal_wins_by_default",
+      "max_entry_slippage_vs_leader": 2,
+      "stop_loss_pct": 30,
+      "max_time_in_position": 3600000,
+      "max_liquidity_share_pct": 5
+    }
+  },
+  "risk_config": {
+    "max_daily_loss_pct": 10,
+    "max_daily_loss_usdt": 500,
+    "max_total_drawdown_pct": 25,
+    "max_open_positions": 5,
+    "max_position_size_pct": 10,
+    "max_token_exposure_pct": 15,
+    "max_creator_exposure_pct": 20,
+    "max_cluster_exposure_pct": 20,
+    "max_correlated_meme_exposure_pct": 30
+  },
+  "ev_gate_config": {
+    "minimum_net_expectancy": 0.05,
+    "minimum_profit_factor": 1.5,
+    "minimum_lower_confidence_bound": 0.1,
+    "minimum_sample_size": 30,
+    "minimum_exit_success_rate": 70,
+    "max_expected_drawdown_pct": 40
+  },
+  "execution_config": {
+    "bundle_ttl_slots": 150,
+    "platform_fee_bps": 0
+  },
+  "paper_config": {
+    "user_enabled_paper_gate": false
+  },
+  "config_versioning": {
+    "config_version": 1
+  }
+}

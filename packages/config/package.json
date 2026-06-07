@@ -1,0 +1,21 @@
+{
+  "name": "@soltrade/config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Config schema + validator + mutability rules derived from docs/02-CONFIG-AND-POLICY-SCHEMA.md (CORE, non-candidate). No name before SSOT; no new threshold; no trading.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src",
+    "fixtures"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
