@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/stream-ingestion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Replay/mock stream ingestion (Gate B / B5): deterministic fixture replay, dedup, forward-only cursor. No live stream/provider/network; no DB; no execution.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

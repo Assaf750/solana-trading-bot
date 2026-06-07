@@ -1,0 +1,6 @@
+[
+  { "event_type": "health_update", "stream_channel": "health", "event_sequence": 1, "event_timestamp": "2026-06-07T00:00:00.000Z", "last_seen_slot": 1000, "last_confirmed_slot": 998 },
+  { "event_type": "position_update", "stream_channel": "position", "event_sequence": 2, "event_timestamp": "2026-06-07T00:00:01.000Z", "last_seen_slot": 1001, "last_confirmed_slot": 999 },
+  { "event_type": "opportunity_update", "stream_channel": "opportunity", "event_sequence": 3, "event_timestamp": "2026-06-07T00:00:02.000Z", "last_seen_slot": 1002, "last_confirmed_slot": 1000 },
+  { "event_type": "intent_update", "stream_channel": "intent", "event_sequence": 4, "event_timestamp": "2026-06-07T00:00:03.000Z", "last_seen_slot": 1003, "last_confirmed_slot": 1001 }
+]
