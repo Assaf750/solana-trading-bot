@@ -10,7 +10,7 @@
 // Pure Node (no deps). Run: `node tools/check-ssot-drift.mjs`.
 // Exit 0 = PASS, exit 1 = FAIL. Importable: `import { runDriftCheck } from ...`.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -21,6 +21,7 @@ import { DEFERRED_CANDIDATES, CLAIMS_FULL_SSOT_COVERAGE } from '../packages/ssot
 import * as api from '../packages/contracts/src/api-vocabulary.mjs';
 import { CANDIDATE_COMMANDS, CANDIDATE_ERRORS } from '../packages/contracts/src/candidate-commands.mjs';
 import { FIELDS as CONFIG_FIELDS, CONFIG_OBJECTS } from '../packages/config/src/schema.mjs';
+import { API_DATA_NAMES } from '../packages/data/src/schema.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -34,11 +35,12 @@ function loadDocs() {
   const ssot = readFileSync(join(ROOT, 'docs/01-SSOT.md'), 'utf8');
   const apiDoc = readFileSync(join(ROOT, 'docs/03-API-CONTRACT.md'), 'utf8');
   const configDoc = readFileSync(join(ROOT, 'docs/02-CONFIG-AND-POLICY-SCHEMA.md'), 'utf8');
+  const dataDoc = readFileSync(join(ROOT, 'docs/05-DATA-MODEL.md'), 'utf8');
   // Extract backtick tokens PER DOCUMENT (an odd backtick in one doc must not corrupt
   // code-span pairing in another when concatenated).
   const backtick = new Set();
   const words = new Set();
-  for (const text of [ssot, apiDoc, configDoc]) {
+  for (const text of [ssot, apiDoc, configDoc, dataDoc]) {
     for (const m of text.matchAll(/`([^`]+)`/g)) {
       for (const tok of m[1].split(/[^A-Za-z0-9_]+/)) if (tok) backtick.add(tok);
     }
@@ -83,7 +85,7 @@ export function runDriftCheck() {
     ...CONFIG_OBJECTS,
     ...CONFIG_OBJECTS.flatMap((o) => Object.keys(CONFIG_FIELDS[o])),
   ];
-  const fieldNames = [...api.ENVELOPE_FIELDS, ...api.AUDIT_FIELDS, ...configFieldNames];
+  const fieldNames = [...api.ENVELOPE_FIELDS, ...api.AUDIT_FIELDS, ...configFieldNames, ...API_DATA_NAMES];
 
   const values = [
     ...Object.values(core.CORE_ENUMS).flat(),
@@ -152,6 +154,21 @@ export function runDriftCheck() {
     errors.push('CLAIMS_FULL_SSOT_COVERAGE is true while candidates are deferred');
   }
 
+  // (6) Migration SQL must not declare any forbidden/rejected name as a column/entity.
+  let migrationFiles = 0;
+  for (const sub of ['migrations/postgres', 'migrations/clickhouse']) {
+    let names = [];
+    try { names = readdirSync(join(ROOT, sub)); } catch { names = []; }
+    for (const fn of names) {
+      if (!fn.endsWith('.sql')) continue;
+      migrationFiles++;
+      const sql = readFileSync(join(ROOT, sub, fn), 'utf8');
+      for (const n of forbidden) {
+        if (new RegExp(`\\b${n}\\b`).test(sql)) errors.push(`forbidden name in ${sub}/${fn}: ${n}`);
+      }
+    }
+  }
+
   return { ok: errors.length === 0, errors, counts: {
     coreEnums: Object.keys(core.CORE_ENUMS).length,
     apiVocab: Object.keys(api.API_VOCAB).length,
@@ -160,6 +177,8 @@ export function runDriftCheck() {
     candidateDeferred: deferredCandidates.size,
     candidateCommands: CANDIDATE_COMMANDS.length,
     configFields: configFieldNames.length,
+    dataNames: API_DATA_NAMES.length,
+    migrationFiles,
     forbidden: forbidden.size,
   } };
 }
@@ -168,7 +187,7 @@ export function runDriftCheck() {
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1] === fileURLToPath(import.meta.url)) {
   const { ok, errors, counts } = runDriftCheck();
   if (ok) {
-    console.log(`SSOT drift check: PASS — core=${counts.coreEnums} api=${counts.apiVocab} config=${counts.configFields} candidate(ssot=${counts.candidateEnumsInSsot}, included=${counts.candidateIncluded}, deferred=${counts.candidateDeferred}) cmd=${counts.candidateCommands} forbidden=${counts.forbidden}`);
+    console.log(`SSOT drift check: PASS — core=${counts.coreEnums} api=${counts.apiVocab} config=${counts.configFields} data=${counts.dataNames} mig=${counts.migrationFiles} candidate(ssot=${counts.candidateEnumsInSsot}, included=${counts.candidateIncluded}, deferred=${counts.candidateDeferred}) cmd=${counts.candidateCommands} forbidden=${counts.forbidden}`);
     process.exit(0);
   } else {
     console.error(`SSOT drift check: FAIL (${errors.length})`);

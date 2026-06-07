@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/data",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Data-model registry + append-only audit write path + Redis projection adapter, derived from docs/05-DATA-MODEL.md (CORE). No name before SSOT; no secrets; no trading event bus.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
