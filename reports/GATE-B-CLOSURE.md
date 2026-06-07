@@ -2,6 +2,12 @@
 
 > دليل إغلاق Gate B (PR-B9). **paper/simulated/in-memory فقط** — لا توقيع/إرسال، لا REAL-LIVE، لا Gate C. مرجع: `06-BUILD §6` · `10-AGENT-BUILD-PLAN §7/§9`.
 
+## 0. الحالة الرسمية (ملزِمة)
+- **Gate B status: PARTIAL** (ليس PASS كاملاً).
+- **B→C readiness: NOT READY.**
+- **السبب (Blocker):** `single-provider → EXITS_ONLY` غير مكتمل — كشف `provider_degraded` موجود (`evaluateRpcHealth`)، لكن **تفعيل `operating_state = EXITS_ONLY` غير موصول بعد** (لا `OperatingStateMachine` منفّذة).
+- **هذا البند Blocker إلزامي:** يُمنع أي انتقال إلى Gate C / REAL-LIVE قبل إغلاقه.
+
 ## 1. مكوّنات Gate B المدموجة في `main`
 | PR | الحزمة | الدور |
 |---|---|---|
@@ -40,4 +46,9 @@
 5. **stream live + provider single/multi** لم يُوصَلا (replay/mock فقط).
 
 ## 5. الخلاصة
-المسار الورقي الآمن (paper execution-safe baseline) **قائم ومُتحقَّق end-to-end** بكل الحُرّاس قبل أي تنفيذ، بلا توقيع/إرسال/DB/شبكة/REAL-LIVE. **Gate B جاهز للمراجعة**؛ بند single-provider→EXITS_ONLY موسوم PARTIAL بصدق ويجب إكماله قبل أي رفع صلاحيات نحو Gate C/REAL-LIVE.
+المسار الورقي الآمن (paper execution-safe baseline) **قائم ومُتحقَّق end-to-end** بكل الحُرّاس قبل أي تنفيذ، بلا توقيع/إرسال/DB/شبكة/REAL-LIVE. **لكن Gate B = PARTIAL وليس PASS**، و**B→C readiness = NOT READY**.
+
+**Blocker list (يجب إغلاقه قبل Gate C/REAL-LIVE):**
+1. **[BLOCKER] `single-provider → EXITS_ONLY`** — كشف `provider_degraded` موجود؛ تفعيل `operating_state=EXITS_ONLY` (OperatingStateMachine) غير موصول.
+
+**Follow-ups (غير حاجبة لكن مطلوبة لاحقاً):** ربط persistence الفعلي للمسار الورقي · stream/provider live (خارج replay) · تطبيق Rust للـ hot path · حسم candidate→implemented عبر SSOT. **لا انتقال إلى Gate C قبل رفع الـ Blocker وموافقة حوكمية صريحة.**
