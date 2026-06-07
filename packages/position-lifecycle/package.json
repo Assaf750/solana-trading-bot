@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/position-lifecycle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PositionLifecycleStateMachine (Gate B / B3): deterministic in-memory position_state transitions + migration handover. No DB writes; no execution; no signing/sending.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

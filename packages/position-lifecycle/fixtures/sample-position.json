@@ -1,0 +1,6 @@
+{
+  "id": "pos-dev-0001",
+  "entry_brain": "brain_a",
+  "config_version_at_entry": 1,
+  "migration_phase": "PRE_MIGRATION"
+}
