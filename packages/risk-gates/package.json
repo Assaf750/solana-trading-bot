@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/risk-gates",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hard Risk enforcement layer (Gate B / B1). Deterministic; always-binding; no bypass; no execution; consumes risk_config (G6).",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "max_daily_loss_pct": 2,
+  "max_daily_loss_usdt": 100,
+  "max_total_drawdown_pct": 8,
+  "max_open_positions": 3,
+  "max_position_size_pct": 5,
+  "max_token_exposure_pct": 9,
+  "max_creator_exposure_pct": 12,
+  "max_cluster_exposure_pct": 10,
+  "max_correlated_meme_exposure_pct": 18
+}
