@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/exit-manager",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Exit Manager (Gate B / B7) CANDIDATE-flagged: candidate_cmd_preview_batch_exit -> candidate_cmd_request_batch_exit PER-POSITION. No atomic exit; no execution/signing/sending; candidate_* kept candidate.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

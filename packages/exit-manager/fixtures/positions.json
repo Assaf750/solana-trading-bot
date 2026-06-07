@@ -1,0 +1,6 @@
+[
+  { "id": "pos-1", "position_state": "OPEN" },
+  { "id": "pos-2", "position_state": "PARTIALLY_EXITING" },
+  { "id": "pos-3", "position_state": "CLOSED" },
+  { "id": "pos-4", "position_state": "OPENING" }
+]
