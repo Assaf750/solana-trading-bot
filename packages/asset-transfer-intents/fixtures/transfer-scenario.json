@@ -1,0 +1,15 @@
+{
+  "wallets": [
+    { "execution_wallet_id": "exec-wallet-src", "execution_wallet_creation_mode": "manual" },
+    { "execution_wallet_id": "exec-wallet-dst", "execution_wallet_creation_mode": "manual" }
+  ],
+  "create_request": {
+    "asset_transfer_intent_id": "ati-dev-1",
+    "source_execution_wallet_id": "exec-wallet-src",
+    "destination_execution_wallet_id": "exec-wallet-dst",
+    "position_owner_wallet_id": "exec-wallet-src",
+    "permission_role": "admin",
+    "audit_actor": "operator-dev-1",
+    "idempotency_key": "idem-transfer-1"
+  }
+}

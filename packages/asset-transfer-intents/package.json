@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/asset-transfer-intents",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Asset Transfer Intent state machine + simulated ownership flip (Gate D / D1). In-memory, deterministic, simulated only. asset_transfer_status PENDING->SUBMITTED->CONFIRMED/FAILED/CANCELLED; position_owner_wallet_id flips only on CONFIRMED; admin-gated create/cancel; idempotency; append-only audit. No live transfer; no transfer-boundary; no token transfer; no tx build/serialize/sign/send; no KeyManager; no key material; no RPC; no DB; no rotation/sweep; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
