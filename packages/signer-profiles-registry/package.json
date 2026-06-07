@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/signer-profiles-registry",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Signer Profiles registry + signer_profile_status state machine (Gate C / C1), references-only. In-memory; starts DISABLED; signer_control required for sensitive ops; no key material; no KeyManager; no signing; no admission gate.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

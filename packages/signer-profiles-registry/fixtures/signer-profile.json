@@ -1,0 +1,4 @@
+{
+  "signer_profile_id": "signer-profile-dev-1",
+  "key_custody_mode": "isolated_signer"
+}
