@@ -285,3 +285,88 @@ export interface LiveRpcSpikeBoundaryResult {
 export function describeLiveRpcSpikeBoundaryContract(): LiveRpcSpikeBoundaryDescriptor;
 export function validateLiveRpcSpikeBoundaryRequest(input?: unknown): LiveRpcSpikeBoundaryRequestResult;
 export function evaluateLiveRpcSpikeBoundary(input?: unknown, bindingMap?: unknown): LiveRpcSpikeBoundaryResult;
+
+export type LiveRpcSpikeApprovalGateStatus =
+  | 'live_rpc_spike_approval_gate_valid_no_live'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface LiveRpcSpikeApprovalGateDescriptor {
+  readonly contract: 'live-rpc-spike-approval-gate';
+  readonly version: string;
+  readonly test_only: true;
+  readonly purpose: 'live_rpc_spike_approval_gate';
+  readonly target: 'testnet_rpc_spike';
+  readonly provider_ref: 'helius';
+  readonly supported_environments: readonly string[];
+  readonly requires_separate_live_spike_pr: true;
+  readonly requires_out_of_repo_endpoint_binding: true;
+  readonly requires_supply_chain_review: true;
+  readonly requires_post_spike_revoke_or_disable: true;
+  readonly requires_no_broadcast: true;
+  readonly requires_no_send: true;
+  readonly requires_no_mainnet: true;
+  readonly requires_no_real_live: true;
+  readonly approval_record_valid: false;
+  readonly approval_gate_passed: false;
+  readonly live_rpc_authorized: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export interface LiveRpcSpikeApprovalGateRecordResult {
+  readonly valid: boolean;
+  readonly approval_record_valid: boolean;
+  readonly status: LiveRpcSpikeApprovalGateStatus;
+  readonly reasons: readonly string[];
+  readonly live_rpc_authorized: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export interface LiveRpcSpikeApprovalGateResult {
+  readonly valid: boolean;
+  readonly approval_record_valid: boolean;
+  readonly approval_gate_passed: boolean;
+  readonly status: LiveRpcSpikeApprovalGateStatus;
+  readonly provider_ref?: 'helius';
+  readonly environment?: string;
+  readonly reasons: readonly string[];
+  readonly requires_separate_live_spike_pr: true;
+  readonly live_rpc_authorized: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export function describeLiveRpcSpikeApprovalGateContract(): LiveRpcSpikeApprovalGateDescriptor;
+export function validateLiveRpcSpikeApprovalGate(input?: unknown): LiveRpcSpikeApprovalGateRecordResult;
+export function evaluateLiveRpcSpikeApprovalGate(input?: unknown): LiveRpcSpikeApprovalGateResult;

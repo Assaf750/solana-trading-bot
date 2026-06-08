@@ -549,3 +549,29 @@ diagnostic bundles تحجب الأسرار؛ backups بلا raw keys/seeds/priva
 **14.4 ما لا يتغيّر.** **لا تغيير EV gate / Hard Risk / Risk Gates / SignerService** بسبب أي إشارة Local Ops/health/version/log/status · لا execution authority من أي منها · REAL-LIVE يبقى محكوماً بـ §2/§4 + 09 §7 (readiness/signer/Hard-Risk/security gates) · blockers تبقى block لا warnings.
 
 > **مبدأ §14:** Wave 5 Local Ops تشغيلياً = مراقبة/إرشاد/حالة read-only تُكمّل §3/§7/§8/§12 القائمة، لا أوامر/قرارات جديدة. health green/local running/upgrade pass/version compatible ليست trading readiness ولا execution authority؛ documented_only/candidate ليست implemented؛ المفقود unavailable/unknown/not_verified لا clean/ready؛ الصيانة آمنة افتراضياً ومُدقَّقة وغير سلطوية على source-of-truth. **لا code/commands/migrations/live · لا تغيير 00–07 · لا تغيير الحُرّاس · لا Wave 6+.**
+
+---
+
+## 15. Live Testnet RPC Spike Approval Runbook
+
+> **operator prose / سياسة تشغيل فقط — لا حقول/enums/config/API/SSOT جديدة · لا code/commands/scripts/launcher · لا live/testnet/mainnet يُشغَّل هنا.** هذا القسم يصف **بوّابة موافقة** (approval gate) لـ RPC spike مستقبلي على testnet. البوّابة نفسها (`packages/rpc-provider-contract` — `describeLiveRpcSpikeApprovalGateContract` / `validateLiveRpcSpikeApprovalGate` / `evaluateLiveRpcSpikeApprovalGate`) **contract/test-only** تتحقّق من **شكل سجلّ الموافقة** فقط ولا تمنح أي سلطة تنفيذ حيّة. سجلّ «موافَق عليه» يُنتج `approval_record_valid=true`/`approval_gate_passed=true` لكنّ `live_rpc_authorized=false` وكل أعلام القدرة/الحيّ false، و`requires_separate_live_spike_pr=true` ثابتة — أي **لا يأذن بشيء حيّ**.
+
+النقاط الإلزامية الخمس عشرة (fail-closed، غير قابلة للتخفيف):
+
+1. **F-13/F-14 لا تنفّذان أي RPC حيّ.** هما طبقة contract/boundary/approval-gate تتحقّق من الشكل فقط؛ لا resolution / network / send / serialize / SDK / env / secret.
+2. **أي RPC spike حيّ لاحق يتطلّب PR منفصلاً + موافقة منفصلة** صريحة؛ سجلّ الموافقة هنا لا يكفي ولا يبدأ شيئاً.
+3. **الـ spike الحيّ على testnet/devnet/localnet فقط** — لا بيئة أخرى.
+4. **mainnet ممنوع** في هذا المسار مطلقاً.
+5. **broadcast/send ممنوعان** — الـ spike لا يبثّ ولا يرسل أي معاملة.
+6. **endpoint خام ممنوع داخل الـ repo** — لا URL/مزوّد حيّ في الكود/الوثائق/الإعداد.
+7. **endpoint / API key / secret خارج الـ repo فقط** (out-of-repo binding) — لا يُخزَّن داخل المستودع.
+8. **أي SDK/dependency يتطلّب مراجعة supply-chain + lockfile** في PR منفصل قبل أي استخدام.
+9. **أي network call يتطلّب موافقة صريحة** في PR منفصل.
+10. **أي نتيجة من spike حيّ لا تفتح send** — اجتياز الـ spike ليس إذناً بالإرسال/البثّ.
+11. **أي انتقال إلى testnet broadcast يتطلّب PR منفصلاً.**
+12. **أي REAL-LIVE/mainnet يتطلّب حوكمة منفصلة** (readiness/signer/Hard-Risk/security gates في 06-BUILD §6 + 09 §7) — **لا عبر هذا المسار.**
+13. **بعد الـ spike يجب توثيق revoke/disable أو cleanup** للمرجع/التجربة (post-spike revoke-or-disable).
+14. **وضع الفشل fail-closed** — عند الشكّ/الغموض ترفض البوّابة (لا fail-open، لا تنفيذ).
+15. **endpoint/secret/raw provider config لا يُخزَّن في الـ repo إطلاقاً** — حتّى في backups/exports/diagnostics/logs.
+
+> **مبدأ §15:** بوّابة موافقة الـ RPC spike contract/test-only؛ سجلّ موافَق عليه لا يمنح سلطة حيّة، ويبقى مطلوباً PR منفصل + out-of-repo endpoint binding + supply-chain review قبل أي spike. لا تغيير EV gate / Hard Risk / Risk Gates / SignerService، ولا حقول/أوامر/SSOT جديدة في هذا القسم.

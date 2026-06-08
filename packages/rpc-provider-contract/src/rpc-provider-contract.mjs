@@ -1165,3 +1165,279 @@ export function evaluateLiveRpcSpikeBoundary(input, bindingMap) {
     });
   }
 }
+
+// ============================================================================================================
+// Live RPC Spike APPROVAL GATE (E2-F-14) — test-only, contract/boundary layer ONLY.
+// ------------------------------------------------------------------------------------------------------------
+// This layer validates the SHAPE of an APPROVAL RECORD for a FUTURE testnet RPC spike. It is ADDITIVE — it does
+// NOT alter or weaken the contract / registry / provisioning / binding / F-13 spike-boundary layers above. It
+// REUSES the hardened validateHeliusEndpointProvisioning + looksLikeKeyMaterial + the existing
+// BROADCAST_SEND_BOUNDARY_TOKENS list + the UNCONFIGURED status literal — none of which is weakened.
+//
+// CRITICAL INVARIANT: an APPROVED record authorizes NOTHING live. A separate live-spike PR + out-of-repo
+// endpoint binding + supply-chain review are ALWAYS still required (requires_separate_live_spike_pr is a FIXED
+// LITERAL true on every result, never echoed from input). This layer performs NO live RPC / endpoint resolution
+// / network / send / broadcast / serialize, contacts no provider, and reads no env/secret.
+
+// The approval-record fields that MUST be exactly boolean-true (each paired with the fixed refusal token emitted
+// when missing/non-true). STRING LITERAL reason tokens — never executed, never echoed.
+const APPROVAL_GATE_REQUIRED_TRUE = Object.freeze([
+  ['no_broadcast', 'no_broadcast_required'],
+  ['no_send', 'no_send_required'],
+  ['no_mainnet', 'no_mainnet_required'],
+  ['no_real_live', 'no_real_live_required'],
+  ['requires_separate_live_spike_pr', 'separate_live_spike_pr_required'],
+  ['requires_out_of_repo_endpoint_binding', 'out_of_repo_endpoint_binding_required'],
+  ['requires_supply_chain_review', 'supply_chain_review_required'],
+  ['requires_post_spike_revoke_or_disable', 'post_spike_revoke_or_disable_required'],
+]);
+
+// The only fields permitted on an approval RECORD — anything else is an unknown field and is rejected (no
+// surprise fields, incl. smuggled has_rpc/ready/can_send/is_live/configured/broadcast flags). All permitted
+// fields are opaque references / fixed enums / boolean attestations; none is a key, a secret, or a live endpoint.
+const APPROVAL_GATE_KNOWN_FIELDS = Object.freeze([
+  'purpose', 'target', 'provider_ref', 'environment', 'endpoint_ref',
+  'no_broadcast', 'no_send', 'no_mainnet', 'no_real_live',
+  'requires_separate_live_spike_pr', 'requires_out_of_repo_endpoint_binding',
+  'requires_supply_chain_review', 'requires_post_spike_revoke_or_disable',
+]);
+
+// Describe the Live RPC Spike Approval Gate contract: test-only, no-broadcast/no-send/no-mainnet/no-real-live,
+// reference-only, fail-closed. Describes an APPROVAL RECORD for a FUTURE testnet spike; an approved record
+// authorizes NOTHING live. Performs NO live RPC / endpoint resolution / network / send; reads no env/secret.
+// Read-only; describes intent, performs nothing.
+export function describeLiveRpcSpikeApprovalGateContract() {
+  return Object.freeze({
+    contract: 'live-rpc-spike-approval-gate',
+    version: '0.0.0',
+    test_only: true,
+    purpose: 'live_rpc_spike_approval_gate',
+    target: 'testnet_rpc_spike',
+    provider_ref: 'helius',
+    supported_environments: Object.freeze(['devnet', 'testnet', 'localnet']),
+    requires_separate_live_spike_pr: true,
+    requires_out_of_repo_endpoint_binding: true,
+    requires_supply_chain_review: true,
+    requires_post_spike_revoke_or_disable: true,
+    requires_no_broadcast: true,
+    requires_no_send: true,
+    requires_no_mainnet: true,
+    requires_no_real_live: true,
+    approval_record_valid: false,
+    approval_gate_passed: false,
+    live_rpc_authorized: false,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    network_call_made: false,
+    live_rpc_call_made: false,
+    broadcast_permitted: false,
+    status: UNCONFIGURED,
+    note: 'Test-only approval-gate; an approved record authorizes NOTHING live — a separate live-spike PR + '
+      + 'out-of-repo endpoint binding + supply-chain review are still required; performs NO live RPC / endpoint '
+      + 'resolution / network / send; reads no env/secret.',
+  });
+}
+
+// Validate the approval-RECORD SHAPE only (NOT a binding, NOT an authorization). Reuses
+// validateHeliusEndpointProvisioning for provider/environment/endpoint_ref/secret/key-material/mainnet shape
+// (reasons propagated) on ONLY the 3 reference fields, then requires purpose === 'live_rpc_spike_approval_gate',
+// target === 'testnet_rpc_spike', every required attestation boolean-true, refuses any broadcast/send/serialize
+// indicator, and rejects unknown fields beyond the known set. The result is built from FIXED LITERALS + frozen
+// reason tokens — input / endpoint_ref / secret VALUES are NEVER echoed. An approved record authorizes NOTHING
+// live (every capability/live flag is a FIXED LITERAL false). Never throws — a hostile/throwing accessor RETURNS
+// a frozen refusal with reason 'input_inspection_error'.
+export function validateLiveRpcSpikeApprovalGate(input) {
+  try {
+    const reasons = [];
+
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+
+    // 1) Reuse the hardened provisioning validator (NOT weakened) for provider/environment/endpoint_ref shape ONLY.
+    //    Pass ONLY the 3 provisioning fields — the approval record's own fields (purpose / target / the no_* and
+    //    requires_* attestations) must NOT reach the provisioning validator, else they trip unknown_field_rejected
+    //    and its substring scans falsely refuse a legitimate record (the 'rpc' inside the required purpose value
+    //    'live_rpc_spike_approval_gate' / target 'testnet_rpc_spike', and the 'broadcast'/'send' inside the
+    //    'no_broadcast'/'no_send' keys).
+    const prov = validateHeliusEndpointProvisioning(obj
+      ? { provider_ref: obj.provider_ref, environment: obj.environment, endpoint_ref: obj.endpoint_ref }
+      : input);
+    if (!prov.valid) for (const r of prov.reasons) reasons.push(r);
+
+    // 2) purpose / target must be exactly the approval-gate literals.
+    const purpose = obj ? obj.purpose : undefined;
+    if (purpose !== 'live_rpc_spike_approval_gate') reasons.push('purpose_invalid');
+    const target = obj ? obj.target : undefined;
+    if (target !== 'testnet_rpc_spike') reasons.push('target_invalid');
+
+    // 3) every required attestation must be explicitly boolean-true (no_*: never broadcasts/sends/mainnet/real-live;
+    //    requires_*: the record itself attests that the downstream gates are still required).
+    for (const [key, reason] of APPROVAL_GATE_REQUIRED_TRUE) {
+      if (!obj || obj[key] !== true) reasons.push(reason);
+    }
+
+    // 4) any broadcast/send/serialize indicator is refused (e.g. a 'broadcast'/'send'/'serialize'-shaped KEY, or
+    //    such a token in a string VALUE). The legitimate 'no_broadcast'/'no_send' keys are EXCLUDED from the KEY
+    //    scan, and the fixed 'purpose'/'target' enum literals are EXCLUDED from the VALUE scan.
+    if (obj) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'no_broadcast' || k === 'no_send') continue;
+        const lk = String(k).toLowerCase();
+        if (BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => lk.indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+        if (k === 'purpose' || k === 'target') continue; // fixed enum literals, not broadcast/send/serialize values
+        if (typeof v === 'string' && BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => v.toLowerCase().indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+      }
+    }
+
+    // 5) extra conservative key-material guard — refuse a secret/key-material-shaped input outright.
+    if (looksLikeKeyMaterial(input) && !reasons.includes('key_material_not_accepted')) {
+      reasons.push('key_material_not_accepted');
+    }
+
+    // 6) unknown / surprise field — only the approval-gate known fields are permitted; any field beyond the known
+    //    set is rejected here.
+    if (obj && Object.keys(obj).some((k) => !APPROVAL_GATE_KNOWN_FIELDS.includes(k))) {
+      if (!reasons.includes('unknown_field_rejected')) reasons.push('unknown_field_rejected');
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    let status;
+    if (valid) status = 'live_rpc_spike_approval_gate_valid_no_live';
+    else if (prov.status === UNCONFIGURED
+      && !uniqueReasons.includes('broadcast_or_send_indicator_blocked')
+      && !uniqueReasons.includes('unknown_field_rejected')) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid`/`approval_record_valid` mean the RECORD SHAPE is acceptable as opaque references / fixed enums /
+      // boolean attestations — it does NOT bind, send, broadcast, serialize, authorize, or activate anything; every
+      // flag below is a FIXED LITERAL (all false), NOT live. An approved record authorizes NOTHING live.
+      valid,
+      approval_record_valid: valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      live_rpc_authorized: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      approval_record_valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      live_rpc_authorized: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
+
+// The Live RPC Spike Approval Gate CORE: prove the SHAPE of an APPROVAL RECORD for a FUTURE testnet RPC spike is
+// well-formed, while staying fully fail-closed and NEVER live. It does NOT resolve an endpoint, make a live RPC
+// call, contact a provider, read env/secret, send/broadcast/serialize, or authorize anything. Even an approved
+// record never authorizes the spike: requires_separate_live_spike_pr is a FIXED-LITERAL invariant (true on every
+// result, never echoed) — a separate live-spike PR + out-of-repo endpoint binding + supply-chain review are
+// ALWAYS still required. Logic: (1) validate the record shape; (2) approval_gate_passed iff the shape is valid.
+// The result flags are FIXED LITERALS (all false); provider_ref is only ever the literal 'helius' and environment
+// only echoed when approved. Never throws — a hostile/throwing accessor RETURNS a frozen invalid refusal.
+export function evaluateLiveRpcSpikeApprovalGate(input) {
+  try {
+    // 1) Validate the approval RECORD SHAPE (reuses validateHeliusEndpointProvisioning + approval-gate rules).
+    //    Never throws.
+    const recv = validateLiveRpcSpikeApprovalGate(input);
+
+    // 2) The gate passes iff the record shape is valid.
+    const approvalGatePassed = recv.valid;
+    const valid = approvalGatePassed;
+
+    // 3) Status passes through the record-validation status (the no-live approval status / unconfigured / invalid).
+    const status = recv.status;
+
+    return Object.freeze({
+      // `valid`/`approval_gate_passed` mean the APPROVAL RECORD is well-formed — it does NOT resolve an endpoint,
+      // call RPC, send, broadcast, serialize, go live, or AUTHORIZE the spike. An approved record authorizes
+      // NOTHING live: requires_separate_live_spike_pr is a FIXED LITERAL true (NOT echoed input), and every
+      // capability/live flag below is a FIXED LITERAL false. provider_ref/environment are echoed ONLY when
+      // approved and are only ever the recognized literal 'helius' / a recognized testnet enum value.
+      valid,
+      approval_record_valid: recv.approval_record_valid,
+      approval_gate_passed: approvalGatePassed,
+      status,
+      provider_ref: approvalGatePassed ? 'helius' : undefined,
+      environment: approvalGatePassed ? String(input.environment) : undefined,
+      reasons: recv.reasons,
+      requires_separate_live_spike_pr: true,
+      live_rpc_authorized: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      approval_record_valid: false,
+      approval_gate_passed: false,
+      status: 'invalid',
+      provider_ref: undefined,
+      environment: undefined,
+      reasons: Object.freeze(['input_inspection_error']),
+      requires_separate_live_spike_pr: true,
+      live_rpc_authorized: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}

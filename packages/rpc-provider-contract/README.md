@@ -358,6 +358,25 @@ Spike-boundary status values: `live_rpc_spike_boundary_no_live` (the future-spik
 `endpoint_ref` or an unconfigured request shape) · `invalid` (any other blocking reason). A `boundary_passed`
 result resolves / calls / sends **nothing**, makes **no network call**, and reads **no env / secret**.
 
+## Live RPC Spike Approval Gate (test-only)
+`describeLiveRpcSpikeApprovalGateContract` / `validateLiveRpcSpikeApprovalGate` / `evaluateLiveRpcSpikeApprovalGate`
+(E2-F-14) validate the **SHAPE of an approval RECORD** for a FUTURE testnet RPC spike — they do not run, bind, or
+authorize one. A well-formed record requires `purpose === 'live_rpc_spike_approval_gate'`,
+`target === 'testnet_rpc_spike'`, the `helius` reference + a testnet/devnet/localnet `environment` + an opaque
+`endpoint_ref`, and the boolean attestations `no_broadcast` / `no_send` / `no_mainnet` / `no_real_live` /
+`requires_separate_live_spike_pr` / `requires_out_of_repo_endpoint_binding` / `requires_supply_chain_review` /
+`requires_post_spike_revoke_or_disable` all `true`.
+
+Even an **approved** record yields `approval_record_valid: true` / `approval_gate_passed: true` but
+`live_rpc_authorized: false`, every capability/live flag (`can_send` / `can_broadcast` / `can_serialize` /
+`is_live` / `real_live` / `network_call_made` / `live_rpc_call_made` / `broadcast_permitted`) `false`, and the
+FIXED-LITERAL invariant `requires_separate_live_spike_pr: true`. In other words the gate authorizes **NOTHING
+live**: a separate live-spike PR + out-of-repo endpoint binding + supply-chain review are always still required.
+It performs **no** live RPC / endpoint resolution / network / send / SDK and reads **no** env / secret;
+broadcast/send/serialize indicators, key-material-shaped input, and unknown fields are refused, and a
+hostile/throwing accessor returns a frozen `input_inspection_error` refusal (never throws). Status values:
+`live_rpc_spike_approval_gate_valid_no_live` · `unconfigured_no_rpc` · `invalid`.
+
 ## Failure model
 `unconfigured_no_rpc` is the only contract status. There is no configured/live branch. No operation does I/O,
 crypto, signing, serialization, broadcast, or any network call.

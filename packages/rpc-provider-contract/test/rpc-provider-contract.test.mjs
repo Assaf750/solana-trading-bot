@@ -2391,3 +2391,411 @@ test('(S40) can_send/is_live/broadcast flags stay false across the whole spike m
   assert.equal(Object.isFrozen(d), true);
   assert.equal(typeof d.note, 'string');
 });
+
+// ============================================================================================================
+// PR-E2-F-14 — Live Testnet RPC Spike APPROVAL GATE (contract/test-only, no-live, no-broadcast, fail-closed).
+// 45 proofs (S1..S45) against the REAL exports re-exported from '../src/index.mjs'.
+// ============================================================================================================
+
+import {
+  describeLiveRpcSpikeApprovalGateContract,
+  validateLiveRpcSpikeApprovalGate,
+  evaluateLiveRpcSpikeApprovalGate,
+} from '../src/index.mjs';
+
+const RUNBOOK = join(HERE, '..', '..', '..', 'docs', '08-RUNBOOK-OPS.md');
+
+// Canonical, valid approval RECORD (opaque references / fixed enums / boolean attestations — no secret, no URL).
+function validApprovalRecord(overrides = {}) {
+  return {
+    purpose: 'live_rpc_spike_approval_gate',
+    target: 'testnet_rpc_spike',
+    provider_ref: 'helius',
+    environment: 'devnet',
+    endpoint_ref: 'helius-devnet-approval-ref',
+    no_broadcast: true,
+    no_send: true,
+    no_mainnet: true,
+    no_real_live: true,
+    requires_separate_live_spike_pr: true,
+    requires_out_of_repo_endpoint_binding: true,
+    requires_supply_chain_review: true,
+    requires_post_spike_revoke_or_disable: true,
+    ...overrides,
+  };
+}
+
+// Every approval-gate result is fail-closed: an approved record authorizes NOTHING live. All capability/live
+// flags are FIXED LITERALS false, and the result is frozen.
+function assertApprovalGateFailClosed(r) {
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(r.live_rpc_authorized, false);
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.can_broadcast, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.is_live, false);
+  assert.equal(r.real_live, false);
+  assert.equal(r.network_call_made, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.broadcast_permitted, false);
+}
+
+// ---- (S1) valid record -> approval_record_valid / approval_gate_passed / valid_no_live status ----
+
+test('(S1) valid approval record -> approval_record_valid=true, approval_gate_passed=true, valid_no_live status', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord());
+  assert.equal(r.approval_record_valid, true, JSON.stringify([...(r.reasons || [])]));
+  assert.equal(r.approval_gate_passed, true);
+  assert.equal(r.valid, true);
+  assert.equal(r.status, 'live_rpc_spike_approval_gate_valid_no_live');
+  assert.deepEqual([...r.reasons], []);
+});
+
+// ---- (S2..S11) a VALID record keeps every capability/live flag FIXED-LITERAL false ----
+
+test('(S2..S11) valid approval record authorizes NOTHING live — every capability/live flag stays false', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord());
+  assert.equal(r.approval_gate_passed, true, 'precondition: record is valid');
+  assert.equal(r.live_rpc_authorized, false);   // S2
+  assert.equal(r.configured, false);             // S3
+  assert.equal(r.has_rpc, false);                // S4
+  assert.equal(r.ready, false);                  // S5
+  assert.equal(r.can_send, false);               // S6
+  assert.equal(r.can_broadcast, false);          // S7
+  assert.equal(r.can_serialize, false);          // S8
+  assert.equal(r.is_live, false);                // S9
+  assert.equal(r.real_live, false);              // S10a
+  assert.equal(r.network_call_made, false);      // S10b
+  assert.equal(r.live_rpc_call_made, false);     // S11
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S12) a VALID record keeps requires_separate_live_spike_pr === true (FIXED LITERAL invariant) ----
+
+test('(S12) valid approval record keeps requires_separate_live_spike_pr === true (fixed-literal invariant)', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord());
+  assert.equal(r.requires_separate_live_spike_pr, true);
+  // even an attempt to set it false yields a valid record whose result still attests true (fixed literal).
+  const r2 = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ requires_separate_live_spike_pr: false }));
+  assert.equal(r2.requires_separate_live_spike_pr, true, 'always a fixed literal true, never echoed');
+});
+
+// ---- (S13..S16) missing each requires_* attestation -> valid:false ----
+
+test('(S13..S16) missing each requires_* attestation -> approval_record_valid=false', () => {
+  const requiredKeys = [
+    'requires_separate_live_spike_pr',       // S13
+    'requires_out_of_repo_endpoint_binding', // S14
+    'requires_supply_chain_review',          // S15
+    'requires_post_spike_revoke_or_disable', // S16
+  ];
+  for (const key of requiredKeys) {
+    const rec = validApprovalRecord();
+    delete rec[key];
+    const r = evaluateLiveRpcSpikeApprovalGate(rec);
+    assert.equal(r.valid, false, `missing ${key} must invalidate`);
+    assert.equal(r.approval_gate_passed, false);
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S17..S20) missing each no_* attestation -> valid:false ----
+
+test('(S17..S20) missing each no_* attestation -> approval_record_valid=false', () => {
+  const noKeys = ['no_broadcast', 'no_send', 'no_mainnet', 'no_real_live']; // S17..S20
+  for (const key of noKeys) {
+    const rec = validApprovalRecord();
+    delete rec[key];
+    const r = evaluateLiveRpcSpikeApprovalGate(rec);
+    assert.equal(r.valid, false, `missing ${key} must invalidate`);
+    assert.equal(r.approval_gate_passed, false);
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S21..S23) a broadcast / send / serialize FIELD -> valid:false (refused) ----
+
+test('(S21..S23) a broadcast:true / send:true / serialize field -> approval_record_valid=false', () => {
+  for (const extra of [{ broadcast: true }, { send: true }, { serialize: 'whatever' }]) { // S21,S22,S23
+    const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord(extra));
+    assert.equal(r.valid, false, `extra ${JSON.stringify(extra)} must be refused`);
+    assert.equal(r.approval_gate_passed, false);
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S24) provider_ref not helius -> valid:false ----
+
+test('(S24) provider_ref not helius (e.g. phantom) -> approval_record_valid=false', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ provider_ref: 'phantom' }));
+  assert.equal(r.valid, false);
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S25) unknown provider -> valid:false ----
+
+test('(S25) unknown provider_ref -> approval_record_valid=false', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ provider_ref: 'totally-unknown-provider' }));
+  assert.equal(r.valid, false);
+  assert.ok(r.reasons.includes('unknown_provider'), JSON.stringify([...r.reasons]));
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S26) disabled provider refs (triton, yellowstone) -> valid:false ----
+
+test('(S26) disabled provider refs (triton, yellowstone) -> approval_record_valid=false', () => {
+  for (const ref of ['triton', 'yellowstone']) {
+    const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ provider_ref: ref }));
+    assert.equal(r.valid, false, `${ref} must be refused`);
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S27) mainnet & prod environment -> valid:false ----
+
+test('(S27) mainnet & prod environment -> approval_record_valid=false (fail-closed)', () => {
+  for (const env of ['mainnet', 'prod']) {
+    const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ environment: env }));
+    assert.equal(r.valid, false, `${env} must be refused`);
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S28) missing endpoint_ref -> valid:false ----
+
+test('(S28) missing endpoint_ref -> approval_record_valid=false', () => {
+  const rec = validApprovalRecord();
+  delete rec.endpoint_ref;
+  const r = evaluateLiveRpcSpikeApprovalGate(rec);
+  assert.equal(r.valid, false);
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S29) URL literal in endpoint_ref -> valid:false AND the URL not echoed ----
+
+test('(S29) URL literal in endpoint_ref -> valid:false AND url not echoed in result', () => {
+  const URL = 'https://x.example/rpc';
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ endpoint_ref: URL }));
+  assert.equal(r.valid, false);
+  assert.equal(JSON.stringify(r).includes('https://x.example'), false, 'url value never echoed');
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S30) raw endpoint -> refused & not echoed ----
+
+test('(S30) raw endpoint in endpoint_ref -> refused & not echoed', () => {
+  const RAW = 'https://my-real-rpc.helius.xyz/?api-key=zzz-S30-secret';
+  const v = validateLiveRpcSpikeApprovalGate(validApprovalRecord({ endpoint_ref: RAW }));
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ endpoint_ref: RAW }));
+  assert.equal(v.valid, false);
+  assert.equal(r.valid, false);
+  assert.equal(JSON.stringify(v).includes('my-real-rpc') || JSON.stringify(v).includes('zzz-S30-secret'), false, 'raw endpoint never echoed (validate)');
+  assert.equal(JSON.stringify(r).includes('my-real-rpc') || JSON.stringify(r).includes('zzz-S30-secret'), false, 'raw endpoint never echoed (eval)');
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S31) provider_url / rpc_endpoint field -> refused & not echoed ----
+
+test('(S31) provider_url / rpc_endpoint field -> refused & not echoed', () => {
+  for (const extra of [{ provider_url: 'https://leak-S31.example/x' }, { rpc_endpoint: 'wss://leak-S31.example/x' }]) {
+    const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord(extra));
+    assert.equal(r.valid, false, `${JSON.stringify(extra)} must be refused`);
+    assert.equal(JSON.stringify(r).includes('leak-S31'), false, 'field value never echoed');
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S32) api_key field -> refused & not echoed ----
+
+test('(S32) api_key field -> refused & not echoed', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ api_key: 'AKIA-S32-leak-value' }));
+  assert.equal(r.valid, false);
+  assert.equal(JSON.stringify(r).includes('AKIA-S32-leak-value'), false, 'api_key value never echoed');
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S33) secret / token field -> refused & not echoed ----
+
+test('(S33) secret / token field -> refused & not echoed', () => {
+  for (const extra of [{ secret: 'sk-S33-leak-secret' }, { token: 'tok-S33-leak-token' }]) {
+    const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord(extra));
+    assert.equal(r.valid, false, `${JSON.stringify(extra)} must be refused`);
+    assert.equal(JSON.stringify(r).includes('S33-leak'), false, 'secret/token value never echoed');
+    assertApprovalGateFailClosed(r);
+  }
+});
+
+// ---- (S34) key-material-shaped endpoint_ref (70-char base58) -> refused & not echoed ----
+
+test('(S34) key-material-shaped endpoint_ref (70-char base58) -> refused & not echoed', () => {
+  const B58 = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ123456789abcdefghijkmn'; // 70 base58 chars
+  assert.equal(B58.length, 70);
+  const v = validateLiveRpcSpikeApprovalGate(validApprovalRecord({ endpoint_ref: B58 }));
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ endpoint_ref: B58 }));
+  assert.equal(v.valid, false);
+  assert.equal(r.valid, false);
+  assert.equal(JSON.stringify(v).includes(B58), false, 'key-material endpoint_ref never echoed (validate)');
+  assert.equal(JSON.stringify(r).includes(B58), false, 'key-material endpoint_ref never echoed (eval)');
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S35) faked ready/has_rpc/can_send extra fields -> ignored/refused; result flags stay false ----
+
+test('(S35) faked ready:true / has_rpc:true / can_send:true extra fields -> refused; flags stay false', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ ready: true, has_rpc: true, can_send: true }));
+  assert.equal(r.valid, false, 'smuggled capability fields must be refused (unknown/indicator)');
+  assert.equal(r.ready, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.can_send, false);
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S36) faked is_live/real_live/network_call_made -> ignored/refused; flags stay false ----
+
+test('(S36) faked is_live:true / real_live:true / network_call_made:true -> refused; flags stay false', () => {
+  const r = evaluateLiveRpcSpikeApprovalGate(validApprovalRecord({ is_live: true, real_live: true, network_call_made: true }));
+  assert.equal(r.valid, false, 'smuggled live fields must be refused (unknown field)');
+  assert.equal(r.is_live, false);
+  assert.equal(r.real_live, false);
+  assert.equal(r.network_call_made, false);
+  assertApprovalGateFailClosed(r);
+});
+
+// ---- (S37) hostile input (throwing Proxy) -> frozen refusal {valid:false}, no throw, frozen ----
+
+test('(S37) hostile input (throwing Proxy) -> frozen {valid:false} refusal, never throws', () => {
+  const SECRET = 'boom-approval-trap-S37';
+  const hostile = new Proxy({}, { get() { throw new Error(SECRET); } });
+  let v;
+  assert.doesNotThrow(() => { v = validateLiveRpcSpikeApprovalGate(hostile); }, 'validate must not propagate');
+  assert.equal(v.valid, false);
+  assert.equal(Object.isFrozen(v), true);
+  assert.ok(v.reasons.includes('input_inspection_error'), JSON.stringify([...v.reasons]));
+  assert.equal(JSON.stringify(v).includes(SECRET), false, 'secret never echoed (validate)');
+
+  let r;
+  assert.doesNotThrow(() => { r = evaluateLiveRpcSpikeApprovalGate(hostile); }, 'eval must not propagate');
+  assert.equal(r.valid, false);
+  assert.equal(r.approval_gate_passed, false);
+  assert.equal(Object.isFrozen(r), true);
+  assert.ok(r.reasons.includes('input_inspection_error'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret never echoed (eval)');
+  assertApprovalGateFailClosed(r);
+  // primitive / weird inputs never throw either.
+  for (const input of [undefined, null, 42, 'x', true, []]) {
+    assert.doesNotThrow(() => validateLiveRpcSpikeApprovalGate(input));
+    assert.doesNotThrow(() => evaluateLiveRpcSpikeApprovalGate(input));
+  }
+});
+
+// ---- (S38) module is import-free (self-scan rpc-provider-contract.mjs) ----
+
+test('(S38) src/rpc-provider-contract.mjs (incl. approval gate) is import-free', () => {
+  const code = stripCommentsAndStrings(readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8'));
+  assert.equal(/^import\s/m.test(code), false, 'no import statement allowed');
+  assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, 'no import-from / require() allowed');
+});
+
+// ---- (S39) no dependency added (package.json) ----
+
+test('(S39) package.json declares NO dependencies (approval gate added none)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false);
+  assert.equal('devDependencies' in pkg, false);
+  assert.equal('peerDependencies' in pkg, false);
+  assert.equal('optionalDependencies' in pkg, false);
+});
+
+// ---- (S40) no network/provider call mechanism in the new approval-gate code region ----
+
+test('(S40) approval-gate code region carries NO fetch / new WebSocket / new Connection mechanism', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const idx = full.indexOf('Live RPC Spike APPROVAL GATE (E2-F-14)');
+  assert.ok(idx !== -1, 'approval-gate region marker present');
+  const region = stripCommentsAndStrings(full.slice(idx));
+  assert.equal(/\bfetch\s*\(/.test(region), false, 'no fetch(');
+  assert.equal(/new\s+WebSocket|WebSocket\s*\(/.test(region), false, 'no WebSocket');
+  assert.equal(/new\s+Connection\s*\(/.test(region), false, 'no new Connection(');
+  assert.equal(/XMLHttpRequest|EventSource|node:net|node:http/.test(region), false, 'no network module');
+});
+
+// ---- (S41) no env / secret-file read in src ----
+
+test('(S41) src (incl. approval gate) reads NO env and NO secret file', () => {
+  const ENV_SECRET_READ = /(process\.env|readFileSync|readFile\s*\(|node:fs|node:process|require\s*\(\s*['"]fs['"])/;
+  for (const fn of srcMjsFiles()) {
+    const raw = readFileSync(join(SRC, fn), 'utf8');
+    assert.equal(ENV_SECRET_READ.test(raw), false, `${fn} must not read env / secret files`);
+  }
+});
+
+// ---- (S42) no send/broadcast/serialize METHODS on createFailClosedRpcProvider (approval gate adds none) ----
+
+test('(S42) createFailClosedRpcProvider exposes NO send/broadcast/serialize/rpc method (approval gate adds none)', () => {
+  const p = createFailClosedRpcProvider();
+  for (const m of ['send', 'broadcast', 'serialize', 'sendTransaction', 'sendRawTransaction', 'submit', 'sign', 'connect', 'rpc', 'request', 'call', 'query', 'approve', 'authorize', 'spike', 'liveRpc', 'resolve', 'lookup', 'register']) {
+    assert.equal(typeof p[m], 'undefined', `provider must NOT expose ${m}`);
+  }
+  // the approval-gate functions are pure/contract-only — none returns a configured/live/sendable surface.
+  assert.equal(describeLiveRpcSpikeApprovalGateContract().is_live, false);
+  assert.equal(describeLiveRpcSpikeApprovalGateContract().can_broadcast, false);
+  assert.equal(describeLiveRpcSpikeApprovalGateContract().can_serialize, false);
+  assert.equal(evaluateLiveRpcSpikeApprovalGate(validApprovalRecord()).can_send, false);
+});
+
+// ---- (S43) no literal endpoint URL / API key in the new approval-gate region ----
+
+test('(S43) approval-gate region contains NO literal endpoint URL or API-key/secret literal', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const idx = full.indexOf('Live RPC Spike APPROVAL GATE (E2-F-14)');
+  assert.ok(idx !== -1, 'approval-gate region marker present');
+  const region = full.slice(idx);
+  assert.equal(/(https?:\/\/[^\s'")]+|wss?:\/\/[^\s'")]+)/.test(region), false, 'no literal endpoint URL');
+  assert.equal(/api_?key\s*[:=]\s*['"][^'"]+['"]/i.test(region), false, 'no api key literal assignment');
+  assert.equal(/secret\s*[:=]\s*['"][^'"]+['"]/i.test(region), false, 'no secret literal assignment');
+});
+
+// ---- (S44) runbook section exists with the mandated no-live / no-broadcast / separate-PR / out-of-repo phrases ----
+
+test('(S44) docs/08-RUNBOOK-OPS.md has §15 with no-live / no-broadcast / separate-PR / out-of-repo-secret phrases', () => {
+  const md = readFileSync(RUNBOOK, 'utf8');
+  assert.ok(md.includes('## 15.'), 'runbook §15 heading present');
+  // no-live: an approved record authorizes nothing live.
+  assert.ok(md.includes('live_rpc_authorized=false'), 'no-live phrase present');
+  // no-broadcast / no-send.
+  assert.ok(md.includes('broadcast/send'), 'no-broadcast/send phrase present');
+  // separate PR required for any live spike.
+  assert.ok(md.includes('PR منفصل'), 'separate-PR phrase present');
+  // out-of-repo endpoint / secret binding.
+  assert.ok(md.includes('out-of-repo'), 'out-of-repo-secret phrase present');
+});
+
+// ---- (S45) can_send:true does not exist anywhere in packages/*/src (repo-wide invariant unchanged) ----
+
+test('(S45) NO `can_send: true` anywhere in packages/*/src (approval gate did not introduce one)', () => {
+  const PKGS = join(HERE, '..', '..');
+  const CAN_SEND_TRUE = /can_send\s*:\s*true/;
+  const offenders = [];
+  function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'test') continue;
+        walk(full);
+      } else if (entry.name.endsWith('.mjs')) {
+        if (CAN_SEND_TRUE.test(readFileSync(full, 'utf8'))) offenders.push(full);
+      }
+    }
+  }
+  // walk every package's src directory.
+  for (const pkg of readdirSync(PKGS, { withFileTypes: true })) {
+    if (!pkg.isDirectory()) continue;
+    let srcDir;
+    try { srcDir = join(PKGS, pkg.name, 'src'); readdirSync(srcDir); } catch { continue; }
+    walk(srcDir);
+  }
+  assert.deepEqual(offenders, [], `can_send: true must not appear in any package src: ${offenders.join(', ')}`);
+});
