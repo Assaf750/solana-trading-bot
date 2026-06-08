@@ -107,7 +107,7 @@ key in code/config".
 ---
 
 ## 8. E2 readiness checklist (blockers → checklist items)
-> Ratification readiness assessed in `reports/E2-POLICY-RATIFICATION-READINESS.md` (no status flipped there; ratification is a separate governance decision).
+> Ratification readiness assessed in `reports/E2-POLICY-RATIFICATION-READINESS.md` (no status flipped there; ratification is a separate governance decision). Decision-record form in `reports/E2-RATIFICATION-DECISION-RECORD-TEMPLATE.md` (template only — ratifies nothing; B1–B7 only, B8 excluded).
 
 | # | Item | Status |
 |---|---|---|
