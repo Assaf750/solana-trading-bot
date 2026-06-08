@@ -115,6 +115,15 @@ export const FORBIDDEN_SECRETS = [
 // vault at runtime, never from source). There is no general bypass and no wildcard.
 export const ALLOWLIST = Object.freeze([]);
 
+// ---- DECLARED (reserved) allowlist path (PR-H4) ------------------------------
+// DECLARATION ONLY — NOT ACTIVATION. This names the single future isolated-signer/execution path that a
+// LATER PR may move into ALLOWLIST, right before real custody/signing exists there. It is NOT wired into
+// the active guard: ALLOWLIST stays []. Declaring it does NOT enable KMS, signing, crypto, or any live
+// mechanism; it does NOT exempt anything today; the path is non-existent (no package, no placeholder).
+// Even once activated, KEY MATERIAL in source stays HARD-FORBIDDEN there. Activation = moving this entry
+// into ALLOWLIST in a future, separately-approved PR with its own positive isolation tests.
+export const DECLARED_ALLOWLIST_PATHS = Object.freeze(['packages/isolated-signer-runtime/src/']);
+
 /** True iff `relPath` is under an explicit allowlist directory prefix (path-segment match, no wildcards). */
 export function isAllowlisted(relPath, allowlist = ALLOWLIST) {
   const p = String(relPath).replace(/\\/g, '/');

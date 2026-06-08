@@ -44,6 +44,8 @@ FORBIDDEN CHANGES · IMPLEMENTATION STEPS · TESTS · DONE CRITERIA
 
 **Carve-out allowlist (PR-H3):** `ALLOWLIST` في الحارس **مغلق افتراضياً (فارغ)** — لا مسار مُعفى، والسلوك مطابق تماماً للسابق (fail-closed في كل مكان). نموذج الـ carve-out موجود ومُختبَر فقط ليستعمله Gate E لاحقاً بمسار **isolated signer/execution واحد صريح** (`packages/<isolated-signer>/src/`) **مع اختبارات عزل خاصّة به**. المسار المُعفى يُسمح فيه بآليات التنفيذ الحيّة **فقط**، أمّا **مادة المفاتيح في الشيفرة فتبقى ممنوعة حتى داخله** (`allowlisted_but_key_material:*`) — المفاتيح تأتي من KMS/secret vault وقت التشغيل لا من المستودع. لا wildcard ولا bypass عام؛ المطابقة بحدود مقطع المسار فقط. **لا يُفتح أي package موجود، ولا يُغيَّر أي منطق runtime.**
 
+**Declared allowlist path (PR-H4):** `DECLARED_ALLOWLIST_PATHS = ['packages/isolated-signer-runtime/src/']` هو **إعلان مسار فقط، لا تفعيل**. المسار **غير موجود** (لا package ولا placeholder) و**ليس** مضافاً إلى `ALLOWLIST` — `ALLOWLIST` يبقى `[]` والحارس fail-closed في كل مكان. الإعلان **لا يفعّل KMS ولا signing ولا crypto ولا أي live mechanism**، ولا يُعفي أي شيء اليوم. **التفعيل** = نقل هذا المسار إلى `ALLOWLIST` في PR لاحق منفصل (قبل وجود custody/signing حقيقي هناك) مع اختبارات عزل إيجابية. حتى بعد التفعيل، **مادة المفاتيح في الشيفرة تبقى ممنوعة داخل المسار** (`allowlisted_but_key_material:*`).
+
 ## 6. حُرّاس غير قابلة للتفاوض (تُفحَص في كل PR)
 - **No name before SSOT** — اسم user/API/runtime/config غير مسجّل ⇒ توقّف وارفع `ARCH → SSOT`.
 - **candidate يبقى candidate** — لا حذف بادئة `candidate_` · skeleton ≠ promotion.
