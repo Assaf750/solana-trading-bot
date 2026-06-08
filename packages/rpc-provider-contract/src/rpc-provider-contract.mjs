@@ -507,3 +507,189 @@ export function validateRpcProviderSelection(selection) {
     });
   }
 }
+
+// ===========================================================================================================
+// PR-E2-F-10 — HELIUS ENDPOINT PROVISIONING (CONTRACT-ONLY, REFERENCE-ONLY, FAIL-CLOSED, NOT LIVE)
+// ===========================================================================================================
+// SOURCE: docs/00-ARCHITECTURE.md §15.12 (Wave 4 execution/providers boundary) + docs/01-SSOT Group 40
+// (candidate provider vocabulary — provider_key_ref by reference only, no raw key).
+//
+// CONTRACT-ONLY endpoint-PROVISIONING layer over Helius. REFERENCE-ONLY and fail-closed: an endpoint is named by
+// an OPAQUE reference token (endpoint_ref) — there is NO live RPC, NO SDK, NO dependency, NO endpoint URL, NO API
+// key, NO secret/token, NO send. "Provisioning" here means CLASSIFYING the shape of a reference-only provisioning
+// description; it provisions/activates/contacts nothing. Every result is fail-closed (configured:false /
+// has_rpc:false / ready:false / can_send:false / is_live:false) and is built from FIXED LITERALS + frozen reason
+// tokens + a numeric slot_count — input / endpoint_ref / secret VALUES are NEVER echoed. Per-slot shape validation
+// REUSES the hardened validateRpcProviderConfig (testnet-family environment; refuses mainnet/url/api_key/rpc/
+// provider_url; refuses key material; rejects unknown fields; treats endpoint_ref as an optional opaque ref that
+// refuses endpoint/url/rpc indicators) — it is NOT weakened.
+//
+// The token list below is composed of STRING LITERAL VALUES (refusal match tokens), never import specifiers —
+// the module stays import-free and guard-safe. A real Helius endpoint / live provisioning is a separate,
+// explicitly-approved PR and is NOT started here.
+
+// Endpoint-reference secret indicators: a provisioning endpoint_ref must be an opaque reference, never a secret/
+// token/credential/api-key/private-key marker. String literal VALUES (lexer-blanked) — never executed, only
+// substring-matched. Conservative by design (over-refusal is fail-safe-not-fail-open).
+const SECRET_INDICATOR_TOKENS = Object.freeze([
+  'secret', 'token', 'credential', 'apikey', 'api_key', 'private_key', 'privatekey',
+]);
+
+// Describe the Helius endpoint-PROVISIONING contract: reference-only, fail-closed, no live/SDK/endpoint/key/send.
+// Read-only; describes intent, performs nothing.
+export function describeHeliusEndpointProvisioningContract() {
+  return Object.freeze({
+    contract: 'helius-endpoint-provisioning',
+    version: '0.0.0',
+    provider_ref: 'helius',
+    supported_environments: Object.freeze(['devnet', 'testnet', 'localnet']),
+    max_provider_slots: 3,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    is_live: false,
+    status: UNCONFIGURED,
+    note: 'Helius endpoint provisioning is reference-only; endpoint_ref is an opaque reference; no URL, no API '
+      + 'key, no secret, no token, no mainnet, no live, no SDK, no send.',
+  });
+}
+
+// Validate a SINGLE provisioning slot WITHOUT provisioning/activating anything. Reuses the hardened
+// validateRpcProviderConfig for the shape (testnet-family environment; refuses mainnet/url/api_key/rpc; refuses
+// key material; rejects unknown fields; endpoint_ref opaque-only). Then classifies provider_ref against the
+// ENABLED list (helius) vs. doc-listed DISABLED refs (triton/yellowstone) vs. unknown, and requires endpoint_ref
+// to be a present, opaque reference carrying no secret/token/credential/api-key indicator. The result is built
+// from FIXED LITERALS + slot reasons — input / endpoint_ref / secret VALUES are NEVER echoed.
+export function validateHeliusEndpointProvisioning(input) {
+  try {
+    // Reuse the existing hardened validator (NOT weakened). It is itself try/catch-wrapped and never throws.
+    const cfg = validateRpcProviderConfig(input);
+    const reasons = [];
+    if (!cfg.valid) for (const r of cfg.reasons) reasons.push(r);
+
+    // provider_ref classification: only 'helius' is enabled (reference-only); doc-listed disabled refs ->
+    // provider_not_enabled; anything else -> unknown_provider.
+    const ref = (input && typeof input === 'object' && typeof input.provider_ref === 'string')
+      ? input.provider_ref
+      : '';
+    if (ref === 'helius') { /* enabled reference (reference-only, NOT live) */ }
+    else if (DOC_LISTED_DISABLED_PROVIDER_REFS.includes(ref)) reasons.push('provider_not_enabled');
+    else reasons.push('unknown_provider');
+
+    // endpoint_ref: REQUIRED opaque reference; never a secret/token/credential/api-key indicator.
+    const ep = (input && typeof input === 'object') ? input.endpoint_ref : undefined;
+    if (typeof ep !== 'string' || ep.length === 0) reasons.push('endpoint_ref_missing');
+    else if (SECRET_INDICATOR_TOKENS.some((t) => ep.toLowerCase().indexOf(t) !== -1)) {
+      reasons.push('endpoint_secret_indicator_blocked');
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    let status;
+    if (valid) status = 'provisioning_valid_no_live';
+    else if (uniqueReasons.includes('endpoint_ref_missing')
+      || uniqueReasons.includes('missing_provider_ref')
+      || uniqueReasons.includes('mainnet_or_nontestnet_environment_blocked')) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid` means the provisioning SHAPE is acceptable as opaque references — it does NOT provision or
+      // activate anything; configured/has_rpc/ready/can_send/is_live stay false (fail-closed, NOT live).
+      valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+    });
+  }
+}
+
+// Validate a MULTI-slot provisioning SELECTION (1..3 slots) WITHOUT provisioning/activating anything. Coerces
+// input to a slots array (same coercion as the F9 registry), validates each slot via
+// validateHeliusEndpointProvisioning (per-slot reasons propagated as fixed tokens), and detects duplicate
+// endpoint_ref across slots. The result is built from FIXED LITERALS + a numeric slot_count + frozen reason
+// tokens — slot / endpoint_ref / secret VALUES are NEVER echoed. Never throws.
+export function validateProviderEndpointRefs(selection) {
+  try {
+    const slots = coerceToSlots(selection);
+    const slotCount = slots.length;
+    const reasons = [];
+
+    if (slotCount === 0) reasons.push('no_provider_slots');
+    if (slotCount > MAX_PROVIDER_SLOTS) reasons.push('too_many_provider_slots');
+
+    const seenEndpoints = [];
+    const bound = slotCount > SLOT_ITERATION_CAP ? SLOT_ITERATION_CAP : slotCount;
+    for (let i = 0; i < bound; i += 1) {
+      const slot = slots[i];
+      const v = validateHeliusEndpointProvisioning(slot);
+      if (!v.valid) {
+        for (const r of v.reasons) reasons.push(r);
+      } else {
+        // A valid slot is guaranteed (by validateHeliusEndpointProvisioning) to carry a non-empty string
+        // endpoint_ref; detect duplicates across slots without echoing the value.
+        const ep = slot.endpoint_ref;
+        if (seenEndpoints.includes(ep)) reasons.push('duplicate_endpoint_ref');
+        else seenEndpoints.push(ep);
+      }
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0 && slotCount >= 1 && slotCount <= MAX_PROVIDER_SLOTS;
+    let status;
+    if (valid) status = 'provisioning_valid_no_live';
+    else if (slotCount === 0) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid` means the selection SHAPE is acceptable as opaque references — it does NOT provision or activate
+      // anything; configured/has_rpc/ready/can_send/is_live stay false (fail-closed, NOT live).
+      valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      slot_count: slotCount,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      slot_count: 0,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+    });
+  }
+}

@@ -17,6 +17,10 @@ import {
   listSupportedRpcProviderRefs,
   normalizeRpcProviderSlots,
   validateRpcProviderSelection,
+  // PR-E2-F-10 — Helius endpoint provisioning (contract-only, reference-only, fail-closed, no-live/no-secret).
+  describeHeliusEndpointProvisioningContract,
+  validateHeliusEndpointProvisioning,
+  validateProviderEndpointRefs,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -714,4 +718,483 @@ test('(R22) hostile/throwing input to selection & normalize -> frozen refusal, n
     assert.equal(validateRpcProviderSelection(input).slot_count, 0);
     assert.equal(normalizeRpcProviderSlots(input).count, 0);
   }
+});
+
+// ===========================================================================================================
+// PR-E2-F-10 — HELIUS ENDPOINT PROVISIONING (contract-only, reference-only, fail-closed, NOT live / NO secret)
+// ===========================================================================================================
+// 30 required proofs. "Provisioning" CLASSIFIES the shape of a reference-only provisioning description — it
+// provisions/activates/contacts NOTHING. A "valid" provisioning shape is references-only: configured:false /
+// has_rpc:false / ready:false / can_send:false / is_live:false, slot contents / endpoint_ref / secret VALUES are
+// never echoed, and a provisioned Helius selection is STILL refused by the send gate.
+//
+// IMPORTANT — opaque endpoint_ref fixtures must avoid EVERY refused substring (no 'endpoint','rpc','url','http',
+// 'ws','provider_url','api_key','secret','token','credential','mainnet','prod'). We use 'helius-slot-ref-1..N'.
+
+const EP1 = 'helius-slot-ref-1';
+const EP2 = 'helius-slot-ref-2';
+const EP3 = 'helius-slot-ref-3';
+const EP4 = 'helius-slot-ref-4';
+
+// Every provisioning result must be fail-closed (reference-only, NOT live) regardless of validity.
+function assertProvisioningFailClosed(r) {
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.is_live, false);
+  assert.notEqual(r.is_live, true);
+  assert.equal(Object.isFrozen(r.reasons), true);
+  // never carries a live/handle/endpoint/key surface field, and never echoes a provider_ref/endpoint_ref field.
+  for (const k of ['key', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'endpoint', 'rpc_endpoint', 'provider_url', 'url', 'credential', 'handle', 'provider_ref', 'endpoint_ref']) {
+    assert.equal(k in r, false, `provisioning result must not carry ${k}`);
+  }
+}
+
+// ---- (1)-(5) Helius single-slot accepted references-only; valid/provisioning_valid_no_live; not configured/ready/sendable ----
+
+test('(P1-P5) Helius single-slot provisioning valid references-only — configured/has_rpc/ready/can_send all false', () => {
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 });
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));            // (1) valid:true
+  assert.equal(r.status, 'provisioning_valid_no_live');                   // (1) provisioning_valid_no_live
+  assert.equal(r.configured, false);                                      // (2) configured:false
+  assert.equal(r.has_rpc, false);                                         // (3) has_rpc:false
+  assert.equal(r.ready, false);                                           // (4) ready:false
+  assert.equal(r.can_send, false);                                        // (5) can_send:false
+  assert.deepEqual([...r.reasons], []);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (6) one-slot multi validator valid ----
+
+test('(P6) one-slot validateProviderEndpointRefs is valid references-only (provisioning_valid_no_live)', () => {
+  const r = validateProviderEndpointRefs([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 }]);
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.status, 'provisioning_valid_no_live');
+  assert.equal(r.slot_count, 1);
+  assert.equal(r.max_provider_slots, 3);
+  assert.deepEqual([...r.reasons], []);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (7) two distinct-endpoint_ref Helius slots -> valid, slot_count 2, still not configured/sendable ----
+
+test('(P7) two distinct-endpoint_ref Helius slots -> valid, slot_count 2, configured:false/can_send:false', () => {
+  const r = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP2 },
+  ]);
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.status, 'provisioning_valid_no_live');
+  assert.equal(r.slot_count, 2);
+  assert.equal(r.configured, false);
+  assert.equal(r.can_send, false);
+  assert.deepEqual([...r.reasons], []);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (8) three distinct slots -> valid, slot_count 3, no-live ----
+
+test('(P8) three distinct-endpoint_ref Helius slots -> valid, slot_count 3, no-live', () => {
+  const r = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP2 },
+    { provider_ref: 'helius', environment: 'localnet', endpoint_ref: EP3 },
+  ]);
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.status, 'provisioning_valid_no_live');
+  assert.equal(r.slot_count, 3);
+  assert.equal(r.is_live, false);
+  assert.deepEqual([...r.reasons], []);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (9) four slots -> too_many_provider_slots ----
+
+test('(P9) four slots -> too_many_provider_slots (invalid, fail-closed)', () => {
+  const r = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP2 },
+    { provider_ref: 'helius', environment: 'localnet', endpoint_ref: EP3 },
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP4 },
+  ]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.equal(r.slot_count, 4);
+  assert.ok(r.reasons.includes('too_many_provider_slots'));
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (10) zero slots -> no_provider_slots / unconfigured_no_rpc ----
+
+test('(P10) zero slots -> no_provider_slots + unconfigured_no_rpc', () => {
+  for (const empty of [[], null, undefined, { slots: [] }]) {
+    const r = validateProviderEndpointRefs(empty);
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'unconfigured_no_rpc');
+    assert.equal(r.slot_count, 0);
+    assert.ok(r.reasons.includes('no_provider_slots'), `no_provider_slots for ${JSON.stringify(empty)}`);
+    assertProvisioningFailClosed(r);
+  }
+});
+
+// ---- (11) missing endpoint_ref -> endpoint_ref_missing (and not live) ----
+
+test('(P11) missing endpoint_ref -> endpoint_ref_missing (unconfigured_no_rpc, not live)', () => {
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet' });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'unconfigured_no_rpc');
+  assert.ok(r.reasons.includes('endpoint_ref_missing'));
+  assertProvisioningFailClosed(r);
+  // empty-string endpoint_ref is also missing.
+  const empty = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: '' });
+  assert.equal(empty.valid, false);
+  assert.ok(empty.reasons.includes('endpoint_ref_missing'));
+});
+
+// ---- (12) endpoint_ref:'https://x/' -> endpoint_or_rpc_indicator_blocked AND URL not echoed ----
+
+test('(P12) endpoint_ref URL literal -> endpoint_or_rpc_indicator_blocked; URL never echoed', () => {
+  const URL_LITERAL = 'https://x/';
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: URL_LITERAL });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(r).includes(URL_LITERAL), false, 'endpoint URL must not be echoed');
+  assert.equal(JSON.stringify(r).includes('https://'), false);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (13) provider_url field -> blocked & not echoed ----
+
+test('(P13) provider_url field -> blocked (unknown_field_rejected) & value never echoed', () => {
+  const MARK = 'PROVIDER-URL-VALUE-MARK-13';
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1, provider_url: MARK });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_field_rejected'), 'a provider_url field is rejected as unknown');
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'provider_url value must not be echoed');
+  assert.equal('provider_url' in r, false);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (14) rpc_endpoint field -> blocked & not echoed ----
+
+test('(P14) rpc_endpoint field -> blocked (unknown_field_rejected) & value never echoed', () => {
+  const MARK = 'RPC-ENDPOINT-VALUE-MARK-14';
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1, rpc_endpoint: MARK });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_field_rejected'), 'an rpc_endpoint field is rejected as unknown');
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'rpc_endpoint value must not be echoed');
+  assert.equal('rpc_endpoint' in r, false);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (15) api_key field -> blocked (unknown_field_rejected) & not echoed ----
+
+test('(P15) api_key field -> blocked (unknown_field_rejected) & value never echoed', () => {
+  const MARK = 'API-KEY-VALUE-MARK-15';
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1, api_key: MARK });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_field_rejected'), 'an api_key field is rejected as unknown');
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'api_key value must not be echoed');
+  assert.equal(JSON.stringify(r).includes('api_key'), false);
+  assert.equal('api_key' in r, false);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (16) secret/token field OR endpoint_ref containing 'secret'/'token' -> blocked & not echoed ----
+
+test('(P16) secret-named field -> key_material_not_accepted; endpoint_ref carrying secret/token -> endpoint_secret_indicator_blocked; never echoed', () => {
+  // a secret-NAMED field is refused as key material (by the reused hardened validator).
+  const SECRET_VAL = 'SECRET-FIELD-VALUE-16';
+  const rField = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1, secret: SECRET_VAL });
+  assert.equal(rField.valid, false);
+  assert.equal(rField.status, 'invalid');
+  assert.ok(rField.reasons.includes('key_material_not_accepted'), 'secret-named field -> key_material_not_accepted');
+  assert.equal(JSON.stringify(rField).includes(SECRET_VAL), false, 'secret value must not be echoed');
+  assertProvisioningFailClosed(rField);
+
+  // an endpoint_ref VALUE carrying a secret/token indicator -> endpoint_secret_indicator_blocked.
+  for (const ep of ['my-secret-ref', 'my-token-ref', 'a-credential-ref', 'a-privatekey-ref', 'a-private_key-ref']) {
+    const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: ep });
+    assert.equal(r.valid, false, `secret-indicator endpoint_ref must be refused: ${ep}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('endpoint_secret_indicator_blocked'), `endpoint_secret_indicator_blocked for ${ep}`);
+    assert.equal(JSON.stringify(r).includes(ep), false, 'endpoint_ref value must not be echoed');
+    assertProvisioningFailClosed(r);
+  }
+});
+
+// ---- (17) environment:'mainnet'/'prod' -> mainnet_or_nontestnet_environment_blocked ----
+
+test('(P17) mainnet/prod environment -> mainnet_or_nontestnet_environment_blocked', () => {
+  for (const env of ['mainnet', 'mainnet-beta', 'prod']) {
+    const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: env, endpoint_ref: EP1 });
+    assert.equal(r.valid, false);
+    assert.ok(r.reasons.includes('mainnet_or_nontestnet_environment_blocked'), `mainnet block for ${env}`);
+    // the input VALUE is never echoed: result carries only the fixed reason token + fixed literals, no
+    // `environment` field. (Note: the reason token itself contains the word "mainnet" — that is the fixed
+    // token name, not an echo of the input value; so we assert on field-absence + endpoint_ref non-echo.)
+    assert.equal('environment' in r, false);
+    assert.equal(JSON.stringify(r).includes(EP1), false, 'endpoint_ref value must not be echoed');
+    assertProvisioningFailClosed(r);
+  }
+  // a 'prod' value (which does NOT overlap any reason-token substring) is genuinely never echoed.
+  const prod = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'prod', endpoint_ref: EP1 });
+  assert.equal(JSON.stringify(prod).includes('prod'), false, "the input value 'prod' must not be echoed");
+});
+
+// ---- (18) unknown provider_ref -> unknown_provider ----
+
+test('(P18) unknown provider_ref -> unknown_provider (invalid, fail-closed)', () => {
+  const r = validateHeliusEndpointProvisioning({ provider_ref: 'unknown-xyz', environment: 'devnet', endpoint_ref: EP1 });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_provider'));
+  assert.equal(r.reasons.includes('provider_not_enabled'), false);
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (19) triton / yellowstone -> provider_not_enabled ----
+
+test('(P19) triton / yellowstone -> provider_not_enabled (doc-listed disabled, NOT live)', () => {
+  for (const ref of ['triton', 'yellowstone']) {
+    const r = validateHeliusEndpointProvisioning({ provider_ref: ref, environment: 'devnet', endpoint_ref: EP1 });
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('provider_not_enabled'), `provider_not_enabled for ${ref}`);
+    assert.equal(r.reasons.includes('unknown_provider'), false);
+    assertProvisioningFailClosed(r);
+  }
+});
+
+// ---- (20) duplicate endpoint_ref across two Helius slots -> duplicate_endpoint_ref ----
+
+test('(P20) duplicate endpoint_ref across two Helius slots -> duplicate_endpoint_ref (invalid)', () => {
+  const r = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP1 },
+  ]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.equal(r.slot_count, 2);
+  assert.ok(r.reasons.includes('duplicate_endpoint_ref'));
+  assertProvisioningFailClosed(r);
+});
+
+// ---- (21) key-material-shaped endpoint_ref (PEM / long base58 / mnemonic) -> key_material_not_accepted, never echoed ----
+
+test('(P21) key-material-shaped endpoint_ref (PEM/base58/mnemonic) -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    const r = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: km });
+    assert.equal(r.valid, false, `key material refused: ${km.slice(0, 16)}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r).includes(km), false, 'key material never echoed');
+    assert.equal(JSON.stringify(r).includes('LEAKBYTES'), false, 'PEM bytes never echoed');
+    assert.equal(JSON.stringify(r).includes(base58), false, 'base58 blob never echoed');
+    assertProvisioningFailClosed(r);
+    // same smuggled through the multi-slot surface is also refused as key material and not echoed.
+    const r2 = validateProviderEndpointRefs([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: km }]);
+    assert.equal(r2.valid, false);
+    assert.ok(r2.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r2).includes(km), false);
+  }
+});
+
+// ---- (22) hostile/throwing input to both validators -> frozen refusal input_inspection_error, never throws ----
+
+test('(P22) hostile/throwing input -> frozen input_inspection_error refusal, never throws, secret not echoed', () => {
+  const SECRET = 'boom-secret-trap-P22';
+  const throwingGetter = { get provider_ref() { throw new Error(SECRET); } };
+  const throwingEndpoint = { provider_ref: 'helius', environment: 'devnet', get endpoint_ref() { throw new Error(SECRET); } };
+  const throwAll = new Proxy({}, { get() { throw new Error(SECRET); } });
+  const throwingSlots = { get slots() { throw new Error(SECRET); } };
+
+  // single-slot validator never throws.
+  for (const hostile of [throwingGetter, throwingEndpoint, throwAll]) {
+    let r;
+    assert.doesNotThrow(() => { r = validateHeliusEndpointProvisioning(hostile); }, 'single-slot must not propagate');
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('input_inspection_error'));
+    assertProvisioningFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret/error message never echoed (single-slot)');
+  }
+
+  // multi-slot validator never throws; outer-catch hostiles yield slot_count 0 + input_inspection_error.
+  for (const hostile of [throwAll, throwingSlots]) {
+    let r;
+    assert.doesNotThrow(() => { r = validateProviderEndpointRefs(hostile); }, 'multi-slot must not propagate');
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.equal(r.slot_count, 0);
+    assert.deepEqual([...r.reasons], ['input_inspection_error']);
+    assertProvisioningFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret/error message never echoed (multi-slot)');
+  }
+  // a per-slot throwing getter is caught inside the per-slot validator and surfaces input_inspection_error.
+  const perSlot = validateProviderEndpointRefs([throwingGetter]);
+  assert.equal(perSlot.valid, false);
+  assert.ok(perSlot.reasons.includes('input_inspection_error'));
+  assert.equal(JSON.stringify(perSlot).includes(SECRET), false);
+
+  // primitive / weird inputs never throw either.
+  for (const input of [undefined, null, 42, 'x', true, []]) {
+    assert.doesNotThrow(() => validateHeliusEndpointProvisioning(input));
+    assert.doesNotThrow(() => validateProviderEndpointRefs(input));
+  }
+});
+
+// ---- (23) a provisioned Helius selection still has can_send:false / not configured (provisioning + registry no send) ----
+
+test('(P23) a provisioned Helius selection is STILL not configured and can_send:false (no send authority)', () => {
+  const single = validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 });
+  assert.equal(single.valid, true);
+  assert.equal(single.configured, false);
+  assert.equal(single.can_send, false);
+  assert.equal(single.is_live, false);
+  const multi = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP2 },
+  ]);
+  assert.equal(multi.valid, true);
+  assert.equal(multi.configured, false);
+  assert.equal(multi.can_send, false);
+  assert.equal(multi.is_live, false);
+  // the registry selection of the same Helius refs is likewise references-only / not sendable.
+  const reg = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet' }]);
+  assert.equal(reg.can_send, false);
+  assert.equal(reg.configured, false);
+});
+
+// ---- (24) Helius endpoint provisioning through the send gate is STILL refused (cross-package) ----
+
+test('(P24) a provisioned Helius rpc_provider is STILL refused by the send gate (can_send:false)', () => {
+  const sg = evaluateSendPreflight({
+    sign_only_success: true,
+    readiness_ready: true,
+    preflight_ok: true,
+    custody_status: 'ACTIVE',
+    network: 'devnet',
+    rpc_provider: { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+  });
+  assert.equal(sg.can_send, false, 'a provisioned Helius endpoint must NOT enable send — fail-closed preserved');
+});
+
+// ---- (25) no SDK import — self-scan src import specifiers (only local relative; no SDK/provider/network) ----
+
+test('(P25) src declares NO SDK/provider/network import specifier (provisioning adds none)', () => {
+  const reFrom = /\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g;
+  const reBare = /\bimport\s*['"]([^'"]+)['"]/g;
+  const reCall = /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const FORBIDDEN_SPEC = /(@solana|@solana-program|solana|web3\.js|jupiter|@jup-ag|jito|helius|@noble|@coral-xyz|anchor|bs58|tweetnacl|ed25519|node:net|node:http|node:https|node:tls|node:dgram|undici|ws|axios|pg|redis|node:crypto)/i;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    const specs = [];
+    for (const re of [reFrom, reBare, reCall]) {
+      for (const m of text.matchAll(re)) specs.push(m[1]);
+    }
+    for (const s of specs) {
+      assert.equal(s.startsWith('.'), true, `${fn} must only import LOCAL relative paths: ${s}`);
+      assert.equal(FORBIDDEN_SPEC.test(s), false, `${fn} must not import an SDK/provider/network module: ${s}`);
+    }
+  }
+});
+
+// ---- (26) no dependency — package.json still has no dependencies/devDependencies (provisioning adds none) ----
+
+test('(P26) package.json still declares NO dependencies/devDependencies (provisioning is dependency-free)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false);
+  assert.equal('devDependencies' in pkg, false);
+  assert.equal('peerDependencies' in pkg, false);
+  assert.equal('optionalDependencies' in pkg, false);
+});
+
+// ---- (27) no network/provider call — src import-free, no fetch/Connection/WebSocket in the provisioning code ----
+
+test('(P27) src (incl. provisioning) is import-free and carries NO network/provider mechanism', () => {
+  const NETWORK_MECH = /(\b(fetch|XMLHttpRequest)\s*\(|new\s+WebSocket|WebSocket\s*\(|new\s+Connection\s*\(|XMLHttpRequest|EventSource|node:net|node:http)/;
+  for (const fn of srcMjsFiles()) {
+    const code = stripCommentsAndStrings(readFileSync(join(SRC, fn), 'utf8'));
+    assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, `no imports allowed in ${fn}`);
+    assert.equal(NETWORK_MECH.test(code), false, `no network/provider mechanism in ${fn}`);
+    assert.equal(FORBIDDEN_CODE.test(code), false, `no forbidden live mechanism in ${fn}`);
+  }
+});
+
+// ---- (28) no send/broadcast/serialize methods on createFailClosedRpcProvider (unchanged by provisioning) ----
+
+test('(P28) createFailClosedRpcProvider still exposes NO send/broadcast/serialize/rpc method (provisioning is pure)', () => {
+  const p = createFailClosedRpcProvider();
+  for (const m of ['send', 'broadcast', 'serialize', 'sendTransaction', 'sendRawTransaction', 'submit', 'sign', 'connect', 'rpc', 'request', 'call', 'query', 'provision', 'addEndpoint', 'setEndpoint', 'register']) {
+    assert.equal(typeof p[m], 'undefined', `provider must NOT expose ${m}`);
+  }
+  // the provisioning functions are pure/contract-only — none returns a configured/live/sendable surface.
+  assert.equal(describeHeliusEndpointProvisioningContract().is_live, false);
+  assert.equal(validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 }).can_send, false);
+  assert.equal(validateProviderEndpointRefs([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 }]).can_send, false);
+});
+
+// ---- (29) no literal endpoint URL / API key present in the new src (grep src for scheme://host / api key) ----
+
+test('(P29) src contains NO literal endpoint URL or API-key literal (full-text scan)', () => {
+  // scheme://<non-space-host> would be a real endpoint literal; an API-key-ish literal is also forbidden.
+  const URL_LITERAL = /(https?:\/\/[^\s'")]+|wss?:\/\/[^\s'")]+)/;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    assert.equal(URL_LITERAL.test(text), false, `${fn} must not contain a literal endpoint URL`);
+    // the secret indicator tokens appear ONLY as match-token string literals, never as a real key/value pair.
+    // assert there is no "api_key:" / "apiKey:" assignment-style literal carrying a value.
+    assert.equal(/api_?key\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign an api key literal`);
+    assert.equal(/secret\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign a secret literal`);
+  }
+});
+
+// ---- (30) can_send:false unchanged across the provisioning matrix (valid AND invalid shapes) ----
+
+test('(P30) can_send/is_live stay false across the whole provisioning matrix (valid + invalid)', () => {
+  const matrix = [
+    validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 }),     // valid
+    validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'devnet' }),                        // missing ep
+    validateHeliusEndpointProvisioning({ provider_ref: 'triton', environment: 'devnet', endpoint_ref: EP1 }),     // disabled
+    validateHeliusEndpointProvisioning({ provider_ref: 'helius', environment: 'mainnet', endpoint_ref: EP1 }),    // mainnet
+    validateProviderEndpointRefs([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 }]),         // valid multi
+    validateProviderEndpointRefs([]),                                                                             // zero slots
+    validateProviderEndpointRefs([
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: EP1 },
+      { provider_ref: 'helius', environment: 'testnet', endpoint_ref: EP1 },
+    ]),                                                                                                            // duplicate
+  ];
+  for (const r of matrix) {
+    assert.equal(r.can_send, false, `can_send must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.is_live, false, `is_live must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.configured, false);
+    assert.equal(r.has_rpc, false);
+    assert.equal(r.ready, false);
+    assertProvisioningFailClosed(r);
+  }
+  // the descriptor is likewise fail-closed.
+  const d = describeHeliusEndpointProvisioningContract();
+  assert.equal(d.contract, 'helius-endpoint-provisioning');
+  assert.equal(d.version, '0.0.0');
+  assert.equal(d.provider_ref, 'helius');
+  assert.deepEqual([...d.supported_environments], ['devnet', 'testnet', 'localnet']);
+  assert.equal(d.max_provider_slots, 3);
+  assert.equal(d.configured, false);
+  assert.equal(d.has_rpc, false);
+  assert.equal(d.ready, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.status, 'unconfigured_no_rpc');
+  assert.equal(Object.isFrozen(d), true);
+  assert.equal(typeof d.note, 'string');
 });

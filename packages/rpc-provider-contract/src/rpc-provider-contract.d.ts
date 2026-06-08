@@ -110,3 +110,53 @@ export function describeRpcProviderRegistry(): RpcProviderRegistryDescriptor;
 export function listSupportedRpcProviderRefs(): readonly ['helius'];
 export function normalizeRpcProviderSlots(input?: unknown): RpcProviderSlotsNormalization;
 export function validateRpcProviderSelection(selection?: unknown): RpcProviderSelectionResult;
+
+// --- PR-E2-F-10: Helius endpoint provisioning (contract-only, reference-only, fail-closed, no-live/no-secret) ---
+
+export interface HeliusEndpointProvisioningDescriptor {
+  readonly contract: 'helius-endpoint-provisioning';
+  readonly version: string;
+  readonly provider_ref: 'helius';
+  readonly supported_environments: readonly ['devnet', 'testnet', 'localnet'];
+  readonly max_provider_slots: 3;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export type HeliusEndpointProvisioningStatus =
+  | 'provisioning_valid_no_live'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface HeliusEndpointProvisioningResult {
+  readonly valid: boolean;
+  readonly status: HeliusEndpointProvisioningStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+}
+
+export interface ProviderEndpointRefsResult {
+  readonly valid: boolean;
+  readonly status: HeliusEndpointProvisioningStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+  readonly slot_count: number;
+  readonly max_provider_slots: 3;
+}
+
+export function describeHeliusEndpointProvisioningContract(): HeliusEndpointProvisioningDescriptor;
+export function validateHeliusEndpointProvisioning(input?: unknown): HeliusEndpointProvisioningResult;
+export function validateProviderEndpointRefs(selection?: unknown): ProviderEndpointRefsResult;

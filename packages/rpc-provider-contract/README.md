@@ -136,6 +136,68 @@ Selection status values: `selection_valid_no_rpc` (valid references-only selecti
 `unconfigured_no_rpc` (zero slots) · `invalid` (any blocking reason). Slots normalization status values:
 `unconfigured_no_rpc` · `within_capacity_no_rpc` · `over_capacity` · `invalid`.
 
+## Helius endpoint provisioning (reference-only, no-live/no-secret)
+**Gate E / PR-E2-F-10 — a CONTRACT-ONLY Helius endpoint-provisioning layer.** It is additive: it does not
+change any existing export or behaviour. "Provisioning" here means **classifying the shape** of a reference-only
+provisioning description — it provisions, activates, and contacts **nothing**. It carries **no live mechanism**:
+no live RPC, no SDK, no dependency, no endpoint URL, no API key, no secret/token, no send. Every result is
+**fail-closed** (`configured: false`, `has_rpc: false`, `ready: false`, `can_send: false`, `is_live: false`) and
+is built from **fixed literals** + frozen reason tokens + a numeric `slot_count`; input / `endpoint_ref` / secret
+values are **never echoed**. Per-slot shape validation **reuses** the hardened `validateRpcProviderConfig`
+(testnet-family environment; refuses mainnet / url / api_key / rpc / provider_url; refuses key material; rejects
+unknown fields; treats `endpoint_ref` as an optional opaque reference that refuses endpoint/url/rpc indicators) —
+it is **not weakened**.
+
+### Allowed shape
+A provisioning slot is the same **opaque-reference** shape validated elsewhere in this contract: a `provider_ref`
+(must be the enabled `helius` reference), a testnet-family `environment` (`devnet` / `testnet` / `localnet`), and a
+**required** `endpoint_ref` that is a **non-empty opaque reference string** — a label/handle that names an endpoint
+by reference only. There is **no endpoint URL, no host, no scheme, no API key, no secret, and no token** anywhere
+in the shape.
+
+### Forbidden indicators (prose — no real URL/key shown)
+The `endpoint_ref` must stay an opaque reference. It is **refused** (conservatively, by case-insensitive substring)
+if it carries any **secret-style indicator** — the words for a *secret*, a *token*, a *credential*, an *api key*
+(spelled either as one word or with an underscore), or a *private key* (spelled either as one word or with an
+underscore). Beyond these secret indicators, the reused `validateRpcProviderConfig` independently refuses any
+*endpoint / RPC / URL / provider-URL / cluster / websocket* indicator and any *mainnet / prod* indicator, and
+refuses key-material-shaped input. No literal endpoint URL or API key is shown here or accepted anywhere.
+
+### Provisioning surface
+- `describeHeliusEndpointProvisioningContract()` → frozen descriptor: `contract:
+  'helius-endpoint-provisioning'`, `version`, `provider_ref: 'helius'`, `supported_environments:
+  ['devnet','testnet','localnet']`, `max_provider_slots: 3`, all of `configured`/`has_rpc`/`ready`/`can_send`/
+  `is_live` `false`, `status: 'unconfigured_no_rpc'`, plus a one-line `note`.
+- `validateHeliusEndpointProvisioning(input)` → **single-slot** validation. Frozen `{ valid, status, reasons,
+  configured: false, has_rpc: false, ready: false, can_send: false, is_live: false }`. Reuses
+  `validateRpcProviderConfig` for the shape, classifies `provider_ref` (enabled `helius` vs. doc-listed disabled
+  `triton`/`yellowstone` → `provider_not_enabled` vs. `unknown_provider`), and requires `endpoint_ref` to be a
+  present, opaque reference free of secret indicators. **Never throws** — a hostile/throwing accessor returns a
+  fixed `status: 'invalid'`, `reasons: ['input_inspection_error']` refusal.
+- `validateProviderEndpointRefs(selection)` → **multi-slot** (1–3) validation. Frozen `{ valid, status, reasons,
+  configured: false, has_rpc: false, ready: false, can_send: false, is_live: false, slot_count,
+  max_provider_slots: 3 }`. Coerces to a slots array (`Array` → itself · `{slots:Array}` → `slots` · a single
+  slot-shaped object → `[it]` · else → `[]`), validates each slot via `validateHeliusEndpointProvisioning`
+  (per-slot reasons propagated as fixed tokens), and detects duplicate `endpoint_ref` across slots. The result is
+  built from **fixed literals** + a numeric `slot_count` — slot / `endpoint_ref` / secret values are **never
+  echoed**. **Never throws** — a hostile/throwing accessor returns a fixed `status: 'invalid'`, `reasons:
+  ['input_inspection_error']`, `slot_count: 0` refusal.
+
+### Provisioning reason vocabulary
+- `endpoint_ref_missing` — `endpoint_ref` is absent or not a non-empty string.
+- `endpoint_secret_indicator_blocked` — `endpoint_ref` carries a secret / token / credential / api-key /
+  private-key indicator (refused; never echoed).
+- `duplicate_endpoint_ref` — the same `endpoint_ref` appears in more than one slot (`validateProviderEndpointRefs`).
+- *(also)* `provider_not_enabled` / `unknown_provider`, plus the per-slot tokens propagated from
+  `validateRpcProviderConfig` (`missing_config`, `missing_provider_ref`,
+  `mainnet_or_nontestnet_environment_blocked`, `endpoint_or_rpc_indicator_blocked`,
+  `send_or_broadcast_indicator_blocked`, `key_material_not_accepted`, `unknown_field_rejected`,
+  `input_inspection_error`), and the multi-slot tokens `no_provider_slots` / `too_many_provider_slots`.
+
+Provisioning status values: `provisioning_valid_no_live` (valid references-only provisioning shape — still **NOT
+live**) · `unconfigured_no_rpc` (missing `endpoint_ref`/`provider_ref`/environment, or zero slots) · `invalid`
+(any other blocking reason). A `valid` provisioning shape configures/activates **nothing**.
+
 ## Failure model
 `unconfigured_no_rpc` is the only contract status. There is no configured/live branch. No operation does I/O,
 crypto, signing, serialization, broadcast, or any network call.
