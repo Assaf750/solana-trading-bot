@@ -114,8 +114,8 @@ key in code/config".
 | B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — policy proposed in `E2-DUAL-CONTROL-SIGNER-CONTROL-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B4 | Key generation/import policy decided (§4) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B5 | Rotation/revocation policy + cadence decided (§5) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (triggers mapped; cadence **not** ratified) | **UNDECIDED** |
-| B6 | Emergency break-glass procedure defined (§6) | **UNDECIDED** |
-| B7 | Audit retention decided (§7) | **UNDECIDED** |
+| B6 | Emergency break-glass procedure defined (§6) — procedure proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
+| B7 | Audit retention decided (§7) — policy proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (append-only/no-secrets affirmed; duration **not** ratified) | **UNDECIDED** |
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
