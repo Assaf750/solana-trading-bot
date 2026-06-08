@@ -7,6 +7,14 @@ This package defines *what a custody provider must be* and ships a *provider-sel
 transaction building/serialisation, no signing/sending, no RPC/provider calls, no DB. It performs no work and
 holds nothing.
 
+## E2-KMS-1 — opaque key-handle interface (interface-only, no real provider, no KMS SDK)
+`describeKeyHandleContract()` / `resolveCustodyKeyHandle()` (and `provider.resolveKeyHandle()`) add an
+**interface only** for a custody/KMS key handle: an **opaque, non-exportable** handle that never exposes a raw
+private key, has **no export method and no signing method**, and refuses raw key/seed/mnemonic/keypair input.
+There is **no real handle** — resolution is **always fail-closed** (`ok:false`, `handle:null`,
+`status:'unconfigured'`, `recommended_signer_profile_status:'DEGRADED'`). **No real provider, no KMS/Vault SDK,
+no network, no signing here.** A real KMS-backed adapter is a separate, explicitly-approved PR.
+
 ## Why a standalone package (not inside the isolated signer runtime)
 A pure contract/stub has no live mechanism, so it lives **outside** the mechanism guard's allowlist and is
 **fully scanned** — proving it carries zero forbidden families. The allowlisted path

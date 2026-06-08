@@ -59,10 +59,57 @@ export function describeCustodyProviderContract() {
     is_live: false,
     status: UNCONFIGURED,
     // the operations a provider exposes — here all resolve fail-closed
-    operations: Object.freeze(['describe', 'health', 'use']),
-    note: 'Contract + stub only (E2-A). Opaque provider; never exports keys; fail-closed. No KMS/vault, no '
-      + 'KeyManager, no crypto, no key material, no signing/sending, no RPC/DB, no execution authority.',
+    operations: Object.freeze(['describe', 'health', 'use', 'resolveKeyHandle']),
+    key_handle: describeKeyHandleContract(), // the opaque key-handle interface (E2-KMS-1)
+    note: 'Contract + stub only (E2-A; key-handle interface E2-KMS-1). Opaque provider; never exports keys; '
+      + 'fail-closed. No KMS/vault, no KeyManager, no crypto, no key material, no signing/sending, no RPC/DB, '
+      + 'no execution authority.',
   });
+}
+
+// ---- E2-KMS-1: opaque key-handle INTERFACE (no real handle, no signing, no export) ----
+
+const KEY_HANDLE_KIND = 'key-handle';
+
+// Describes the CONTRACT any custody/KMS key handle MUST satisfy: opaque, non-exportable, no raw private key,
+// no seed/mnemonic/keypair, no export method, no signing method. This is an interface descriptor ONLY — there
+// is no real handle here, and resolution is always fail-closed (a real KMS adapter is a separate PR).
+export function describeKeyHandleContract() {
+  return Object.freeze({
+    kind: KEY_HANDLE_KIND,
+    opaque: true,                  // callers only ever hold an opaque reference, never key bytes
+    exportable: false,             // a conforming handle is NON-exportable
+    can_export_key: false,         // no export method exists
+    holds_raw_private_key: false,  // never exposes a raw private key
+    accepts_key_material_input: false, // raw key/seed/mnemonic/keypair input is refused
+    can_sign: false,               // signing is NOT part of this PR; a real adapter is separate
+    is_live: false,
+    status: UNCONFIGURED,
+    note: 'Key-handle INTERFACE only (E2-KMS-1). Opaque, non-exportable; never exposes a raw private key; no '
+      + 'seed/mnemonic/keypair; no export method; no signing here; no KMS SDK; no network. Real KMS adapter '
+      + 'is a separate, explicitly-approved PR.',
+  });
+}
+
+// A fail-closed key-handle resolution result. There is NO handle (null) until a real provider is configured,
+// and any custody/KMS unavailability maps to a DEGRADED recommendation.
+function failClosedHandle(reason) {
+  return Object.freeze({
+    ok: false,
+    status: UNCONFIGURED,
+    handle: null,                 // no handle: nothing is configured (real adapter = separate PR)
+    can_sign: false,
+    can_export_key: false,
+    reason,
+    recommended_signer_profile_status: 'DEGRADED', // fail-closed: never sign on unverified/unavailable custody
+  });
+}
+
+// Resolve a custody key handle. Fail-closed: with no real provider configured this ALWAYS returns no handle
+// and a DEGRADED recommendation. Refuses key-material input. No KMS SDK, no network, no signing.
+export function resolveCustodyKeyHandle(selection) {
+  if (looksLikeKeyMaterial(selection)) return failClosedHandle('key_material_not_accepted');
+  return failClosedHandle('no_key_handle_unconfigured_provider');
 }
 
 // An "unconfigured" custody provider: an opaque object whose every operation is fail-closed and which refuses
@@ -72,6 +119,7 @@ export function createUnconfiguredCustodyProvider() {
     status: UNCONFIGURED,
     isConfigured() { return false; },
     describe() { return describeCustodyProviderContract(); },
+    describeKeyHandle() { return describeKeyHandleContract(); },
     health() { return failClosed('health', 'no provider configured'); },
     // `use` is the single generic operation a future provider would expose; here it always fails closed and
     // refuses key-material input. It NEVER accepts, stores, or returns key material.
@@ -81,6 +129,9 @@ export function createUnconfiguredCustodyProvider() {
       }
       return failClosed('use', 'no provider configured');
     },
+    // resolveKeyHandle resolves an OPAQUE key handle — always fail-closed here (no real provider). Never
+    // returns a key; maps to DEGRADED. A real KMS-backed handle is a separate PR.
+    resolveKeyHandle(request) { return resolveCustodyKeyHandle(request); },
   };
   return Object.freeze(provider);
 }
@@ -111,3 +162,4 @@ export function refusesKeyMaterial(input) {
 }
 
 export const CUSTODY_PROVIDER_CONTRACT_STATUS = UNCONFIGURED;
+export const CUSTODY_KEY_HANDLE_KIND = KEY_HANDLE_KIND;

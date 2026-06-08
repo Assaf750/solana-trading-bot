@@ -3,6 +3,29 @@
 
 export type CustodyProviderStatus = 'unconfigured';
 
+export interface KeyHandleContractDescriptor {
+  readonly kind: 'key-handle';
+  readonly opaque: true;
+  readonly exportable: false;
+  readonly can_export_key: false;
+  readonly holds_raw_private_key: false;
+  readonly accepts_key_material_input: false;
+  readonly can_sign: false;
+  readonly is_live: false;
+  readonly status: CustodyProviderStatus;
+  readonly note: string;
+}
+
+export interface KeyHandleResolveResult {
+  readonly ok: false;
+  readonly status: CustodyProviderStatus;
+  readonly handle: null;
+  readonly can_sign: false;
+  readonly can_export_key: false;
+  readonly reason: string;
+  readonly recommended_signer_profile_status: 'DEGRADED';
+}
+
 export interface CustodyProviderContractDescriptor {
   readonly contract: 'custody-provider';
   readonly version: string;
@@ -14,6 +37,7 @@ export interface CustodyProviderContractDescriptor {
   readonly is_live: false;
   readonly status: CustodyProviderStatus;
   readonly operations: readonly string[];
+  readonly key_handle: KeyHandleContractDescriptor;
   readonly note: string;
 }
 
@@ -28,8 +52,10 @@ export interface UnconfiguredCustodyProvider {
   readonly status: CustodyProviderStatus;
   isConfigured(): false;
   describe(): CustodyProviderContractDescriptor;
+  describeKeyHandle(): KeyHandleContractDescriptor;
   health(): CustodyProviderFailClosedResult;
   use(request?: unknown): CustodyProviderFailClosedResult;
+  resolveKeyHandle(request?: unknown): KeyHandleResolveResult;
 }
 
 export interface CustodyProviderSelectionResult {
@@ -43,4 +69,7 @@ export function describeCustodyProviderContract(): CustodyProviderContractDescri
 export function createUnconfiguredCustodyProvider(): UnconfiguredCustodyProvider;
 export function selectCustodyProvider(selection?: unknown): CustodyProviderSelectionResult;
 export function refusesKeyMaterial(input?: unknown): boolean;
+export function describeKeyHandleContract(): KeyHandleContractDescriptor;
+export function resolveCustodyKeyHandle(selection?: unknown): KeyHandleResolveResult;
 export const CUSTODY_PROVIDER_CONTRACT_STATUS: CustodyProviderStatus;
+export const CUSTODY_KEY_HANDLE_KIND: 'key-handle';

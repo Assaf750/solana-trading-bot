@@ -9,7 +9,10 @@ import {
   createUnconfiguredCustodyProvider,
   selectCustodyProvider,
   refusesKeyMaterial,
+  describeKeyHandleContract,
+  resolveCustodyKeyHandle,
   CUSTODY_PROVIDER_CONTRACT_STATUS,
+  CUSTODY_KEY_HANDLE_KIND,
 } from '../src/index.mjs';
 import { runMechanismGuard, ALLOWLIST, stripCommentsAndStrings } from '../../../tools/check-mechanism-guards.mjs';
 
@@ -109,4 +112,71 @@ test('mechanism guard still PASSES and ALLOWLIST is unchanged (one isolated-sign
 
 test('status constant is unconfigured', () => {
   assert.equal(CUSTODY_PROVIDER_CONTRACT_STATUS, 'unconfigured');
+});
+
+// ================= E2-KMS-1: opaque key-handle interface (no real handle, no signing) =================
+
+test('E2-KMS-1 key-handle descriptor: opaque, non-exportable, no raw key, no sign', () => {
+  const d = describeKeyHandleContract();
+  assert.equal(d.kind, 'key-handle');
+  assert.equal(d.opaque, true);
+  assert.equal(d.exportable, false);
+  assert.equal(d.can_export_key, false);
+  assert.equal(d.holds_raw_private_key, false);
+  assert.equal(d.accepts_key_material_input, false);
+  assert.equal(d.can_sign, false);
+  assert.equal(d.status, 'unconfigured');
+  assert.equal(CUSTODY_KEY_HANDLE_KIND, 'key-handle');
+  // descriptor exposes NO export/sign methods (it is a plain frozen object)
+  assert.equal(typeof d.exportKey, 'undefined');
+  assert.equal(typeof d.sign, 'undefined');
+  assert.equal(Object.isFrozen(d), true);
+});
+
+test('E2-KMS-1 contract descriptor embeds the key-handle interface and the resolveKeyHandle op', () => {
+  const c = describeCustodyProviderContract();
+  assert.equal(c.key_handle.kind, 'key-handle');
+  assert.equal(c.key_handle.can_export_key, false);
+  assert.ok(c.operations.includes('resolveKeyHandle'));
+});
+
+test('E2-KMS-1 resolveCustodyKeyHandle is fail-closed: no handle, DEGRADED, cannot sign/export', () => {
+  for (const sel of [undefined, null, 'kms-ref', { provider: 'kms', role: 'hot_path' }]) {
+    const r = resolveCustodyKeyHandle(sel);
+    assert.equal(r.ok, false);
+    assert.equal(r.status, 'unconfigured');
+    assert.equal(r.handle, null);
+    assert.equal(r.can_sign, false);
+    assert.equal(r.can_export_key, false);
+    assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+  }
+});
+
+test('E2-KMS-1 provider.resolveKeyHandle mirrors fail-closed DEGRADED; describeKeyHandle matches', () => {
+  const p = createUnconfiguredCustodyProvider();
+  const r = p.resolveKeyHandle({ provider: 'kms' });
+  assert.equal(r.ok, false);
+  assert.equal(r.handle, null);
+  assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+  assert.equal(p.describeKeyHandle().kind, 'key-handle');
+  assert.equal(p.describeKeyHandle().can_export_key, false);
+});
+
+test('E2-KMS-1 key-material-shaped input to handle resolution is refused and never echoed', () => {
+  for (const km of ['-----BEGIN PRIVATE KEY-----', { secret: 'x' }, { private_key: 'x' }, { seed: 'x' }, { mnemonic: 'x' }, { keypair: 'x' }]) {
+    const r = resolveCustodyKeyHandle(km);
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'key_material_not_accepted');
+    assert.equal(r.handle, null);
+  }
+  const withSecret = resolveCustodyKeyHandle({ secret: 'super-secret-value' });
+  assert.equal(JSON.stringify(withSecret).includes('super-secret-value'), false);
+});
+
+test('E2-KMS-1 no handle ever exposes a key; result carries no key/private/raw fields', () => {
+  const r = resolveCustodyKeyHandle({ provider: 'kms' });
+  assert.equal(r.handle, null);
+  for (const k of ['key', 'privateKey', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'raw']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
 });
