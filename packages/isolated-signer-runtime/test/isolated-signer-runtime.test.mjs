@@ -42,7 +42,7 @@ test('only approved internal imports (E2-B wiring); no forbidden SDK/provider im
   // E2-B introduces wiring that consumes the keyless lifecycle + custody provider contract via relative
   // imports. The skeleton module itself stays import-free; the wiring module may import ONLY the two
   // approved internal packages (relative paths). No external/SDK/provider import is allowed.
-  const ALLOWED_IMPORT = /^(\.\.\/\.\.\/keyless-custody-lifecycle\/src\/index\.mjs|\.\.\/\.\.\/custody-provider-contract\/src\/index\.mjs)$/;
+  const ALLOWED_IMPORT = /^(\.\.\/\.\.\/keyless-custody-lifecycle\/src\/index\.mjs|\.\.\/\.\.\/custody-provider-contract\/src\/index\.mjs|\.\.\/\.\.\/real-live-readiness\/src\/index\.mjs)$/;
   for (const fn of readdirSync(SRC).filter((x) => x.endsWith('.mjs'))) {
     const raw = readFileSync(join(SRC, fn), 'utf8');
     for (const m of raw.matchAll(/\bimport\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g)) {
@@ -206,6 +206,15 @@ const VALID_PREFLIGHT = Object.freeze({
   max_approval_age_slots: 10,
   intent_id: 'intent-1',
   idempotency_key: 'idem-1',
+  // E0 readiness mock inputs (hard precondition; must all be ready for preflight_ok)
+  validation_status: 'valid',
+  protocol_constant_status: 'green',
+  provider_degraded: false,
+  slot_lag: 0,
+  slot_lag_max: 5,
+  audit_path_available: true,
+  admission_complete: true,
+  operator_checklist_complete: true,
 });
 
 test('E2-C0 happy path: preflight_ok but NEVER signs/sends', () => {
@@ -342,6 +351,81 @@ test('E2-D no-audit passthrough still never signs', () => {
   const r = gate.evaluate({ ...VALID_PREFLIGHT });
   assert.equal(r.preflight_ok, true);
   assert.equal(r.signed, false); assert.equal(r.signature, null); assert.equal(r.can_send, false);
+});
+
+// ================= E2-E: readiness integration + fail-closed DEGRADED (no signing) =================
+
+test('E2-E readiness ready=true allows preflight_ok but NEVER signs', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT });
+  assert.equal(r.preflight_ok, true);
+  assert.equal(r.readiness_ready, true);
+  assert.equal(r.signed, false); assert.equal(r.signature, null); assert.equal(r.can_send, false);
+});
+
+test('E2-E readiness blockers prevent preflight_ok (readiness_not_ready)', () => {
+  // each readiness mock input flipped to a not-ready value adds readiness_not_ready
+  for (const override of [
+    { validation_status: 'invalid' },
+    { protocol_constant_status: 'changed' },
+    { provider_degraded: true },
+    { slot_lag: 999 },
+    { audit_path_available: false },
+    { admission_complete: false },
+    { operator_checklist_complete: false },
+  ]) {
+    const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, ...override });
+    assert.equal(r.preflight_ok, false, `expected blocked for ${JSON.stringify(override)}`);
+    assert.ok(r.blockers.includes('readiness_not_ready'), `expected readiness_not_ready for ${JSON.stringify(override)}`);
+    assert.equal(r.signed, false); assert.equal(r.can_send, false);
+  }
+});
+
+test('E2-E custody DEGRADED is fail-closed and recommends signer_profile_status=DEGRADED', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, custody_phase: 'degraded' });
+  assert.equal(r.preflight_ok, false);
+  assert.ok(r.blockers.includes('custody_degraded'));
+  assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+  assert.equal(r.signed, false); assert.equal(r.can_send, false);
+});
+
+test('E2-E unconfigured/unknown provider is fail-closed and recommends DEGRADED', () => {
+  const unconf = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, provider_status: 'unconfigured' });
+  assert.ok(unconf.blockers.includes('custody_unconfigured'));
+  assert.equal(unconf.recommended_signer_profile_status, 'DEGRADED');
+  const noProvider = { ...VALID_PREFLIGHT };
+  delete noProvider.provider_status;
+  const r2 = runtime.evaluateSigningPreflight(noProvider);
+  assert.ok(r2.blockers.includes('custody_unconfigured'));
+  assert.equal(r2.recommended_signer_profile_status, 'DEGRADED');
+});
+
+test('E2-E audit before/after continues through readiness failure', () => {
+  const log = createAuditLog();
+  const gate = runtime.createSigningPreflightGate({ auditLog: log });
+  const r = gate.evaluate({ ...VALID_PREFLIGHT, provider_degraded: true, audit_actor: 'op' });
+  assert.equal(r.preflight_ok, false);
+  assert.ok(r.blockers.includes('readiness_not_ready'));
+  assert.equal(log.length, 2); // before + after, even on readiness failure
+  assert.match(log.get(0).audit_reason, /signing_preflight_before/);
+  assert.match(log.get(1).audit_reason, /signing_preflight_after_blocked:.*readiness_not_ready/);
+});
+
+test('E2-E does NOT call activate_real_live and adds no REAL-LIVE activation', () => {
+  // source scan: no activation call anywhere in the gate
+  const code = stripCode(readFileSync(join(SRC, 'signing-preflight-gate.mjs'), 'utf8'));
+  assert.equal(/activate_real_live\s*\(/.test(code), false);
+  // even a fully-ready preflight never signs/sends and carries no activation
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT });
+  assert.equal(r.can_send, false);
+  assert.equal('activated' in r, false);
+});
+
+test('E2-E key material refused even with full readiness inputs; capabilities stay all-false', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, secret: 'no' });
+  assert.deepEqual([...r.blockers], ['key_material_not_accepted']);
+  assert.equal(JSON.stringify(r).includes('"no"'), false);
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
 });
 
 test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {

@@ -33,6 +33,15 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-E readiness integration + fail-closed `DEGRADED` (gate only, no REAL-LIVE)
+The preflight now consumes the **E0 real-live readiness evaluator** (`@soltrade/real-live-readiness`) as a
+**hard precondition**: if readiness is not ready (any readiness blocker), the preflight adds `readiness_not_ready`
+and fails — no signing, no sending. Unsafe custody (`degraded` / `unconfigured` / unknown provider) is
+fail-closed and the envelope carries `recommended_signer_profile_status:'DEGRADED'`. Readiness inputs are
+**mock/result-model only**. This is a readiness **gate** — it never activates REAL-LIVE and never calls
+`activate_real_live`. The envelope invariants are unchanged: `signed:false`, `signature:null`, `can_send:false`,
+no bytes/tx/serialized/raw.
+
 ### E2-D audit before/after (evidence only, no signing)
 `createSigningPreflightGate({ auditLog })` records **before + after** the preflight for **every** attempt
 (success and refusal), append-only, **refs only**: `resource_type`/`audit_scope='signer_profile'`,

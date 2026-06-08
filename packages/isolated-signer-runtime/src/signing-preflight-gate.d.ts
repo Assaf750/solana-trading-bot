@@ -18,6 +18,15 @@ export interface SigningPreflightInput {
   readonly signer_profile_id?: string;
   readonly audit_actor?: string;
   readonly request_id?: string;
+  // E0 readiness mock inputs (consumed by evaluateRealLiveReadiness as a hard precondition)
+  readonly validation_status?: string;
+  readonly protocol_constant_status?: string;
+  readonly provider_degraded?: boolean;
+  readonly slot_lag?: number;
+  readonly slot_lag_max?: number;
+  readonly audit_path_available?: boolean;
+  readonly admission_complete?: boolean;
+  readonly operator_checklist_complete?: boolean;
 }
 
 export interface SigningPreflightResult {
@@ -28,6 +37,8 @@ export interface SigningPreflightResult {
   readonly can_send: false;
   readonly blockers: readonly string[];
   readonly intent_id?: string;
+  readonly readiness_ready?: true;
+  readonly recommended_signer_profile_status?: 'DEGRADED';
   readonly note?: string;
 }
 

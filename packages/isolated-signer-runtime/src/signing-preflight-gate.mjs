@@ -14,6 +14,7 @@
 // `max_approval_age_slots` are MOCK inputs (implementation concepts, not SSOT fields).
 
 import { refusesKeyMaterial } from '../../custody-provider-contract/src/index.mjs';
+import { evaluateRealLiveReadiness } from '../../real-live-readiness/src/index.mjs';
 
 const isStr = (v) => typeof v === 'string' && v.length > 0;
 const isInt = (v) => typeof v === 'number' && Number.isFinite(v);
@@ -51,6 +52,11 @@ export function evaluateSigningPreflight(input = {}) {
 
   const blockers = [];
 
+  // HARD PRECONDITION: E0 real-live readiness must be ready (no readiness blockers) before anything else.
+  // The readiness evaluator is pure and never activates anything; here it only gates the preflight.
+  const readiness = evaluateRealLiveReadiness(input);
+  if (!readiness.ready) blockers.push('readiness_not_ready');
+
   // Risk + readiness gates (must be explicitly true)
   if (input.risk_approved !== true) blockers.push('risk_not_approved');
   if (input.real_live_config_valid !== true) blockers.push('real_live_config_invalid');
@@ -61,9 +67,10 @@ export function evaluateSigningPreflight(input = {}) {
   if (input.operating_state !== 'ACTIVE') blockers.push('operating_state_not_active');
 
   // Custody must be neither degraded nor unconfigured (from E2-A/E2-B wiring)
-  if (input.custody_phase === 'degraded') blockers.push('custody_degraded');
-  if (input.provider_status !== undefined && input.provider_status !== 'configured') blockers.push('custody_unconfigured');
-  if (input.provider_status === undefined) blockers.push('custody_unconfigured'); // fail-closed: unknown => unconfigured
+  let custodyUnsafe = false;
+  if (input.custody_phase === 'degraded') { blockers.push('custody_degraded'); custodyUnsafe = true; }
+  if (input.provider_status !== undefined && input.provider_status !== 'configured') { blockers.push('custody_unconfigured'); custodyUnsafe = true; }
+  if (input.provider_status === undefined) { blockers.push('custody_unconfigured'); custodyUnsafe = true; } // fail-closed: unknown => unconfigured
 
   // Payload binding (mock): the digest presented must match the approved digest
   if (!isStr(input.payload_digest) || !isStr(input.approved_payload_digest) || input.payload_digest !== input.approved_payload_digest) {
@@ -79,12 +86,17 @@ export function evaluateSigningPreflight(input = {}) {
   if (!isStr(input.intent_id)) blockers.push('missing_intent_id');
   if (!isStr(input.idempotency_key)) blockers.push('missing_idempotency_key');
 
-  if (blockers.length > 0) return envelope(blockers);
+  if (blockers.length > 0) {
+    // Fail-closed: where custody itself is unsafe, recommend DEGRADED (no signing on unverified custody).
+    return envelope(blockers, custodyUnsafe ? { recommended_signer_profile_status: 'DEGRADED' } : {});
+  }
 
-  // All preconditions theoretically satisfied — but STILL no signing. Real signing is a separate E2-C PR.
+  // All preconditions (incl. E0 readiness) theoretically satisfied — but STILL no signing. Real signing is a
+  // separate E2-C PR. This gate never activates REAL-LIVE and never calls any activation command.
   return envelope([], {
     intent_id: input.intent_id,
-    note: 'preflight satisfied; real signing requires separate E2-C approval (E2-C0 never signs)',
+    readiness_ready: true,
+    note: 'preflight satisfied (incl. readiness); real signing requires separate E2-C approval (gate never signs)',
   });
 }
 
