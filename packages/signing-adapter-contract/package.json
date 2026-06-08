@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/signing-adapter-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Signing Adapter CONTRACT + NO-OP adapter (Gate E / E2-C1): interface/contract describing a signing adapter that consumes an already-validated preflight result + an opaque custody handle and is fail-closed, plus a no-op adapter that never signs. NO live calls. No crypto/signing library; no KMS/vault; no KeyManager; no key material; no transaction building/serialization; no signing/sending; no RPC/provider; no DB; no REAL-LIVE; no execution authority. OUTSIDE the mechanism guard's allowlist and fully scanned.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
