@@ -7,3 +7,4 @@ export * from './isolated-signer-runtime.mjs';
 export * from './custody-lifecycle-wiring.mjs';
 export * from './signing-preflight-gate.mjs';
 export * from './mock-signer-adapter.mjs';
+export * from './webcrypto-signing-adapter.mjs';

@@ -10,6 +10,7 @@ import { runMechanismGuard, scanText, isAllowlisted, ALLOWLIST, DECLARED_ALLOWLI
 import { FORBIDDEN_NAMES } from '../../ssot-types/src/forbidden.mjs';
 import { createAuditLog } from '../../data/src/audit.mjs';
 import { AUDIT_COLUMNS } from '../../data/src/schema.mjs';
+import { webcrypto } from 'node:crypto';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
@@ -32,7 +33,11 @@ test('skeleton exposes NO signing/sending/execution authority surface', () => {
 });
 
 test('package source contains NO live mechanism / no key material (CODE scan)', () => {
-  const BAD = /(KeyManager|\bKMS\b|\bvault\b|@noble|tweetnacl|bs58|ed25519|web3|@solana\/|jupiter|helius|jito|signTransaction|signAllTransactions|partialSign|sendTransaction|sendRawTransaction|\.serialize\(|buildTransaction|new\s+Transaction|node:crypto|createHash|\bfetch\b|axios|https?:\/\/|node:net|node:http|node:dgram|INSERT\s|UPDATE\s|DELETE\s+FROM|\.query\(|clickhouse|createPool|private[_-]?key|secret[_-]?key|\bmnemonic\b|keypair|activate_real_live\s*\()/i;
+  // E2-C3-2: native WebCrypto via `node:crypto` + the `Ed25519` algorithm name are APPROVED local-capability
+  // usage inside this allowlisted path (reports/E2-C3-0). They are intentionally NOT in BAD. Everything
+  // dangerous stays forbidden: third-party crypto libs, sign/send-transaction, serialize, network, RPC, DB,
+  // KMS/vault/KeyManager, key-material literals, REAL-LIVE.
+  const BAD = /(KeyManager|\bKMS\b|\bvault\b|@noble|tweetnacl|bs58|web3|@solana\/|jupiter|helius|jito|signTransaction|signAllTransactions|partialSign|sendTransaction|sendRawTransaction|\.serialize\(|buildTransaction|new\s+Transaction|createHash|\bfetch\b|axios|https?:\/\/|node:net|node:http|node:dgram|INSERT\s|UPDATE\s|DELETE\s+FROM|\.query\(|clickhouse|createPool|private[_-]?key|secret[_-]?key|\bmnemonic\b|keypair|activate_real_live\s*\()/i;
   for (const fn of readdirSync(SRC).filter((x) => x.endsWith('.mjs'))) {
     assert.equal(BAD.test(stripCode(readFileSync(join(SRC, fn), 'utf8'))), false, `forbidden mechanism in ${fn}`);
   }
@@ -44,11 +49,13 @@ test('only approved internal imports (E2-B/C wiring); no forbidden SDK/provider 
   // relative paths. No external/SDK/provider/crypto import is allowed.
   const SAME_PKG = /^\.\/[\w.-]+\.mjs$/;
   const CROSS_PKG = /^(\.\.\/\.\.\/keyless-custody-lifecycle\/src\/index\.mjs|\.\.\/\.\.\/custody-provider-contract\/src\/index\.mjs|\.\.\/\.\.\/real-live-readiness\/src\/index\.mjs|\.\.\/\.\.\/signing-adapter-contract\/src\/index\.mjs)$/;
+  const NODE_BUILTIN = /^node:crypto$/; // E2-C3-2: WebCrypto local capability (approved in the allowlisted path)
   for (const fn of readdirSync(SRC).filter((x) => x.endsWith('.mjs'))) {
     const raw = readFileSync(join(SRC, fn), 'utf8');
     for (const m of raw.matchAll(/\bimport\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g)) {
       const spec = m[1];
-      assert.equal(spec.startsWith('.') && (SAME_PKG.test(spec) || CROSS_PKG.test(spec)), true, `disallowed import "${spec}" in ${fn}`);
+      const ok = (spec.startsWith('.') && (SAME_PKG.test(spec) || CROSS_PKG.test(spec))) || NODE_BUILTIN.test(spec);
+      assert.equal(ok, true, `disallowed import "${spec}" in ${fn}`);
     }
     // bare imports (side-effect) are not allowed anywhere
     assert.equal(/\bimport\s*['"][^'"]+['"]/.test(raw), false, `bare side-effect import in ${fn}`);
@@ -520,6 +527,79 @@ test('E2-C2 no module-level signing/sending/execution surface; capabilities all-
   assert.equal(runtime.capabilities().can_send, false);
   assert.equal(runtime.capabilities().has_key_material, false);
   assert.equal(runtime.capabilities().live_mechanisms, false);
+});
+
+// ================= E2-C3-2: WebCrypto sign-only adapter SKELETON (no project signing) =================
+
+test('E2-C3-2 descriptor: skeleton, WebCrypto/Ed25519, all execution caps false, not wired', () => {
+  const d = runtime.describeWebcryptoSigningAdapter();
+  assert.equal(d.status, 'skeleton');
+  assert.equal(d.backend, 'webcrypto');
+  assert.equal(d.algorithm, 'Ed25519');
+  assert.equal(d.can_sign, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.holds_key_material, false);
+  assert.equal(d.can_export_key, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.wired_to_custody, false);
+  assert.equal(d.wired_to_preflight, false);
+});
+
+test('E2-C3-2 attemptSign is ALWAYS fail-closed (skeleton not wired); no signature, no send', () => {
+  const a = runtime.createWebcryptoSigningAdapter();
+  const r = a.attemptSign({ preflight_ok: true, signed: false, signature: null, can_send: false, blockers: [] });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 'skeleton');
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(r.can_send, false);
+  assert.equal(r.reason, 'skeleton_not_wired_to_custody_preflight');
+  // carries no key / bytes / tx
+  for (const k of ['key', 'private_key', 'bytes', 'tx', 'transaction', 'serialized', 'raw']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
+});
+
+test('E2-C3-2 attemptSign refuses key-material-shaped input; never echoes it', () => {
+  const a = runtime.createWebcryptoSigningAdapter();
+  const r = a.attemptSign({ secret: 'super-secret', preflight_ok: true });
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'key_material_not_accepted');
+  assert.equal(r.signed, false); assert.equal(r.signature, null);
+  assert.equal(JSON.stringify(r).includes('super-secret'), false);
+});
+
+test('E2-C3-2 probeSupport() returns a boolean (true on this Node) without project signing', async () => {
+  const a = runtime.createWebcryptoSigningAdapter();
+  const supported = await a.probeSupport();
+  assert.equal(typeof supported, 'boolean');
+  // On a runtime with Ed25519 WebCrypto, support is true; the probe never signs a project payload.
+  assert.equal(supported, true);
+});
+
+test('E2-C3-2 the reported capability is real: ephemeral non-extractable sign/verify works (test-only)', async () => {
+  // This proof lives in the TEST (not src): generate an ephemeral non-extractable key, sign+verify a LOCAL
+  // test payload, and confirm a tampered payload is rejected. No key is exported; no project payload.
+  const subtle = webcrypto.subtle;
+  const pair = await subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+  assert.equal(pair.privateKey.extractable, false);
+  const payload = new TextEncoder().encode('e2c32-local-capability-test-payload');
+  const sig = await subtle.sign({ name: 'Ed25519' }, pair.privateKey, payload);
+  assert.equal(await subtle.verify({ name: 'Ed25519' }, pair.publicKey, sig, payload), true);
+  assert.equal(await subtle.verify({ name: 'Ed25519' }, pair.publicKey, sig, new TextEncoder().encode('tampered')), false);
+});
+
+test('E2-C3-2 no module-level signing surface; capabilities stay all-false; guard allowlist=1', () => {
+  for (const k of ['sign', 'send', 'submit', 'execute', 'serialize', 'buildTransaction', 'loadKey', 'requestSign']) {
+    assert.equal(typeof runtime[k], 'undefined', `runtime must not export ${k}`);
+  }
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
+  assert.equal(runtime.capabilities().has_key_material, false);
+  const res = runMechanismGuard();
+  assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
+  assert.equal(res.counts.allowlist, 1);
+  assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
 });
 
 test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {

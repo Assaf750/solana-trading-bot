@@ -33,6 +33,18 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-C3-2 WebCrypto sign-only adapter skeleton (skeleton only, NOT wired)
+`createWebcryptoSigningAdapter()` / `describeWebcryptoSigningAdapter()` / `probeWebcryptoEd25519Support()` add a
+**skeleton** that references WebCrypto (`node:crypto`) as a **local capability** only. The descriptor reports
+all execution caps `false` and `wired_to_custody:false`, `wired_to_preflight:false`. `attemptSign()` is
+**always fail-closed** (`signed:false`, `signature:null`, `can_send:false`, reason
+`skeleton_not_wired_to_custody_preflight`) and refuses key-material input. `probeWebcryptoEd25519Support()`
+only checks support by generating and **discarding** an ephemeral key — it never accesses, returns, or exports
+a private key, and never signs a project payload. **No third-party crypto dependency, no KMS/Vault, no
+KeyManager, no custody/preflight wiring, no transaction/serialize/send/RPC.** `capabilities()` stays all-false.
+The actual ephemeral sign/verify proof lives in tests. Real project signing remains a separate **E2-C3**
+approval.
+
 ### E2-C3-1 native WebCrypto Ed25519 probe (test-only capability check, NOT E2-C3)
 A **test-only** probe (`test/webcrypto-signing-probe.test.mjs`) checks whether `node:crypto.webcrypto.subtle`
 supports Ed25519 and, if so, that an **ephemeral** key generated in test memory can sign+verify a **local test
