@@ -33,6 +33,20 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-C3-4 real signing path — SIGN-ONLY (gated; ephemeral test key; no send/RPC/REAL-LIVE)
+`createRealSigningPath({ auditLog }).attemptSign(input, signerKey)` produces a WebCrypto **Ed25519 signature
+over the EXACT approved, bound digest** — and only that — behind the existing gate (preflight + readiness +
+audit before/after + custody). It **never sends**, never builds/serialises a transaction, never calls RPC, and
+never activates REAL-LIVE (`can_send:false` always). The signing key is an **ephemeral, non-extractable**
+WebCrypto handle **supplied by the caller (test-mode input)**; this module never generates, persists, exports,
+or literalises a key, and never reads a private key as a property. With the production custody stub the
+preflight is fail-closed (DEGRADED), so this path cannot reach signing in production; real custody/KMS key
+sourcing is a separate track. Arbitrary-bytes signing is structurally impossible (only `approved_payload_digest`
+is signed). Audit before/after on every attempt (keys ⊆ `AUDIT_COLUMNS`; no signature/digest/key in audit).
+`describeRealSigningPath()` reports `can_sign:true` **only locally** (sign-only, test-gated); the **global
+`capabilities()` stays all-false**. This is **test/ephemeral key only — no KMS, no send, no mainnet, not
+REAL-LIVE.**
+
 ### E2-C3-2 WebCrypto sign-only adapter skeleton (skeleton only, NOT wired)
 `createWebcryptoSigningAdapter()` / `describeWebcryptoSigningAdapter()` / `probeWebcryptoEd25519Support()` add a
 **skeleton** that references WebCrypto (`node:crypto`) as a **local capability** only. The descriptor reports

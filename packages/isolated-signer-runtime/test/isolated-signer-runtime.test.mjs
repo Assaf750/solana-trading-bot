@@ -602,6 +602,141 @@ test('E2-C3-2 no module-level signing surface; capabilities stay all-false; guar
   assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
 });
 
+// ================= E2-C3-4: real signing wiring SIGN-ONLY (gated; ephemeral test key) =================
+
+// Generate a fresh ephemeral NON-EXTRACTABLE Ed25519 key pair in test memory (never exported/persisted).
+async function ephemeralPair() {
+  return webcrypto.subtle.generateKey({ name: 'Ed25519' }, false, ['sign', 'verify']);
+}
+const enc = (s) => new TextEncoder().encode(s);
+
+test('E2-C3-4 descriptor: sign-only, test-gated; LOCAL can_sign true but global capabilities stay all-false', () => {
+  const d = runtime.describeRealSigningPath();
+  assert.equal(d.mode, 'sign_only');
+  assert.equal(d.can_sign, true);     // local, explicit, sign-only/test-gated
+  assert.equal(d.can_send, false);
+  assert.equal(d.test_gated, true);
+  assert.equal(d.holds_key_material, false);
+  assert.equal(d.can_export_key, false);
+  // global capabilities remain all-false (no flip)
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
+});
+
+test('E2-C3-4 happy path: signs ONLY the bound digest; signature verifies; can_send false', async () => {
+  const pair = await ephemeralPair();
+  const path = runtime.createRealSigningPath();
+  const r = await path.attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op' }, pair.privateKey);
+  assert.equal(r.ok, true);
+  assert.equal(r.signed, true);
+  assert.equal(typeof r.signature, 'string');
+  assert.equal(r.can_send, false);
+  // signature verifies over the BOUND approved digest, and not over other bytes
+  const sigBytes = Buffer.from(r.signature, 'base64');
+  assert.equal(await webcrypto.subtle.verify({ name: 'Ed25519' }, pair.publicKey, sigBytes, enc(VALID_PREFLIGHT.approved_payload_digest)), true);
+  assert.equal(await webcrypto.subtle.verify({ name: 'Ed25519' }, pair.publicKey, sigBytes, enc('different-bytes')), false);
+  // output carries no transaction/serialized/raw/key
+  for (const k of ['bytes', 'tx', 'transaction', 'serialized', 'raw', 'privateKey', 'private_key', 'key']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
+});
+
+test('E2-C3-4 arbitrary-bytes signing is impossible: only approved_payload_digest is ever signed', async () => {
+  const pair = await ephemeralPair();
+  const path = runtime.createRealSigningPath();
+  // an extra "message"/"payload" field is ignored; only approved_payload_digest is signed
+  const r = await path.attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op', message: 'evil-bytes', payload: 'evil' }, pair.privateKey);
+  assert.equal(r.signed, true);
+  const sigBytes = Buffer.from(r.signature, 'base64');
+  assert.equal(await webcrypto.subtle.verify({ name: 'Ed25519' }, pair.publicKey, sigBytes, enc('evil-bytes')), false);
+  assert.equal(await webcrypto.subtle.verify({ name: 'Ed25519' }, pair.publicKey, sigBytes, enc(VALID_PREFLIGHT.approved_payload_digest)), true);
+});
+
+test('E2-C3-4 every gate failure refuses a signature (signed:false, signature:null)', async () => {
+  const pair = await ephemeralPair();
+  const path = runtime.createRealSigningPath();
+  const cases = [
+    [{ payload_digest: 'x', approved_payload_digest: 'y' }, 'payload_digest_mismatch'],
+    [{ approval_age_slots: 999 }, 'approval_stale'],
+    [{ provider_degraded: true }, 'readiness_not_ready'],
+    [{ custody_phase: 'degraded' }, 'custody_degraded'],
+    [{ provider_status: 'unconfigured' }, 'custody_unconfigured'],
+    [{ risk_approved: false }, 'risk_not_approved'],
+    [{ signer_profile_status: 'DISABLED' }, 'signer_not_active'],
+    [{ execution_wallet_status: 'DISABLED' }, 'execution_wallet_not_active'],
+    [{ operating_state: 'EXITS_ONLY' }, 'operating_state_not_active'],
+  ];
+  for (const [override, blocker] of cases) {
+    const r = await path.attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op', ...override }, pair.privateKey);
+    assert.notEqual(r.ok, true, `must refuse for ${blocker}`);
+    assert.equal(r.signed, false);
+    assert.equal(r.signature, null);
+    assert.equal(r.can_send, false);
+    assert.ok(r.blockers.includes(blocker), `expected ${blocker}, got ${r.blockers && r.blockers.join(',')}`);
+  }
+});
+
+test('E2-C3-4 missing audit_actor (with audit) refuses with NO append; key-material input refused', async () => {
+  const pair = await ephemeralPair();
+  const log = createAuditLog();
+  const path = runtime.createRealSigningPath({ auditLog: log });
+  const noActor = await path.attemptSign({ ...VALID_PREFLIGHT }, pair.privateKey); // no audit_actor
+  assert.equal(noActor.ok, false);
+  assert.ok(noActor.blockers.includes('audit_actor_required'));
+  assert.equal(log.length, 0); // no partial append
+  // key-material-shaped input is refused by the gate
+  const km = await path.attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op', secret: 'x' }, pair.privateKey);
+  assert.notEqual(km.ok, true);
+  assert.ok(km.blockers.includes('key_material_not_accepted'));
+  assert.equal(km.signed, false);
+});
+
+test('E2-C3-4 gates pass but no signing key -> fail-closed no_signing_material (never signs)', async () => {
+  const path = runtime.createRealSigningPath();
+  const r = await path.attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op' }); // no signerKey
+  assert.equal(r.ok, false);
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(r.reason, 'no_signing_material');
+});
+
+test('E2-C3-4 audit before/after on success and refusal; keys ⊆ AUDIT_COLUMNS; no key/sig/digest leak', async () => {
+  const pair = await ephemeralPair();
+  const allowed = new Set(AUDIT_COLUMNS);
+  // success
+  const okLog = createAuditLog();
+  const okR = await runtime.createRealSigningPath({ auditLog: okLog }).attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op' }, pair.privateKey);
+  assert.equal(okLog.length, 2);
+  assert.match(okLog.get(0).audit_reason, /real_sign_before/);
+  assert.match(okLog.get(1).audit_reason, /real_sign_after_signed_sign_only_no_send/);
+  // refusal
+  const noLog = createAuditLog();
+  await runtime.createRealSigningPath({ auditLog: noLog }).attemptSign({ ...VALID_PREFLIGHT, audit_actor: 'op', risk_approved: false }, pair.privateKey);
+  assert.equal(noLog.length, 2);
+  assert.match(noLog.get(1).audit_reason, /real_sign_after_refused:.*risk_not_approved/);
+  // no leakage of signature / digest / key in audit; keys all in AUDIT_COLUMNS
+  for (const log of [okLog, noLog]) {
+    for (const e of log.list()) {
+      for (const k of Object.keys(e)) assert.ok(allowed.has(k), `audit key ${k} in AUDIT_COLUMNS`);
+      const blob = JSON.stringify(e);
+      assert.equal(blob.includes('digest-abc'), false, 'audit must not contain the digest');
+      assert.equal(blob.includes(okR.signature), false, 'audit must not contain the signature');
+      for (const bad of ['privateKey', 'private_key', 'secret', 'mnemonic']) assert.equal(blob.toLowerCase().includes(bad.toLowerCase()), false);
+    }
+  }
+});
+
+test('E2-C3-4 no module-level send/execute surface; capabilities all-false; guard allowlist=1', () => {
+  for (const k of ['send', 'submit', 'execute', 'serialize', 'buildTransaction', 'sendTransaction', 'loadKey']) {
+    assert.equal(typeof runtime[k], 'undefined', `runtime must not export ${k}`);
+  }
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
+  const res = runMechanismGuard();
+  assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
+  assert.equal(res.counts.allowlist, 1);
+});
+
 test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {
   // module-level: only the gate functions are added; no sign/send/execute exports
   for (const k of ['sign', 'send', 'submit', 'execute', 'serialize', 'buildTransaction', 'loadKey', 'requestSign']) {
