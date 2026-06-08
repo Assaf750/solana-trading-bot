@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/send-gate-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Send Gate CONTRACT + FAIL-CLOSED SKELETON (Gate E / E2-F-1): contract/skeleton only describing a send gate as a fail-closed component that ALWAYS refuses, plus a gate whose every evaluation resolves to refused. NO live calls. No RPC/provider client; no Solana/Jupiter/Helius/Jito; no transaction building/serialization; no signing/sending; no broadcast; no network; no KMS/vault; no KeyManager; no key material; no DB; no REAL-LIVE; no execution authority. This package is OUTSIDE the mechanism guard's allowlist and is fully scanned.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
