@@ -209,6 +209,10 @@ export function createProviderAdapterSkeleton(config) {
 const TESTNET_ENVS = ['devnet', 'testnet', 'localnet'];
 // Indicators that mark a value as mainnet/prod or as a live endpoint/send surface — blocked in validation.
 const MAINNET_OR_ENDPOINT = /(mainnet|prod|broadcast|rpc|endpoint|https?:\/\/|provider_url|cluster)/i;
+// E2-KMS-10 hardening: only these config fields are permitted; anything else is rejected (no surprise fields).
+const PROVIDER_CONFIG_KNOWN_FIELDS = ['provider_ref', 'environment', 'key_alias', 'key_id'];
+// E2-KMS-10 hardening: endpoint / RPC / URL / live-call indicators in ANY value are blocked (no live surface).
+const ENDPOINT_OR_LIVECALL = /(https?:\/\/|wss?:\/\/|\brpc\b|endpoint|provider_url|broadcast|\bsend\b|websocket|live_call)/i;
 
 // Validate a provider config WITHOUT activating anything. This NEVER contacts a provider, never loads an SDK,
 // and never returns a handle or key. It classifies the config shape only: references are opaque strings;
@@ -246,6 +250,13 @@ export function validateProviderConfig(config) {
       if (/mainnet|prod/i.test(String(kk))) { reasons.push('env_ref_mismatch_mainnet_in_testnet'); break; }
     }
   }
+
+  // E2-KMS-10 hardening (1): reject any unknown/surprise field — only the known reference fields are permitted.
+  if (Object.keys(config).some((k) => !PROVIDER_CONFIG_KNOWN_FIELDS.includes(k))) reasons.push('unknown_field_rejected');
+
+  // E2-KMS-10 hardening (2): block endpoint / RPC / URL / provider_url / broadcast / send / websocket / live-call
+  // indicators in ANY string value — references must be opaque, never a live-call surface.
+  if (Object.values(config).some((v) => typeof v === 'string' && ENDPOINT_OR_LIVECALL.test(v))) reasons.push('endpoint_or_live_call_indicator_blocked');
 
   const valid = reasons.length === 0 && refOk;
   return Object.freeze({

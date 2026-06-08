@@ -15,6 +15,16 @@ There is **no real handle** — resolution is **always fail-closed** (`ok:false`
 `status:'unconfigured'`, `recommended_signer_profile_status:'DEGRADED'`). **No real provider, no KMS/Vault SDK,
 no network, no signing here.** A real KMS-backed adapter is a separate, explicitly-approved PR.
 
+## E2-KMS-10 — no-SDK provider config hardening
+`validateProviderConfig(config)` is hardened (still **no SDK, no live call**): in addition to requiring an
+opaque `provider_ref` + testnet-family `environment` and refusing key material, it now **rejects any
+unknown/surprise field** (`unknown_field_rejected` — only `provider_ref`/`environment`/`key_alias`/`key_id`
+allowed) and **blocks endpoint/RPC/URL/`provider_url`/`broadcast`/`send`/`websocket`/live-call indicators in any
+value** (`endpoint_or_live_call_indicator_blocked`, catching e.g. `wss://`). A valid shape stays
+`reference_valid_no_sdk` / `activated:false` and **does not configure** anything — the skeleton stays
+`isConfigured()===false` and `resolveKeyHandle()` stays fail-closed (`handle:null`, DEGRADED). **NO SDK SELECTED
+YET**; real SDK/KMS activation remains a separate, explicitly-approved PR.
+
 ## E2-KMS-6 — provider config validation (no SDK, validation-only)
 `validateProviderConfig(config)` is **validation-only**: it classifies a config's **shape** (opaque
 `provider_ref` + testnet-family `environment` + optional opaque `key_alias`/`key_id` references) and **never**

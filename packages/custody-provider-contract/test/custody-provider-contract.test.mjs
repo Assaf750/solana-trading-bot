@@ -294,3 +294,57 @@ test('E2-KMS-6 key_alias/key_id must be opaque reference strings (no endpoints/s
   assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_alias: 'https://x/' }).reasons.includes('key_alias_invalid_reference'));
   assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_id: '' }).reasons.includes('key_id_invalid_reference'));
 });
+
+// ================= E2-KMS-10: no-SDK provider config HARDENING =================
+
+test('E2-KMS-10 valid testnet/devnet/localnet refs (known fields only) stay shape-only valid; no activation', () => {
+  for (const environment of ['devnet', 'testnet', 'localnet']) {
+    const r = validateProviderConfig({ provider_ref: 'kms-key-ref-1', environment, key_alias: 'signer-alias-1' });
+    assert.equal(r.valid, true, `expected valid for ${environment}: ${r.reasons.join(',')}`);
+    assert.equal(r.activated, false);
+    assert.equal(r.status, 'reference_valid_no_sdk');
+  }
+  // a valid shape still does NOT configure/activate the skeleton
+  const a = createProviderAdapterSkeleton({ provider_ref: 'kms-key-ref-1', environment: 'devnet' });
+  assert.equal(a.isConfigured(), false);
+  assert.equal(a.resolveKeyHandle({ request: 'x' }).handle, null);
+});
+
+test('E2-KMS-10 unknown/surprise fields are rejected', () => {
+  for (const extra of [{ exec: 'x' }, { rpc_endpoint: 'r' }, { provider_url: 'u' }, { broadcast: true }, { send: true }, { foo: 'bar' }]) {
+    const r = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', ...extra });
+    assert.equal(r.valid, false, `must reject unknown field: ${JSON.stringify(extra)}`);
+    assert.ok(r.reasons.includes('unknown_field_rejected'), `expected unknown_field_rejected for ${JSON.stringify(extra)}`);
+    assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+  }
+});
+
+test('E2-KMS-10 endpoint/RPC/URL/live-call indicators in any value are blocked (incl. wss:// and bare send)', () => {
+  // wss:// is caught by the hardening scan even though it is not in the mainnet/endpoint ref check
+  const wss = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_alias: 'wss://node' });
+  assert.equal(wss.valid, false);
+  assert.ok(wss.reasons.includes('endpoint_or_live_call_indicator_blocked'));
+  // a bare "send" indicator in an otherwise-known field value is blocked
+  const send = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_alias: 'send-target' });
+  assert.equal(send.valid, false);
+  assert.ok(send.reasons.includes('endpoint_or_live_call_indicator_blocked'));
+});
+
+test('E2-KMS-10 key-material-shaped config still refused and never echoed; no key/raw/handle in result', () => {
+  const r = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', secret: 'super-secret' });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid_key_material');
+  assert.equal(JSON.stringify(r).includes('super-secret'), false);
+  for (const k of ['key', 'privateKey', 'private_key', 'seed', 'mnemonic', 'keypair', 'handle', 'raw']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
+});
+
+test('E2-KMS-10 guard remains allowlist=1; no SDK selected; skeleton stays fail-closed', () => {
+  const res = runMechanismGuard();
+  assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
+  assert.equal(res.counts.allowlist, 1);
+  const a = createProviderAdapterSkeleton({ provider_ref: 'kms-key-ref-1', environment: 'devnet' });
+  assert.equal(a.isConfigured(), false);
+  assert.equal(a.resolveKeyHandle({ request: 'x' }).recommended_signer_profile_status, 'DEGRADED');
+});
