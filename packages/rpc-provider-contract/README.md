@@ -268,6 +268,96 @@ Binding status values: `reference_bound_no_live` (the `endpoint_ref` matched a t
 propagated from provisioning) · `invalid` (any other blocking reason). A `bound` result binds/activates **nothing
 real**, makes **no network call**, and reads **no env / secret**.
 
+## Live RPC spike boundary (test-only, no-broadcast, no-live)
+**Gate E / PR-E2-F-13 — a CONTRACT-ONLY "Live RPC Spike Boundary".** It is additive: it does not change any
+existing export or behaviour. It **describes / validates the conditions of a FUTURE testnet RPC spike REQUEST** and
+executes **NO live RPC**. It is **NOT live** in any way: **no** live RPC call, **no** endpoint resolution, **no**
+env/secret read, **no** fetch / WebSocket / Connection, **no** SDK / dependency, and **no** send / broadcast /
+serialize. A spike boundary **never sends, never broadcasts, never serializes** — it must be a **no-broadcast**
+request **bound** to a **TEST-ONLY in-memory** endpoint reference. Everything is **fail-closed**: every result
+field is a **fixed literal** (all false / not-ready / not-live), input / `endpoint_ref` / secret / binding values
+are **never echoed**, and `provider_ref` is only ever the recognized literal `helius` while `environment` is only
+a recognized testnet enum value. The layer **reuses** the hardened `bindEndpointReferenceForTest` +
+`validateHeliusEndpointProvisioning` + `looksLikeKeyMaterial` + the existing indicator token lists — they are
+**not weakened**. A real testnet RPC spike (a live call) is a separate, explicitly-approved PR and is **not
+started** here.
+
+### Allowed request shape
+A spike-boundary `input` is the same **opaque-reference** shape validated elsewhere in this contract, plus two
+spike-only fields: a `provider_ref` (the enabled `helius` reference), a testnet-family `environment` (`devnet` /
+`testnet` / `localnet`), a **required** non-empty opaque `endpoint_ref` string, a `purpose` that **must** equal
+`live_rpc_spike_boundary`, and a `no_broadcast` flag that **must** be exactly `true`. Known request fields are
+**only** `provider_ref`, `environment`, `endpoint_ref`, `purpose`, `no_broadcast` — any other field (including a
+smuggled `has_rpc` / `ready` / `can_send` / `is_live` / `configured` / `broadcast` / `live_rpc_call_made` flag) is
+an unknown field and is **rejected**. There is **no endpoint URL, no host, no scheme, no API key, no secret, and no
+token** anywhere in the shape.
+
+### Test-only binding map
+The `bindingMap` is the same **TEST-ONLY in-memory** map used by the binding harness: a caller-supplied plain
+object mapping `endpoint_ref` → `{ bound: true, provider_ref, environment, endpoint_kind: 'reference_only' }`. It
+exists **only in memory for a test**, is never read from env or a secret file, and is never wired to anything live.
+The boundary requires the request's `endpoint_ref` to be **bound** in this map (via the reused
+`bindEndpointReferenceForTest`); any entry flag is **ignored and never trusted**.
+
+### Forbidden indicators (prose — no real URL/key shown)
+Because a spike boundary never sends/broadcasts/serializes, the request is **refused** (and never echoed) if it
+carries any **broadcast / send / serialize** indicator anywhere in its keys or values (for example a `broadcast`,
+`send`, or `serialize` key, or such a flag set true) → `broadcast_or_send_indicator_blocked`. Beyond that, the
+reused `validateHeliusEndpointProvisioning` independently refuses any *endpoint / RPC / URL / provider-URL /
+cluster / websocket* indicator, any *secret / token / credential / api-key / private-key* indicator on the
+`endpoint_ref`, any *mainnet / prod* indicator, and any key-material-shaped content. No literal endpoint URL or API
+key is shown here or accepted anywhere.
+
+### Faked-flag invariant
+Any `has_rpc` / `ready` / `can_send` / `is_live` / `network_call_made` / `configured` / `broadcast` /
+`live_rpc_call_made` field arriving on the input is **ignored for the result** — the result flags are **fixed
+literals, all false**. If such a flag arrives as an unknown request field it is also **refused**
+(`unknown_field_rejected`) — but even if tolerated, the result flags stay false.
+
+### Spike-boundary surface
+- `describeLiveRpcSpikeBoundaryContract()` → frozen descriptor: `contract: 'live-rpc-spike-boundary'`, `version`,
+  `test_only: true`, `purpose: 'live_rpc_spike_boundary'`, `provider_ref: 'helius'`, `supported_environments:
+  ['devnet','testnet','localnet']`, `requires_no_broadcast: true`, `requires_bound_endpoint_ref: true`, all of
+  `configured`/`has_rpc`/`ready`/`can_send`/`can_broadcast`/`can_serialize`/`is_live`/`live_rpc_call_made`/
+  `network_call_made`/`broadcast_permitted` `false`, `status: 'unconfigured_no_rpc'`, plus a one-line `note`.
+- `validateLiveRpcSpikeBoundaryRequest(input)` → validates the **request shape only** (not the binding). Frozen
+  `{ valid, status, reasons, configured: false, has_rpc: false, ready: false, can_send: false, can_broadcast:
+  false, can_serialize: false, is_live: false, live_rpc_call_made: false, network_call_made: false,
+  broadcast_permitted: false }`. Reuses `validateHeliusEndpointProvisioning` for the provider / environment /
+  `endpoint_ref` / secret / key-material / mainnet shape (reasons propagated), requires `purpose ===
+  'live_rpc_spike_boundary'` and `no_broadcast === true`, refuses any broadcast/send/serialize indicator, and
+  rejects unknown fields. **Never throws** — a hostile/throwing accessor returns a fixed `status: 'invalid'`,
+  `reasons: ['input_inspection_error']` refusal. Endpoint / secret values are **never echoed**.
+- `evaluateLiveRpcSpikeBoundary(input, bindingMap)` → the boundary **core**. Validates the request shape, then
+  reuses `bindEndpointReferenceForTest` against the test-only in-memory map; if not bound it pushes
+  `endpoint_ref_unbound` and surfaces the binding reasons under an `endpoint_binding:` prefix. Frozen `{ valid,
+  boundary_passed, status, provider_ref?, environment?, bound, reasons, configured: false, has_rpc: false, ready:
+  false, can_send: false, can_broadcast: false, can_serialize: false, is_live: false, live_rpc_call_made: false,
+  network_call_made: false, broadcast_permitted: false }`. `boundary_passed` (and `valid`) is true **only** when
+  there are no reasons; `provider_ref` (only ever the literal `helius`) and `environment` (only a recognized
+  testnet enum value) are echoed **only when valid**. The result flags are **fixed literals** (all false).
+  **Never throws** — a hostile/throwing accessor returns a fixed `boundary_passed: false`, `status: 'invalid'`,
+  `reasons: ['input_inspection_error']` refusal. Input / `endpoint_ref` / binding / secret values are **never
+  echoed**.
+
+### Spike-boundary reason vocabulary
+- `purpose_invalid` — `purpose` is not exactly `live_rpc_spike_boundary`.
+- `no_broadcast_required` — `no_broadcast` is not exactly `true`.
+- `broadcast_or_send_indicator_blocked` — a `broadcast` / `send` / `serialize` indicator appears in the request
+  (refused; never echoed).
+- `endpoint_ref_unbound` — the request's `endpoint_ref` is not bound in the test-only in-memory map (the binding
+  refusal reasons are surfaced under an `endpoint_binding:` prefix).
+- *(also)* `unknown_field_rejected`, plus the per-request tokens propagated from
+  `validateHeliusEndpointProvisioning` (`endpoint_ref_missing`, `endpoint_secret_indicator_blocked`,
+  `provider_not_enabled`, `unknown_provider`, `missing_config`, `missing_provider_ref`,
+  `mainnet_or_nontestnet_environment_blocked`, `endpoint_or_rpc_indicator_blocked`, `key_material_not_accepted`,
+  `input_inspection_error`).
+
+Spike-boundary status values: `live_rpc_spike_boundary_no_live` (the future-spike request is well-formed and the
+`endpoint_ref` matched a test-only in-memory reference entry — still **NOT live**) · `unconfigured_no_rpc` (unbound
+`endpoint_ref` or an unconfigured request shape) · `invalid` (any other blocking reason). A `boundary_passed`
+result resolves / calls / sends **nothing**, makes **no network call**, and reads **no env / secret**.
+
 ## Failure model
 `unconfigured_no_rpc` is the only contract status. There is no configured/live branch. No operation does I/O,
 crypto, signing, serialization, broadcast, or any network call.

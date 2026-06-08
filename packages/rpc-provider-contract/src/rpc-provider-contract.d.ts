@@ -215,3 +215,73 @@ export interface EndpointReferenceBindingResult {
 export function describeEndpointReferenceBindingHarness(): EndpointReferenceBindingHarnessDescriptor;
 export function validateEndpointReferenceBinding(input?: unknown): EndpointReferenceBindingValidationResult;
 export function bindEndpointReferenceForTest(input?: unknown, bindingMap?: unknown): EndpointReferenceBindingResult;
+
+// --- PR-E2-F-13: live RPC spike boundary (contract-only, test-only, no-broadcast, no-live/no-secret) ---
+
+export interface LiveRpcSpikeBoundaryDescriptor {
+  readonly contract: 'live-rpc-spike-boundary';
+  readonly version: string;
+  readonly test_only: true;
+  readonly purpose: 'live_rpc_spike_boundary';
+  readonly provider_ref: 'helius';
+  readonly supported_environments: readonly ['devnet', 'testnet', 'localnet'];
+  readonly requires_no_broadcast: true;
+  readonly requires_bound_endpoint_ref: true;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly live_rpc_call_made: false;
+  readonly network_call_made: false;
+  readonly broadcast_permitted: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export type LiveRpcSpikeBoundaryStatus =
+  | 'live_rpc_spike_boundary_no_live'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface LiveRpcSpikeBoundaryRequestResult {
+  readonly valid: boolean;
+  readonly status: LiveRpcSpikeBoundaryStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly live_rpc_call_made: false;
+  readonly network_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export interface LiveRpcSpikeBoundaryResult {
+  readonly valid: boolean;
+  readonly boundary_passed: boolean;
+  readonly status: LiveRpcSpikeBoundaryStatus;
+  readonly provider_ref?: 'helius';
+  readonly environment?: string;
+  readonly bound: boolean;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly live_rpc_call_made: false;
+  readonly network_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export function describeLiveRpcSpikeBoundaryContract(): LiveRpcSpikeBoundaryDescriptor;
+export function validateLiveRpcSpikeBoundaryRequest(input?: unknown): LiveRpcSpikeBoundaryRequestResult;
+export function evaluateLiveRpcSpikeBoundary(input?: unknown, bindingMap?: unknown): LiveRpcSpikeBoundaryResult;

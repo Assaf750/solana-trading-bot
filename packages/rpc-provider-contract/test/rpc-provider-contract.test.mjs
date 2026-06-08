@@ -25,6 +25,10 @@ import {
   describeEndpointReferenceBindingHarness,
   validateEndpointReferenceBinding,
   bindEndpointReferenceForTest,
+  // PR-E2-F-13 — live RPC spike boundary (contract-only, test-only, no-broadcast, no-live).
+  describeLiveRpcSpikeBoundaryContract,
+  validateLiveRpcSpikeBoundaryRequest,
+  evaluateLiveRpcSpikeBoundary,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -1797,6 +1801,592 @@ test('(B32) can_send/is_live/network_call_made stay false across the whole bindi
   assert.equal(d.can_send, false);
   assert.equal(d.is_live, false);
   assert.equal(d.network_call_made, false);
+  assert.equal(d.status, 'unconfigured_no_rpc');
+  assert.equal(Object.isFrozen(d), true);
+  assert.equal(typeof d.note, 'string');
+});
+
+// ===========================================================================================================
+// PR-E2-F-13 — LIVE RPC SPIKE BOUNDARY (contract-only, test-only, no-broadcast, NOT live)
+// ===========================================================================================================
+// 40 required proofs. The spike boundary DESCRIBES/VALIDATES the conditions of a FUTURE testnet RPC spike REQUEST
+// and executes NO live RPC: no live RPC call, no endpoint resolution, no env/secret read, no fetch/WebSocket/
+// Connection, no SDK/dependency, no send/broadcast/serialize. A valid spike request must be a NO-BROADCAST request
+// bound to a TEST-ONLY in-memory endpoint reference. Everything is fail-closed: every result flag is a FIXED
+// LITERAL (all false / not-ready / not-live), provider_ref is only ever the literal 'helius', environment is only
+// a recognized testnet enum value, and input / endpoint_ref / secret / binding VALUES are NEVER echoed.
+//
+// IMPORTANT — opaque endpoint_ref / binding VALUES must avoid EVERY refused substring (no 'endpoint','rpc','url',
+// 'http','ws','provider_url','api_key','secret','token','credential','mainnet','prod','broadcast','send',
+// 'serialize'). We use 'helius-spike-ref-N' and 'reference_only'.
+
+const SPIKE_REF_1 = 'helius-spike-ref-1';
+const SPIKE_REF_2 = 'helius-spike-ref-2';
+
+// A clean, spec-mandated valid spike REQUEST (a no-broadcast future-testnet-spike description).
+function validSpikeRequest(ref = SPIKE_REF_1, environment = 'devnet') {
+  return { provider_ref: 'helius', environment, endpoint_ref: ref, purpose: 'live_rpc_spike_boundary', no_broadcast: true };
+}
+
+// A clean TEST-ONLY in-memory binding map: endpoint_ref -> reference-only entry. No live surface, no secret.
+function spikeBindingMap(ref = SPIKE_REF_1, providerRef = 'helius', environment = 'devnet') {
+  return { [ref]: { bound: true, provider_ref: providerRef, environment, endpoint_kind: 'reference_only' } };
+}
+
+// The fixed-literal flags every spike-boundary REQUEST result must carry (all false — never live, never sendable).
+function assertSpikeRequestFlagsFalse(r) {
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.can_broadcast, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.is_live, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.network_call_made, false);
+  assert.equal(r.broadcast_permitted, false);
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(Object.isFrozen(r.reasons), true);
+}
+
+// Every spike-boundary EVAL result must be fail-closed (no-live) regardless of pass/fail. The result flags are
+// FIXED LITERALS (all false); no live/handle/endpoint/key surface field is ever present, and an UNbound/failed
+// result never echoes provider_ref/environment as real values.
+function assertSpikeFailClosed(r) {
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.can_broadcast, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.is_live, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.network_call_made, false);
+  assert.equal(r.broadcast_permitted, false);
+  assert.notEqual(r.is_live, true);
+  assert.equal(Object.isFrozen(r.reasons), true);
+  // never carries a live/handle/endpoint/key surface field, and never echoes endpoint_ref/secret/binding values.
+  for (const k of ['key', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'endpoint', 'rpc_endpoint', 'provider_url', 'url', 'credential', 'handle', 'endpoint_ref', 'binding', 'entry', 'bindingMap', 'purpose', 'no_broadcast']) {
+    assert.equal(k in r, false, `spike result must not carry ${k}`);
+  }
+}
+
+// ---- (S1) valid request + map -> valid:true / boundary_passed:true / live_rpc_spike_boundary_no_live ----
+
+test('(S1) valid spike request + map -> valid:true, boundary_passed:true, live_rpc_spike_boundary_no_live', () => {
+  const r = evaluateLiveRpcSpikeBoundary(validSpikeRequest(), spikeBindingMap());
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.boundary_passed, true);
+  assert.equal(r.status, 'live_rpc_spike_boundary_no_live');
+  assert.equal(r.bound, true);
+  assert.deepEqual([...r.reasons], []);
+  // provider_ref echoed ONLY as the recognized literal 'helius'; environment ONLY a recognized testnet enum value.
+  assert.equal(r.provider_ref, 'helius');
+  assert.equal(r.environment, 'devnet');
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S2) valid request + EMPTY map -> endpoint_ref_unbound, boundary_passed:false ----
+
+test('(S2) valid request + EMPTY map -> endpoint_ref_unbound, boundary_passed:false (requires a bound endpoint_ref)', () => {
+  const r = evaluateLiveRpcSpikeBoundary(validSpikeRequest(), {});
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.valid, false);
+  assert.equal(r.bound, false);
+  assert.ok(r.reasons.includes('endpoint_ref_unbound'), JSON.stringify([...r.reasons]));
+  // an unbound/failed result must NOT echo provider_ref/environment as real values.
+  assert.equal(r.provider_ref, undefined);
+  assert.equal(r.environment, undefined);
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S3)-(S12) the valid result keeps all 10 capability/live flags false ----
+
+test('(S3-S12) the valid spike result keeps configured/has_rpc/ready/can_send/can_broadcast/can_serialize/is_live/network_call_made/live_rpc_call_made/broadcast_permitted ALL false', () => {
+  const r = evaluateLiveRpcSpikeBoundary(validSpikeRequest(), spikeBindingMap());
+  assert.equal(r.boundary_passed, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.configured, false);          // (S3)
+  assert.equal(r.has_rpc, false);             // (S4)
+  assert.equal(r.ready, false);               // (S5)
+  assert.equal(r.can_send, false);            // (S6)
+  assert.equal(r.can_broadcast, false);       // (S7)
+  assert.equal(r.can_serialize, false);       // (S8)
+  assert.equal(r.is_live, false);             // (S9)
+  assert.equal(r.network_call_made, false);   // (S10)
+  assert.equal(r.live_rpc_call_made, false);  // (S11)
+  assert.equal(r.broadcast_permitted, false); // (S12)
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S13) missing binding (no map / non-object map) refuses ----
+
+test('(S13) missing binding (no map / null / primitive map) refuses (endpoint_ref_unbound, bound:false)', () => {
+  for (const badMap of [undefined, null, 42, 'x', true]) {
+    const r = evaluateLiveRpcSpikeBoundary(validSpikeRequest(), badMap);
+    assert.equal(r.boundary_passed, false, `bad map must refuse: ${JSON.stringify(badMap)}`);
+    assert.equal(r.bound, false);
+    assert.ok(r.reasons.includes('endpoint_ref_unbound'));
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S14) missing endpoint_ref refuses ----
+
+test('(S14) missing endpoint_ref in the request refuses (not bound)', () => {
+  const noEp = { provider_ref: 'helius', environment: 'devnet', purpose: 'live_rpc_spike_boundary', no_broadcast: true };
+  const r = evaluateLiveRpcSpikeBoundary(noEp, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.bound, false);
+  // the reused provisioning validator flags a missing endpoint_ref; the boundary stays unbound.
+  assert.ok(r.reasons.includes('endpoint_ref_missing') || r.reasons.includes('endpoint_ref_unbound'), JSON.stringify([...r.reasons]));
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S15) empty binding map refuses ----
+
+test('(S15) empty {} binding map refuses (endpoint_ref_unbound)', () => {
+  const r = evaluateLiveRpcSpikeBoundary(validSpikeRequest(), {});
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.bound, false);
+  assert.ok(r.reasons.includes('endpoint_ref_unbound'));
+  // a populated map missing the requested ref is likewise unbound.
+  const absent = evaluateLiveRpcSpikeBoundary(validSpikeRequest(SPIKE_REF_1), spikeBindingMap(SPIKE_REF_2));
+  assert.equal(absent.boundary_passed, false);
+  assert.ok(absent.reasons.includes('endpoint_ref_unbound'));
+  assertSpikeFailClosed(r);
+  assertSpikeFailClosed(absent);
+});
+
+// ---- (S16) provider mismatch (entry.provider_ref='triton') refuses ----
+
+test('(S16) entry provider mismatch (entry.provider_ref=triton) refuses (bound:false)', () => {
+  const r = evaluateLiveRpcSpikeBoundary(
+    validSpikeRequest(SPIKE_REF_1),
+    { [SPIKE_REF_1]: { bound: true, provider_ref: 'triton', environment: 'devnet', endpoint_kind: 'reference_only' } },
+  );
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.bound, false);
+  // surfaced from the binding step under the 'endpoint_binding:' prefix.
+  assert.ok(r.reasons.includes('endpoint_binding:endpoint_ref_provider_mismatch') || r.reasons.includes('endpoint_ref_unbound'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes('triton'), false, 'mismatched entry provider value never echoed');
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S17) environment mismatch refuses ----
+
+test('(S17) entry environment mismatch refuses (bound:false)', () => {
+  const r = evaluateLiveRpcSpikeBoundary(
+    validSpikeRequest(SPIKE_REF_1, 'devnet'),
+    { [SPIKE_REF_1]: { bound: true, provider_ref: 'helius', environment: 'testnet', endpoint_kind: 'reference_only' } },
+  );
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.bound, false);
+  assert.ok(r.reasons.includes('endpoint_binding:endpoint_ref_environment_mismatch') || r.reasons.includes('endpoint_ref_unbound'), JSON.stringify([...r.reasons]));
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S18) URL literal endpoint_ref 'https://x/' -> blocked AND not echoed ----
+
+test('(S18) URL literal endpoint_ref (https://x/) -> blocked AND never echoed', () => {
+  const URL_LITERAL = 'https://x/';
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: URL_LITERAL, purpose: 'live_rpc_spike_boundary', no_broadcast: true };
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap(URL_LITERAL));
+  assert.equal(r.boundary_passed, false);
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes(URL_LITERAL), false, 'URL endpoint_ref never echoed');
+  assert.equal(JSON.stringify(r).includes('https://'), false);
+  assertSpikeFailClosed(r);
+  // the request-shape validator alone also refuses & never echoes.
+  const v = validateLiveRpcSpikeBoundaryRequest(req);
+  assert.equal(v.valid, false);
+  assert.ok(v.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(v).includes(URL_LITERAL), false);
+  assertSpikeRequestFlagsFalse(v);
+});
+
+// ---- (S19) raw endpoint field -> blocked & not echoed ----
+
+test('(S19) a raw endpoint field name in the request -> unknown_field/endpoint blocked & never echoed', () => {
+  const MARK = 'RAW-ENDPOINT-VALUE-S19';
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, endpoint: MARK };
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  // a surprise 'endpoint' field is both an unknown field AND carries the endpoint indicator.
+  assert.ok(r.reasons.includes('unknown_field_rejected') || r.reasons.includes('endpoint_or_rpc_indicator_blocked'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'raw endpoint value never echoed');
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S20) provider_url / rpc_endpoint field -> blocked & not echoed ----
+
+test('(S20) provider_url / rpc_endpoint field in the request -> blocked & never echoed', () => {
+  for (const [field, MARK] of [['provider_url', 'PROVIDER-URL-VAL-S20'], ['rpc_endpoint', 'RPC-ENDPOINT-VAL-S20']]) {
+    const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, [field]: MARK };
+    const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+    assert.equal(r.boundary_passed, false, `${field} must refuse`);
+    assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked') || r.reasons.includes('unknown_field_rejected'), `${field}: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(JSON.stringify(r).includes(MARK), false, `${field} value never echoed`);
+    assert.equal(field in r, false);
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S21) api_key field -> blocked & not echoed ----
+
+test('(S21) an api_key field in the request -> blocked & never echoed', () => {
+  const MARK = 'MY-api_key-VALUE-S21';
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, api_key: MARK };
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked') || r.reasons.includes('unknown_field_rejected'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'api_key value never echoed');
+  assert.equal(JSON.stringify(r).includes('api_key'), false);
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S22) secret / token field -> blocked & not echoed ----
+
+test('(S22) a secret / token field in the request -> blocked & never echoed', () => {
+  for (const [field, MARK] of [['secret', 'MY-secret-VALUE-S22'], ['token', 'MY-token-VALUE-S22'], ['credential', 'A-credential-VALUE-S22']]) {
+    const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, [field]: MARK };
+    const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+    assert.equal(r.boundary_passed, false, `${field} must refuse`);
+    // a secret-NAMED field is key-material; secret/token/credential are also endpoint-secret indicators / unknown.
+    assert.ok(
+      r.reasons.includes('key_material_not_accepted')
+      || r.reasons.includes('endpoint_secret_indicator_blocked')
+      || r.reasons.includes('unknown_field_rejected'),
+      `${field}: ${JSON.stringify([...r.reasons])}`,
+    );
+    assert.equal(JSON.stringify(r).includes(MARK), false, `${field} value never echoed`);
+    assert.equal(field in r, false);
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S23) key-material endpoint_ref (PEM/base58/mnemonic) -> blocked & not echoed ----
+
+test('(S23) key-material-shaped endpoint_ref (PEM / long base58 / mnemonic) -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES-S23\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: km, purpose: 'live_rpc_spike_boundary', no_broadcast: true };
+    const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap(km));
+    assert.equal(r.boundary_passed, false, `key material refused: ${km.slice(0, 16)}`);
+    assert.ok(r.reasons.includes('key_material_not_accepted'), JSON.stringify([...r.reasons]));
+    assert.equal(JSON.stringify(r).includes(km), false, 'key material never echoed');
+    assert.equal(JSON.stringify(r).includes('LEAKBYTES-S23'), false);
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S24) key-material binding value -> blocked & not echoed ----
+
+test('(S24) key-material-shaped binding entry VALUE -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES-S24\n-----END PRIVATE KEY-----';
+  const r = evaluateLiveRpcSpikeBoundary(
+    validSpikeRequest(SPIKE_REF_1),
+    { [SPIKE_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', extra: pem } },
+  );
+  assert.equal(r.boundary_passed, false);
+  assert.equal(r.bound, false);
+  assert.ok(r.reasons.includes('endpoint_binding:key_material_not_accepted') || r.reasons.includes('key_material_not_accepted'), JSON.stringify([...r.reasons]));
+  assert.equal(JSON.stringify(r).includes(pem), false, 'key-material binding value never echoed');
+  assert.equal(JSON.stringify(r).includes('LEAKBYTES-S24'), false);
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S25) environment 'mainnet' / 'prod' -> blocked ----
+
+test('(S25) environment mainnet / mainnet-beta / prod -> blocked (not a testnet enum)', () => {
+  for (const env of ['mainnet', 'mainnet-beta', 'prod']) {
+    const req = { provider_ref: 'helius', environment: env, endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true };
+    const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap(SPIKE_REF_1, 'helius', env));
+    assert.equal(r.boundary_passed, false, `mainnet/prod env must refuse: ${env}`);
+    assert.ok(r.reasons.includes('mainnet_or_nontestnet_environment_blocked'), `${env}: ${JSON.stringify([...r.reasons])}`);
+    // a refused result must NOT echo environment.
+    assert.equal(r.environment, undefined);
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S26) missing no_broadcast:true -> no_broadcast_required ----
+
+test('(S26) missing/false no_broadcast -> no_broadcast_required', () => {
+  for (const variant of [
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary' },
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: false },
+  ]) {
+    const v = validateLiveRpcSpikeBoundaryRequest(variant);
+    assert.equal(v.valid, false);
+    assert.ok(v.reasons.includes('no_broadcast_required'), JSON.stringify([...v.reasons]));
+    assertSpikeRequestFlagsFalse(v);
+    const r = evaluateLiveRpcSpikeBoundary(variant, spikeBindingMap());
+    assert.equal(r.boundary_passed, false);
+    assert.ok(r.reasons.includes('no_broadcast_required'));
+    assertSpikeFailClosed(r);
+  }
+});
+
+// ---- (S27) broadcast:true -> blocked ----
+
+test('(S27) broadcast:true in the request -> broadcast_or_send_indicator_blocked', () => {
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, broadcast: true };
+  const v = validateLiveRpcSpikeBoundaryRequest(req);
+  assert.equal(v.valid, false);
+  assert.ok(v.reasons.includes('broadcast_or_send_indicator_blocked'), JSON.stringify([...v.reasons]));
+  assertSpikeRequestFlagsFalse(v);
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  assert.ok(r.reasons.includes('broadcast_or_send_indicator_blocked'));
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S28) send:true -> blocked ----
+
+test('(S28) send:true in the request -> broadcast_or_send_indicator_blocked', () => {
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, send: true };
+  const v = validateLiveRpcSpikeBoundaryRequest(req);
+  assert.equal(v.valid, false);
+  assert.ok(v.reasons.includes('broadcast_or_send_indicator_blocked'), JSON.stringify([...v.reasons]));
+  assertSpikeRequestFlagsFalse(v);
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  assert.ok(r.reasons.includes('broadcast_or_send_indicator_blocked'));
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S29) serialize:true -> blocked ----
+
+test('(S29) serialize:true in the request -> broadcast_or_send_indicator_blocked', () => {
+  const req = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, serialize: true };
+  const v = validateLiveRpcSpikeBoundaryRequest(req);
+  assert.equal(v.valid, false);
+  assert.ok(v.reasons.includes('broadcast_or_send_indicator_blocked'), JSON.stringify([...v.reasons]));
+  assertSpikeRequestFlagsFalse(v);
+  const r = evaluateLiveRpcSpikeBoundary(req, spikeBindingMap());
+  assert.equal(r.boundary_passed, false);
+  assert.ok(r.reasons.includes('broadcast_or_send_indicator_blocked'));
+  assertSpikeFailClosed(r);
+});
+
+// ---- (S30) faked ready:true/has_rpc:true/can_send:true in request or entry -> result flags STILL false ----
+
+test('(S30) faked ready/has_rpc/can_send in request OR entry -> ignored/refused; result flags STILL false', () => {
+  // (a) smuggled into the REQUEST as unknown flag fields -> refused as unknown fields; result flags stay false.
+  const fakedReq = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, ready: true, has_rpc: true, can_send: true };
+  const rReq = evaluateLiveRpcSpikeBoundary(fakedReq, spikeBindingMap());
+  assert.equal(rReq.ready, false);
+  assert.equal(rReq.has_rpc, false);
+  assert.equal(rReq.can_send, false);
+  assert.equal(rReq.boundary_passed, false, 'smuggled flag fields are refused');
+  assertSpikeFailClosed(rReq);
+  // (b) smuggled into the binding ENTRY -> ignored / screened; result flags stay FIXED false.
+  const rEntry = evaluateLiveRpcSpikeBoundary(
+    validSpikeRequest(SPIKE_REF_1),
+    { [SPIKE_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', ready: true, has_rpc: true, can_send: true } },
+  );
+  assert.equal(rEntry.ready, false);
+  assert.equal(rEntry.has_rpc, false);
+  assert.equal(rEntry.can_send, false);
+  assertSpikeFailClosed(rEntry);
+});
+
+// ---- (S31) faked is_live:true/network_call_made:true -> ignored/refused, flags false ----
+
+test('(S31) faked is_live/network_call_made in request OR entry -> ignored/refused; flags STILL false', () => {
+  const fakedReq = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, is_live: true, network_call_made: true, live_rpc_call_made: true };
+  const rReq = evaluateLiveRpcSpikeBoundary(fakedReq, spikeBindingMap());
+  assert.equal(rReq.is_live, false);
+  assert.equal(rReq.network_call_made, false);
+  assert.equal(rReq.live_rpc_call_made, false);
+  assert.equal(rReq.boundary_passed, false);
+  assertSpikeFailClosed(rReq);
+  const rEntry = evaluateLiveRpcSpikeBoundary(
+    validSpikeRequest(SPIKE_REF_1),
+    { [SPIKE_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', is_live: true, network_call_made: true } },
+  );
+  assert.equal(rEntry.is_live, false);
+  assert.equal(rEntry.network_call_made, false);
+  assert.equal(rEntry.live_rpc_call_made, false);
+  assertSpikeFailClosed(rEntry);
+});
+
+// ---- (S32) hostile throwing request (getter / Proxy) -> frozen input_inspection_error refusal, no throw ----
+
+test('(S32) hostile/throwing request (getter / Proxy) -> frozen input_inspection_error refusal, never throws', () => {
+  const SECRET = 'boom-secret-trap-S32';
+  const throwingGetter = { get provider_ref() { throw new Error(SECRET); } };
+  const throwingPurpose = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, get purpose() { throw new Error(SECRET); }, no_broadcast: true };
+  const throwAll = new Proxy({}, { get() { throw new Error(SECRET); } });
+  for (const hostile of [throwingGetter, throwingPurpose, throwAll]) {
+    let v;
+    assert.doesNotThrow(() => { v = validateLiveRpcSpikeBoundaryRequest(hostile); }, 'validate must not propagate');
+    assert.equal(v.valid, false);
+    assert.equal(v.status, 'invalid');
+    assert.ok(v.reasons.includes('input_inspection_error') || v.reasons.length > 0, JSON.stringify([...v.reasons]));
+    assertSpikeRequestFlagsFalse(v);
+    assert.equal(JSON.stringify(v).includes(SECRET), false, 'secret never echoed (validate)');
+
+    let r;
+    assert.doesNotThrow(() => { r = evaluateLiveRpcSpikeBoundary(hostile, spikeBindingMap()); }, 'eval must not propagate');
+    assert.equal(r.boundary_passed, false);
+    assert.equal(r.valid, false);
+    assertSpikeFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret never echoed (eval)');
+  }
+  // primitive / weird inputs never throw either.
+  for (const input of [undefined, null, 42, 'x', true, []]) {
+    assert.doesNotThrow(() => validateLiveRpcSpikeBoundaryRequest(input));
+    assert.doesNotThrow(() => evaluateLiveRpcSpikeBoundary(input, spikeBindingMap()));
+  }
+});
+
+// ---- (S33) hostile throwing binding map (getter / Proxy) -> frozen refusal, no throw, no echo ----
+
+test('(S33) hostile/throwing binding map (getter / Proxy) -> frozen refusal, never throws, secret not echoed', () => {
+  const SECRET = 'boom-map-trap-S33';
+  const req = validSpikeRequest(SPIKE_REF_1);
+  const throwAllMap = new Proxy({}, { get() { throw new Error(SECRET); } });
+  const throwingSlotMap = { get [SPIKE_REF_1]() { throw new Error(SECRET); } };
+  const throwingEntryMap = { [SPIKE_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', get endpoint_kind() { throw new Error(SECRET); } } };
+  for (const hostileMap of [throwAllMap, throwingSlotMap, throwingEntryMap]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateLiveRpcSpikeBoundary(req, hostileMap); }, 'eval must not propagate map exception');
+    assert.equal(r.boundary_passed, false);
+    assert.equal(r.valid, false);
+    assertSpikeFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret/error message never echoed (hostile map)');
+  }
+});
+
+// ---- (S34) no SDK import (self-scan src specifiers) ----
+
+test('(S34) src declares NO SDK/provider/network import specifier (spike boundary adds none)', () => {
+  const reFrom = /\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g;
+  const reBare = /\bimport\s*['"]([^'"]+)['"]/g;
+  const reCall = /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const FORBIDDEN_SPEC = /(@solana|@solana-program|solana|web3\.js|jupiter|@jup-ag|jito|helius|@noble|@coral-xyz|anchor|bs58|tweetnacl|ed25519|node:net|node:http|node:https|node:tls|node:dgram|undici|ws|axios|pg|redis|node:crypto|node:fs|node:process)/i;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    const specs = [];
+    for (const re of [reFrom, reBare, reCall]) {
+      for (const m of text.matchAll(re)) specs.push(m[1]);
+    }
+    for (const s of specs) {
+      assert.equal(s.startsWith('.'), true, `${fn} must only import LOCAL relative paths: ${s}`);
+      assert.equal(FORBIDDEN_SPEC.test(s), false, `${fn} must not import an SDK/provider/network/fs module: ${s}`);
+    }
+  }
+});
+
+// ---- (S35) no dependency (package.json) ----
+
+test('(S35) package.json still declares NO dependencies/devDependencies (spike boundary is dependency-free)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false);
+  assert.equal('devDependencies' in pkg, false);
+  assert.equal('peerDependencies' in pkg, false);
+  assert.equal('optionalDependencies' in pkg, false);
+});
+
+// ---- (S36) no network/provider call (src import-free) ----
+
+test('(S36) src (incl. spike boundary) is import-free and carries NO network/provider mechanism', () => {
+  const NETWORK_MECH = /(\b(fetch|XMLHttpRequest)\s*\(|new\s+WebSocket|WebSocket\s*\(|new\s+Connection\s*\(|XMLHttpRequest|EventSource|node:net|node:http)/;
+  for (const fn of srcMjsFiles()) {
+    const code = stripCommentsAndStrings(readFileSync(join(SRC, fn), 'utf8'));
+    assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, `no imports allowed in ${fn}`);
+    assert.equal(NETWORK_MECH.test(code), false, `no network/provider mechanism in ${fn}`);
+    assert.equal(FORBIDDEN_CODE.test(code), false, `no forbidden live mechanism in ${fn}`);
+  }
+});
+
+// ---- (S37) no env/secret read (grep src for process.env / readFileSync / node:fs / node:process -> none) ----
+
+test('(S37) src (incl. spike boundary) reads NO env and NO secret file', () => {
+  const ENV_SECRET_READ = /(process\.env|readFileSync|readFile\s*\(|node:fs|node:process|require\s*\(\s*['"]fs['"])/;
+  for (const fn of srcMjsFiles()) {
+    const raw = readFileSync(join(SRC, fn), 'utf8');
+    assert.equal(ENV_SECRET_READ.test(raw), false, `${fn} must not read env / secret files`);
+  }
+});
+
+// ---- (S38) no send/broadcast/serialize methods on createFailClosedRpcProvider (unchanged by spike boundary) ----
+
+test('(S38) createFailClosedRpcProvider still exposes NO send/broadcast/serialize/rpc method (spike adds none)', () => {
+  const p = createFailClosedRpcProvider();
+  for (const m of ['send', 'broadcast', 'serialize', 'sendTransaction', 'sendRawTransaction', 'submit', 'sign', 'connect', 'rpc', 'request', 'call', 'query', 'spike', 'liveRpc', 'resolve', 'lookup', 'register']) {
+    assert.equal(typeof p[m], 'undefined', `provider must NOT expose ${m}`);
+  }
+  // the spike functions are pure/contract-only — none returns a configured/live/sendable/broadcasting surface.
+  assert.equal(describeLiveRpcSpikeBoundaryContract().is_live, false);
+  assert.equal(describeLiveRpcSpikeBoundaryContract().can_broadcast, false);
+  assert.equal(describeLiveRpcSpikeBoundaryContract().can_serialize, false);
+  assert.equal(evaluateLiveRpcSpikeBoundary(validSpikeRequest(), spikeBindingMap()).can_send, false);
+});
+
+// ---- (S39) no literal endpoint URL / API key in src ----
+
+test('(S39) src contains NO literal endpoint URL or API-key literal (full-text scan, spike boundary adds none)', () => {
+  const URL_LITERAL = /(https?:\/\/[^\s'")]+|wss?:\/\/[^\s'")]+)/;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    assert.equal(URL_LITERAL.test(text), false, `${fn} must not contain a literal endpoint URL`);
+    assert.equal(/api_?key\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign an api key literal`);
+    assert.equal(/secret\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign a secret literal`);
+  }
+});
+
+// ---- (S40) can_send:false (and the descriptor) across the spike matrix ----
+
+test('(S40) can_send/is_live/broadcast flags stay false across the whole spike matrix; descriptor fail-closed', () => {
+  const matrix = [
+    evaluateLiveRpcSpikeBoundary(validSpikeRequest(), spikeBindingMap()),                                    // valid (passes)
+    evaluateLiveRpcSpikeBoundary(validSpikeRequest(), {}),                                                    // unbound
+    evaluateLiveRpcSpikeBoundary(validSpikeRequest(SPIKE_REF_1, 'devnet'), spikeBindingMap(SPIKE_REF_1, 'helius', 'testnet')), // env mismatch
+    evaluateLiveRpcSpikeBoundary({ provider_ref: 'helius', environment: 'mainnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true }, spikeBindingMap(SPIKE_REF_1, 'helius', 'mainnet')), // mainnet
+    evaluateLiveRpcSpikeBoundary({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'live_rpc_spike_boundary', no_broadcast: true, broadcast: true }, spikeBindingMap()), // broadcast smuggled
+    validateLiveRpcSpikeBoundaryRequest(validSpikeRequest()),                                                 // request-shape only
+    validateLiveRpcSpikeBoundaryRequest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: SPIKE_REF_1, purpose: 'wrong', no_broadcast: true }), // bad purpose
+  ];
+  for (const r of matrix) {
+    assert.equal(r.can_send, false, `can_send must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.can_broadcast, false, `can_broadcast must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.can_serialize, false, `can_serialize must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.is_live, false, `is_live must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.live_rpc_call_made, false);
+    assert.equal(r.network_call_made, false);
+    assert.equal(r.broadcast_permitted, false);
+    assert.equal(r.configured, false);
+    assert.equal(r.has_rpc, false);
+    assert.equal(r.ready, false);
+    assert.equal(Object.isFrozen(r), true);
+  }
+  // a bad purpose yields purpose_invalid.
+  assert.ok(matrix[6].reasons.includes('purpose_invalid'), JSON.stringify([...matrix[6].reasons]));
+  // the descriptor is fail-closed and test-only.
+  const d = describeLiveRpcSpikeBoundaryContract();
+  assert.equal(d.contract, 'live-rpc-spike-boundary');
+  assert.equal(d.version, '0.0.0');
+  assert.equal(d.test_only, true);
+  assert.equal(d.purpose, 'live_rpc_spike_boundary');
+  assert.equal(d.provider_ref, 'helius');
+  assert.deepEqual([...d.supported_environments], ['devnet', 'testnet', 'localnet']);
+  assert.equal(d.requires_no_broadcast, true);
+  assert.equal(d.requires_bound_endpoint_ref, true);
+  assert.equal(d.configured, false);
+  assert.equal(d.has_rpc, false);
+  assert.equal(d.ready, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.can_broadcast, false);
+  assert.equal(d.can_serialize, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.live_rpc_call_made, false);
+  assert.equal(d.network_call_made, false);
+  assert.equal(d.broadcast_permitted, false);
   assert.equal(d.status, 'unconfigured_no_rpc');
   assert.equal(Object.isFrozen(d), true);
   assert.equal(typeof d.note, 'string');

@@ -902,3 +902,266 @@ export function bindEndpointReferenceForTest(input, bindingMap) {
     });
   }
 }
+
+// ===========================================================================================================
+// PR-E2-F-13 — LIVE RPC SPIKE BOUNDARY (CONTRACT-ONLY, TEST-ONLY, NO-BROADCAST, NO-LIVE)
+// ===========================================================================================================
+// SOURCE: docs/00-ARCHITECTURE.md §15.12 (Wave 4 execution/providers boundary) + docs/09-THREAT-SECURITY +
+// docs/01-SSOT Group 40 (candidate provider vocabulary — provider_key_ref by reference only, no raw key).
+//
+// CONTRACT-ONLY "Live RPC Spike Boundary": it DESCRIBES/VALIDATES the conditions of a FUTURE testnet RPC spike
+// REQUEST and executes NO live RPC. It is NOT live in any way: NO live RPC call, NO endpoint resolution, NO env/
+// secret read, NO fetch/WebSocket/Connection, NO SDK/dependency, NO send/broadcast/serialize. A spike boundary
+// never sends, never broadcasts, never serializes — and it must be a NO-BROADCAST request bound to a TEST-ONLY
+// in-memory endpoint reference. Everything is fail-closed: every result field is a FIXED LITERAL (all false /
+// not-ready / not-live), input / endpoint_ref / secret / binding VALUES are NEVER echoed, and provider_ref is
+// only ever the recognized literal 'helius' while environment is only a recognized testnet enum value.
+//
+// This layer is ADDITIVE — it does NOT alter the contract/registry/provisioning/binding layers above. It REUSES
+// the hardened bindEndpointReferenceForTest + validateHeliusEndpointProvisioning + looksLikeKeyMaterial + the
+// existing indicator token lists (ENDPOINT_RPC_TOKENS / SECRET_INDICATOR_TOKENS / MAINNET_TOKENS) + the enabled/
+// disabled provider-ref lists — none of which is weakened. A real testnet RPC spike (a live call) is a separate,
+// explicitly-approved PR and is NOT started here.
+
+// Request-level broadcast/send/serialize indicators that must NOT be present: a spike boundary never sends,
+// broadcasts, or serializes. STRING LITERAL VALUES (lexer-blanked match tokens) — never executed, only
+// substring-matched. Conservative by design (over-refusal is fail-safe-not-fail-open).
+const BROADCAST_SEND_BOUNDARY_TOKENS = Object.freeze(['broadcast', 'send', 'serialize']);
+
+// The only request fields permitted on a spike-boundary REQUEST — anything else is an unknown field and is
+// rejected (no surprise fields, incl. smuggled has_rpc/ready/can_send/is_live/configured/broadcast flags). All
+// permitted fields are opaque references / fixed enums; none is a key, a secret, or a live endpoint.
+const SPIKE_REQUEST_KNOWN_FIELDS = Object.freeze([
+  'provider_ref', 'environment', 'endpoint_ref', 'purpose', 'no_broadcast',
+]);
+
+// Describe the Live RPC Spike Boundary contract: test-only, no-broadcast, reference-only, fail-closed; describes
+// a FUTURE testnet spike request; performs NO live RPC / endpoint resolution / network / send; reads no env/
+// secret. Read-only; describes intent, performs nothing.
+export function describeLiveRpcSpikeBoundaryContract() {
+  return Object.freeze({
+    contract: 'live-rpc-spike-boundary',
+    version: '0.0.0',
+    test_only: true,
+    purpose: 'live_rpc_spike_boundary',
+    provider_ref: 'helius',
+    supported_environments: Object.freeze(['devnet', 'testnet', 'localnet']),
+    requires_no_broadcast: true,
+    requires_bound_endpoint_ref: true,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    live_rpc_call_made: false,
+    network_call_made: false,
+    broadcast_permitted: false,
+    status: UNCONFIGURED,
+    note: 'Test-only boundary; describes a future testnet spike request; performs NO live RPC / endpoint '
+      + 'resolution / network / send; reads no env/secret.',
+  });
+}
+
+// Validate the spike-boundary REQUEST SHAPE only (NOT the binding). Reuses validateHeliusEndpointProvisioning for
+// provider/environment/endpoint_ref/secret/key-material/mainnet shape (reasons propagated), then requires
+// purpose === 'live_rpc_spike_boundary', no_broadcast === true, refuses any broadcast/send/serialize indicator,
+// and rejects unknown fields beyond the known set. The result is built from FIXED LITERALS + frozen reason tokens
+// — input / endpoint_ref / secret VALUES are NEVER echoed. Never throws — a hostile/throwing accessor RETURNS a
+// frozen refusal.
+export function validateLiveRpcSpikeBoundaryRequest(input) {
+  try {
+    const reasons = [];
+
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+
+    // 1) Reuse the hardened provisioning validator (NOT weakened) for provider/environment/endpoint_ref shape ONLY.
+    //    Pass ONLY the 3 provisioning fields — the spike's own fields (purpose / no_broadcast) must NOT reach the
+    //    provisioning validator, else `purpose`/`no_broadcast` trip unknown_field_rejected and its substring scans
+    //    falsely refuse a legitimate request (the 'rpc' inside the required purpose value 'live_rpc_spike_boundary',
+    //    and the 'broadcast' inside the required 'no_broadcast' key).
+    const prov = validateHeliusEndpointProvisioning(obj
+      ? { provider_ref: obj.provider_ref, environment: obj.environment, endpoint_ref: obj.endpoint_ref }
+      : input);
+    if (!prov.valid) for (const r of prov.reasons) reasons.push(r);
+
+    // 2) purpose must be exactly the spike-boundary purpose.
+    const purpose = obj ? obj.purpose : undefined;
+    if (purpose !== 'live_rpc_spike_boundary') reasons.push('purpose_invalid');
+
+    // 3) no_broadcast must be explicitly true — a spike boundary never broadcasts/sends.
+    const noBroadcast = obj ? obj.no_broadcast : undefined;
+    if (noBroadcast !== true) reasons.push('no_broadcast_required');
+
+    // 4) any broadcast/send/serialize indicator is refused (e.g. broadcast:true, send:true, serialize:true, or a
+    //    'broadcast'/'send'/'serialize'-shaped KEY, or such a token in a string VALUE). The legitimate
+    //    'no_broadcast' key and the fixed 'live_rpc_spike_boundary' purpose literal are EXCLUDED from this scan.
+    if (obj) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'no_broadcast') continue;
+        const lk = String(k).toLowerCase();
+        if (BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => lk.indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+        if (k === 'purpose') continue; // the required fixed purpose literal is not a broadcast/send/serialize value
+        if (typeof v === 'string' && BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => v.toLowerCase().indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+      }
+    }
+
+    // 5) unknown / surprise field — only the spike known fields (provider_ref/environment/endpoint_ref/purpose/
+    //    no_broadcast) are permitted; any field beyond the known set is rejected here.
+    if (obj && Object.keys(obj).some((k) => !SPIKE_REQUEST_KNOWN_FIELDS.includes(k))) {
+      if (!reasons.includes('unknown_field_rejected')) reasons.push('unknown_field_rejected');
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    let status;
+    if (valid) status = 'live_rpc_spike_boundary_no_live';
+    else if (prov.status === UNCONFIGURED
+      && !uniqueReasons.includes('broadcast_or_send_indicator_blocked')
+      && !uniqueReasons.includes('unknown_field_rejected')) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid` means the REQUEST SHAPE is acceptable as opaque references / fixed enums — it does NOT bind, send,
+      // broadcast, serialize, or activate anything; every flag below is a FIXED LITERAL (all false), NOT live.
+      valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      live_rpc_call_made: false,
+      network_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      live_rpc_call_made: false,
+      network_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
+
+// The Live RPC Spike Boundary CORE: prove the conditions of a FUTURE testnet RPC spike REQUEST are well-formed AND
+// bound to a TEST-ONLY in-memory endpoint reference, while staying fully fail-closed and NEVER live. It does NOT
+// resolve an endpoint, make a live RPC call, contact a provider, read env/secret, or send/broadcast/serialize.
+// Logic: (1) validate the request shape; if invalid, propagate reasons. (2) reuse bindEndpointReferenceForTest
+// against the TEST-ONLY in-memory binding map; if not bound, push 'endpoint_ref_unbound' and surface the binding
+// reasons under an 'endpoint_binding:' prefix. (3) boundary_passed iff no reasons. The result flags are FIXED
+// LITERALS (all false); provider_ref is only ever the literal 'helius' and environment only a recognized testnet
+// enum value, echoed ONLY when valid. Input / endpoint_ref / binding / secret VALUES are NEVER echoed. Never
+// throws — a hostile/throwing accessor RETURNS a frozen invalid refusal.
+export function evaluateLiveRpcSpikeBoundary(input, bindingMap) {
+  try {
+    const reasons = [];
+
+    // 1) Validate the REQUEST SHAPE (reuses validateHeliusEndpointProvisioning + spike rules). Never throws.
+    const reqv = validateLiveRpcSpikeBoundaryRequest(input);
+    if (!reqv.valid) for (const r of reqv.reasons) reasons.push(r);
+
+    // 2) Bind the endpoint_ref against the TEST-ONLY in-memory binding map (reuses the hardened, fail-closed
+    //    bindEndpointReferenceForTest — NOT weakened; it screens entries and never echoes values).
+    const b = bindEndpointReferenceForTest(
+      {
+        provider_ref: (input != null && typeof input === 'object') ? input.provider_ref : undefined,
+        environment: (input != null && typeof input === 'object') ? input.environment : undefined,
+        endpoint_ref: (input != null && typeof input === 'object') ? input.endpoint_ref : undefined,
+      },
+      bindingMap,
+    );
+    if (b.bound !== true) {
+      if (!reasons.includes('endpoint_ref_unbound')) reasons.push('endpoint_ref_unbound');
+      // Surface the binding refusal reasons under a fixed prefix (FIXED tokens only — never echoes values).
+      for (const r of b.reasons) {
+        const prefixed = `endpoint_binding:${r}`;
+        if (!reasons.includes(prefixed)) reasons.push(prefixed);
+      }
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    // 3) The boundary passes iff there are zero reasons.
+    const boundaryPassed = uniqueReasons.length === 0;
+    const valid = boundaryPassed;
+
+    // 4) Status: passed -> the no-live boundary status; an unbound endpoint or an unconfigured request shape ->
+    //    unconfigured_no_rpc; everything else -> invalid.
+    let status;
+    if (boundaryPassed) status = 'live_rpc_spike_boundary_no_live';
+    else if (uniqueReasons.includes('endpoint_ref_unbound') || reqv.status === UNCONFIGURED) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid`/`boundary_passed` mean the FUTURE-spike REQUEST is well-formed and matched a TEST-ONLY in-memory
+      // reference entry — it does NOT resolve an endpoint, call RPC, send, broadcast, serialize, or go live; every
+      // flag below is a FIXED LITERAL (all false). provider_ref/environment are echoed ONLY when valid and are
+      // only ever the recognized literal 'helius' / a recognized testnet enum value (never a secret/endpoint).
+      valid,
+      boundary_passed: boundaryPassed,
+      status,
+      provider_ref: boundaryPassed ? 'helius' : undefined,
+      environment: boundaryPassed ? String(input.environment) : undefined,
+      bound: boundaryPassed === true,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      live_rpc_call_made: false,
+      network_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      boundary_passed: false,
+      status: 'invalid',
+      provider_ref: undefined,
+      environment: undefined,
+      bound: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      live_rpc_call_made: false,
+      network_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
