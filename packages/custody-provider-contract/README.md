@@ -15,6 +15,14 @@ There is **no real handle** — resolution is **always fail-closed** (`ok:false`
 `status:'unconfigured'`, `recommended_signer_profile_status:'DEGRADED'`). **No real provider, no KMS/Vault SDK,
 no network, no signing here.** A real KMS-backed adapter is a separate, explicitly-approved PR.
 
+## E2-KMS-4 — provider adapter skeleton (no SDK, fail-closed)
+`createProviderAdapterSkeleton(config)` is a **contract-shaped** provider adapter with **no SDK, no network, no
+live provider, no key material**. It is **never configured** (`isConfigured() === false`, `has_sdk:false`), so
+`resolveKeyHandle()` is **always fail-closed** (`handle:null`, `recommended_signer_profile_status:'DEGRADED'`,
+reasons `skeleton_no_sdk` / `config_invalid_key_material` / `key_material_not_accepted`). `config` is
+reference-only (`provider_ref`); key-material in `config` or `request` is refused and never echoed. There are
+**no `sign`/`exportKey` methods**. A real KMS-backed adapter is a separate, explicitly-approved PR.
+
 ## Why a standalone package (not inside the isolated signer runtime)
 A pure contract/stub has no live mechanism, so it lives **outside** the mechanism guard's allowlist and is
 **fully scanned** — proving it carries zero forbidden families. The allowlisted path

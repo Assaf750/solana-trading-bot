@@ -68,8 +68,35 @@ export interface CustodyProviderSelectionResult {
 export function describeCustodyProviderContract(): CustodyProviderContractDescriptor;
 export function createUnconfiguredCustodyProvider(): UnconfiguredCustodyProvider;
 export function selectCustodyProvider(selection?: unknown): CustodyProviderSelectionResult;
+export type ProviderAdapterConfigStatus = 'unconfigured' | 'reference_present_no_sdk' | 'invalid_key_material';
+
+export interface ProviderAdapterSkeletonDescriptor {
+  readonly contract: 'custody-provider';
+  readonly adapter: 'skeleton';
+  readonly is_skeleton: true;
+  readonly has_sdk: false;
+  readonly can_export_key: false;
+  readonly holds_raw_private_key: false;
+  readonly can_sign: false;
+  readonly is_live: false;
+  readonly status: CustodyProviderStatus;
+  readonly config_status: ProviderAdapterConfigStatus;
+  readonly note: string;
+}
+
+export interface ProviderAdapterSkeleton {
+  readonly is_skeleton: true;
+  readonly has_sdk: false;
+  readonly config_status: ProviderAdapterConfigStatus;
+  isConfigured(): false;
+  describe(): ProviderAdapterSkeletonDescriptor;
+  describeKeyHandle(): KeyHandleContractDescriptor;
+  resolveKeyHandle(request?: unknown): KeyHandleResolveResult;
+}
+
 export function refusesKeyMaterial(input?: unknown): boolean;
 export function describeKeyHandleContract(): KeyHandleContractDescriptor;
 export function resolveCustodyKeyHandle(selection?: unknown): KeyHandleResolveResult;
+export function createProviderAdapterSkeleton(config?: unknown): ProviderAdapterSkeleton;
 export const CUSTODY_PROVIDER_CONTRACT_STATUS: CustodyProviderStatus;
 export const CUSTODY_KEY_HANDLE_KIND: 'key-handle';

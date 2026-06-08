@@ -11,6 +11,7 @@ import {
   refusesKeyMaterial,
   describeKeyHandleContract,
   resolveCustodyKeyHandle,
+  createProviderAdapterSkeleton,
   CUSTODY_PROVIDER_CONTRACT_STATUS,
   CUSTODY_KEY_HANDLE_KIND,
 } from '../src/index.mjs';
@@ -179,4 +180,64 @@ test('E2-KMS-1 no handle ever exposes a key; result carries no key/private/raw f
   for (const k of ['key', 'privateKey', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'raw']) {
     assert.equal(k in r, false, `result must not carry ${k}`);
   }
+});
+
+// ================= E2-KMS-4: provider adapter SKELETON (no SDK, fail-closed) =================
+
+test('E2-KMS-4 skeleton descriptor: is_skeleton, no SDK, all execution caps false', () => {
+  const a = createProviderAdapterSkeleton({ provider_ref: 'ref-1' });
+  const d = a.describe();
+  assert.equal(d.adapter, 'skeleton');
+  assert.equal(d.is_skeleton, true);
+  assert.equal(d.has_sdk, false);
+  assert.equal(d.can_export_key, false);
+  assert.equal(d.holds_raw_private_key, false);
+  assert.equal(d.can_sign, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.status, 'unconfigured');
+  assert.equal(a.isConfigured(), false);
+  assert.equal(a.describeKeyHandle().kind, 'key-handle');
+});
+
+test('E2-KMS-4 skeleton has no signing/export methods', () => {
+  const a = createProviderAdapterSkeleton({ provider_ref: 'ref-1' });
+  for (const m of ['sign', 'send', 'serialize', 'exportKey', 'loadKey']) {
+    assert.equal(typeof a[m], 'undefined', `skeleton must not expose ${m}`);
+  }
+});
+
+test('E2-KMS-4 config_status reflects input (reference vs missing vs key-material)', () => {
+  assert.equal(createProviderAdapterSkeleton({ provider_ref: 'ref-1' }).config_status, 'reference_present_no_sdk');
+  assert.equal(createProviderAdapterSkeleton().config_status, 'unconfigured');
+  assert.equal(createProviderAdapterSkeleton({}).config_status, 'unconfigured');
+  assert.equal(createProviderAdapterSkeleton({ secret: 'x' }).config_status, 'invalid_key_material');
+});
+
+test('E2-KMS-4 resolveKeyHandle is ALWAYS fail-closed: no handle, DEGRADED, cannot sign/export', () => {
+  const a = createProviderAdapterSkeleton({ provider_ref: 'ref-1' });
+  const r = a.resolveKeyHandle({ request: 'sign-something' });
+  assert.equal(r.ok, false);
+  assert.equal(r.handle, null);
+  assert.equal(r.can_sign, false);
+  assert.equal(r.can_export_key, false);
+  assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+  assert.equal(r.reason, 'skeleton_no_sdk');
+  for (const k of ['key', 'privateKey', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'raw']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
+});
+
+test('E2-KMS-4 key-material in request or config is refused and never echoed', () => {
+  const a = createProviderAdapterSkeleton({ provider_ref: 'ref-1' });
+  const r = a.resolveKeyHandle({ secret: 'super-secret' });
+  assert.equal(r.reason, 'key_material_not_accepted');
+  assert.equal(r.handle, null);
+  assert.equal(JSON.stringify(r).includes('super-secret'), false);
+  // key material in config -> config invalid, resolution refuses
+  const bad = createProviderAdapterSkeleton({ private_key: 'leaked' });
+  assert.equal(bad.config_status, 'invalid_key_material');
+  const r2 = bad.resolveKeyHandle({ request: 'x' });
+  assert.equal(r2.reason, 'config_invalid_key_material');
+  assert.equal(r2.handle, null);
+  assert.equal(JSON.stringify(bad.describe()).includes('leaked'), false);
 });

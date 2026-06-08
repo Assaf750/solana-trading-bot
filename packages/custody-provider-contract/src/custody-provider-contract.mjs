@@ -156,6 +156,54 @@ export function selectCustodyProvider(selection) {
   });
 }
 
+// ---- E2-KMS-4: provider adapter SKELETON (no SDK, fail-closed) ----
+
+// A contract-shaped provider adapter SKELETON. It has NO SDK, NO network, NO live provider, and NO key
+// material. It is NEVER configured (a real KMS-backed adapter is a separate PR), so `isConfigured()` is always
+// false and `resolveKeyHandle()` is always fail-closed (no handle, DEGRADED). `config` is reference-only: it is
+// inspected only to refuse key material and to report a status; it is never used to contact anything.
+export function createProviderAdapterSkeleton(config) {
+  const configHasKeyMaterial = looksLikeKeyMaterial(config);
+  const hasRef = config != null && typeof config === 'object'
+    && typeof config.provider_ref === 'string' && config.provider_ref.length > 0;
+  // a reference may be present, but there is NO SDK -> still not configured; key material in config is invalid.
+  const config_status = configHasKeyMaterial ? 'invalid_key_material' : (hasRef ? 'reference_present_no_sdk' : 'unconfigured');
+
+  return Object.freeze({
+    is_skeleton: true,
+    has_sdk: false,
+    config_status,
+    isConfigured() { return false; }, // skeleton has no SDK; never configured
+
+    describe() {
+      return Object.freeze({
+        contract: 'custody-provider',
+        adapter: 'skeleton',
+        is_skeleton: true,
+        has_sdk: false,
+        can_export_key: false,
+        holds_raw_private_key: false,
+        can_sign: false,
+        is_live: false,
+        status: UNCONFIGURED,
+        config_status,
+        note: 'E2-KMS-4 provider adapter SKELETON: contract-shaped, fail-closed; NO SDK, NO network, NO live '
+          + 'provider, NO key material, NO signing, NO export. Real KMS-backed adapter is a separate PR.',
+      });
+    },
+
+    describeKeyHandle() { return describeKeyHandleContract(); },
+
+    // Always fail-closed: refuses key material, refuses invalid config, and (with no SDK) never resolves a
+    // real handle. Returns no handle + a DEGRADED recommendation.
+    resolveKeyHandle(request) {
+      if (looksLikeKeyMaterial(request)) return failClosedHandle('key_material_not_accepted');
+      if (configHasKeyMaterial) return failClosedHandle('config_invalid_key_material');
+      return failClosedHandle('skeleton_no_sdk');
+    },
+  });
+}
+
 // Explicit predicate the rest of the system can use to assert refusal behaviour in tests/diagnostics.
 export function refusesKeyMaterial(input) {
   return looksLikeKeyMaterial(input);
