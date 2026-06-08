@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/custody-provider-contract",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Custody Provider CONTRACT + STUB (Gate E / E2-A): interface/contract only describing a custody provider as an opaque, non-key-exporting, fail-closed component, plus a provider-selection stub that always resolves to an 'unconfigured' provider. NO live calls. No KMS/vault client; no KeyManager; no crypto/signing library; no key material; no transaction building/serialization; no signing/sending; no RPC/provider; no DB; no REAL-LIVE; no execution authority. This package is OUTSIDE the mechanism guard's allowlist and is fully scanned.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
