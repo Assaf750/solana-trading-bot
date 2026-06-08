@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Isolated Signer Runtime SKELETON (Gate E / E2-1): the declared isolated-signer path created as a safe, empty placeholder. No keys, no live mechanism, no signing authority. NOT activated in the mechanism guard's ALLOWLIST (which stays []), so this source is fully scanned and any live mechanism added here is rejected until a future, separately-approved PR activates the path. No KMS/vault; no KeyManager; no crypto/signing library; no transaction building/serialization; no signing/sending; no RPC/provider; no DB; no REAL-LIVE; no execution authority.",
+  "description": "Isolated Signer Runtime (Gate E): E2-1 skeleton (capabilities all-false) + E2-B custody lifecycle WIRING over the E2-A custody provider STUB. The path is activated in the mechanism guard's ALLOWLIST (B8), but key material stays HARD-forbidden even here. The provider stub is always 'unconfigured', so custody load/use are fail-closed (DEGRADED); least-privilege per signer_profile_id; idempotent zeroize; key-material refused. STILL no real provider integration; no KMS/vault; no KeyManager; no crypto/signing library; no transaction building/serialization; no signing/sending; no RPC/provider; no DB; no REAL-LIVE; no execution authority.",
   "exports": {
     ".": {
       "types": "./src/index.d.ts",
