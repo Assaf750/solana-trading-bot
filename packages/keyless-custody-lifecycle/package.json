@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/keyless-custody-lifecycle",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Keyless Custody Lifecycle Model (Gate E / E2-0): in-memory/mock custody state machine (load/use/zeroize) with fail-closed DEGRADED, least-privilege per signer_profile_id, and revoke/disable/shutdown/panic. NO KEYS, NO KMS/vault, NO KeyManager, NO crypto/signing library, NO tx build/serialize, NO signing/sending, NO RPC, NO DB, NO REAL-LIVE, NO mechanism-guard carve-out, NO execution authority. Key material is refused, never stored or returned.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

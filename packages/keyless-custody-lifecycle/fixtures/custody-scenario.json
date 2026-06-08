@@ -1,0 +1,13 @@
+{
+  "load_request": {
+    "signer_profile_id": "signer-profile-dev-1",
+    "signer_profile_status": "ACTIVE",
+    "key_custody_mode": "isolated_signer",
+    "custody_available": true,
+    "audit_actor": "operator-dev-1"
+  },
+  "signer_control_ctx": {
+    "permission_role": "signer_control",
+    "audit_actor": "operator-dev-1"
+  }
+}
