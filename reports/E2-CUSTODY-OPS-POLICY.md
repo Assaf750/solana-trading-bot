@@ -46,7 +46,7 @@ key in code/config".
 
 ---
 
-## 3. Dual-control / `signer_control` ops — status: `UNDECIDED`
+## 3. Dual-control / `signer_control` ops — status: `DECIDED` (ratified in `E2-RATIFICATION-B3-DUAL-CONTROL.md` — `signer_control` separate from admin; requester ≠ approver; two-person rule for sensitive actions; operator roster deferred to ops provisioning)
 - **Who approves custody changes:** holders of `permission_role = signer_control` (separate from `admin`).
 - **Two-person rule for critical actions:** custody register/disable/revoke, `activate_real_live`,
   `trigger_kill_switch`, allowlist activation — **require `signer_control` + a second approver** (proposed; to be ratified).
@@ -54,7 +54,7 @@ key in code/config".
   `trigger_kill_switch` and `revoke_signer_profile` require `signer_control`. Admin alone is insufficient for
   any signing-sensitive/custody action.
 
-**Decision owner:** _TBD._ **Decision:** _UNDECIDED (two-person rule proposed, not ratified)._
+**Decision owner:** governance + `signer_control`. **Decision:** _DECIDED — dual-control: `signer_control` (separate from admin) + independent approver; requester ≠ approver; two-person rule for sensitive actions; operator roster deferred to ops provisioning (`DR-E2-B3-001`)._
 
 ---
 
@@ -113,7 +113,7 @@ key in code/config".
 |---|---|---|
 | B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **KMS/HSM class, vendor-neutral**; specific instance deferred to deployment approval | **DECIDED** (class level) |
 | B2 | Deployment boundary defined (isolated process; no API/UI/hot-path key access; no dumps) (§2) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **isolated separate container/process**; tier deferred to deployment approval | **DECIDED** (boundary level) |
-| B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — policy proposed in `E2-DUAL-CONTROL-SIGNER-CONTROL-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
+| B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — ratified in `E2-RATIFICATION-B3-DUAL-CONTROL.md` (`DR-E2-B3-001`): `signer_control` separate from admin; requester ≠ approver; two-person rule; operator roster deferred to ops | **DECIDED** |
 | B4 | Key generation/import policy decided (§4) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B5 | Rotation/revocation policy + cadence decided (§5) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (triggers mapped; cadence **not** ratified) | **UNDECIDED** |
 | B6 | Emergency break-glass procedure defined (§6) — procedure proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
@@ -121,7 +121,7 @@ key in code/config".
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
-**Aggregate readiness:** **NOT READY** — 5 `UNDECIDED` (B3–B7) + 2 `DECIDED` (B1, B2) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
+**Aggregate readiness:** **NOT READY** — 4 `UNDECIDED` (B4–B7) + 3 `DECIDED` (B1–B3) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
 
 ---
 
