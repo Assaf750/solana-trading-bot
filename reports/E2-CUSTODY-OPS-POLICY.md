@@ -58,18 +58,18 @@ key in code/config".
 
 ---
 
-## 4. Key generation / import policy — status: `UNDECIDED`
+## 4. Key generation / import policy — status: `DECIDED` (ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` — generate-in-custody default; import exception-only + dual-control + non-persistence proof; no seed/mnemonic in app code; no plaintext key anywhere)
 - **Generate inside KMS/HSM preferred** (key never leaves custody in plaintext).
 - **Import only if documented and audited** (justified, approved, logged) — otherwise disallowed.
 - **No plaintext key in app memory** except inside the **isolated signer runtime during signing**, then zeroized.
 - **No key in repo / `.env` / DB / logs / cache / fixtures** (enforced today by the mechanism guard's
   key-material rules, including `allowlisted_but_key_material:*` even inside a future allowlisted path).
 
-**Decision owner:** _TBD._ **Decision:** _UNDECIDED._
+**Decision owner:** governance + `signer_control`. **Decision:** _DECIDED — generate-in-custody default; import exception-only (dual-control + non-persistence proof); no seed/mnemonic in app code; no plaintext key anywhere (`DR-E2-B4B5-001`)._
 
 ---
 
-## 5. Rotation / revocation policy — status: `UNDECIDED`
+## 5. Rotation / revocation policy — status: `DECIDED` (ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` — triggers per `rotation_trigger`; `revoke_signer_profile` terminal+zeroize; `disable_signer_profile` unusable until governed re-enable; KMS failure → `DEGRADED`; cadence/thresholds deferred to ops)
 - **Rotation triggers** (existing `rotation_trigger` values): `manual` · `time_based` · `trade_count_based` ·
   `risk_limit_based` · `compromise_suspected` · `wallet_retirement`. Cadence/thresholds: _TBD._
 - **Revoke behavior:** `revoke_signer_profile` ⇒ `signer_profile_status = REVOKED` + **simulated→real zeroize**
@@ -78,7 +78,7 @@ key in code/config".
 - **Mapping to existing names:** `revoke_signer_profile`, `disable_signer_profile`, `rotate_execution_wallet`,
   `wallet_rotation_status` (`NOT_REQUIRED`/`PENDING`/`IN_PROGRESS`/`COMPLETED`/`FAILED`) — no new names.
 
-**Decision owner:** _TBD._ **Decision:** _UNDECIDED (cadence/thresholds undecided)._
+**Decision owner:** governance + ops. **Decision:** _DECIDED — triggers per `rotation_trigger`; `revoke_signer_profile` terminal+zeroize; `disable_signer_profile` unusable until governed re-enable; KMS failure → `DEGRADED`; cadence/thresholds deferred to ops (`DR-E2-B4B5-001`)._
 
 ---
 
@@ -114,14 +114,14 @@ key in code/config".
 | B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **KMS/HSM class, vendor-neutral**; specific instance deferred to deployment approval | **DECIDED** (class level) |
 | B2 | Deployment boundary defined (isolated process; no API/UI/hot-path key access; no dumps) (§2) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **isolated separate container/process**; tier deferred to deployment approval | **DECIDED** (boundary level) |
 | B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — ratified in `E2-RATIFICATION-B3-DUAL-CONTROL.md` (`DR-E2-B3-001`): `signer_control` separate from admin; requester ≠ approver; two-person rule; operator roster deferred to ops | **DECIDED** |
-| B4 | Key generation/import policy decided (§4) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
-| B5 | Rotation/revocation policy + cadence decided (§5) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (triggers mapped; cadence **not** ratified) | **UNDECIDED** |
+| B4 | Key generation/import policy decided (§4) — ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` (`DR-E2-B4B5-001`): generate-in-custody default; import exception-only + dual-control + non-persistence proof; no seed/mnemonic; no plaintext key | **DECIDED** |
+| B5 | Rotation/revocation policy + cadence decided (§5) — ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` (`DR-E2-B4B5-001`): triggers per `rotation_trigger`; revoke terminal+zeroize; disable→governed re-enable; KMS failure → DEGRADED; cadence deferred to ops | **DECIDED** (cadence deferred) |
 | B6 | Emergency break-glass procedure defined (§6) — procedure proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B7 | Audit retention decided (§7) — policy proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (append-only/no-secrets affirmed; duration **not** ratified) | **UNDECIDED** |
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
-**Aggregate readiness:** **NOT READY** — 4 `UNDECIDED` (B4–B7) + 3 `DECIDED` (B1–B3) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
+**Aggregate readiness:** **NOT READY** — 2 `UNDECIDED` (B6, B7) + 5 `DECIDED` (B1–B5) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
 
 ---
 
