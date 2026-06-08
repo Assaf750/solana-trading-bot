@@ -107,6 +107,8 @@ key in code/config".
 ---
 
 ## 8. E2 readiness checklist (blockers → checklist items)
+> Ratification readiness assessed in `reports/E2-POLICY-RATIFICATION-READINESS.md` (no status flipped there; ratification is a separate governance decision).
+
 | # | Item | Status |
 |---|---|---|
 | B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — options compared in `E2-CUSTODY-VENDOR-DEPLOYMENT-OPTIONS.md` (preference recorded, vendor **not** ratified) | **UNDECIDED** |
