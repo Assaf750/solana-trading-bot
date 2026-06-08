@@ -14,6 +14,13 @@
 // WHY OUTSIDE THE ALLOWLIST: a pure contract/skeleton has no live mechanism, so it lives outside the mechanism
 // guard's allowlist and is FULLY SCANNED — proving it carries zero forbidden families. Real send/RPC/broadcast
 // is a separate, explicitly-approved PR and is NOT started here.
+//
+// MILESTONE 2 (E2-F-8): this gate now CONSUMES the sibling rpc-provider CONTRACT result in a FAIL-CLOSED way.
+// It reads the rpc-provider's readiness/config classification (never trusting a caller-supplied flag) and STILL
+// ALWAYS refuses — evaluateRpcReadiness is always not-ready and validateRpcProviderConfig never configures, so a
+// supplied provider always yields rpc_provider_not_ready and a missing provider yields rpc_provider_missing. The
+// foundational refusal (send_gate_unconfigured_no_rpc) remains ALWAYS present. NOT live integration.
+import { evaluateRpcReadiness, validateRpcProviderConfig } from '../../rpc-provider-contract/src/index.mjs';
 
 const UNCONFIGURED = 'unconfigured_no_rpc';
 
@@ -97,11 +104,14 @@ export function describeSendGateContract() {
     is_live: false,
     accepts_key_material_input: false,    // key-material-shaped input is refused
     requires_sign_only_success: true,     // send may never happen without prior sign-only success
+    consumes_rpc_provider: true,          // consumes the rpc-provider CONTRACT result fail-closed (still refuses)
     status: UNCONFIGURED,
     operations: Object.freeze(['describe', 'evaluateSendPreflight']),
     note: 'Send-gate CONTRACT + fail-closed SKELETON (E2-F-1). Always refuses: no RPC, no send, no broadcast, '
       + 'no transaction build/serialization, no network, no KMS, no KeyManager, no key material, no execution '
-      + 'authority. Real send/testnet broadcast is a separate, explicitly-approved PR.',
+      + 'authority. CONSUMES the rpc-provider CONTRACT result fail-closed (derives readiness/config from the '
+      + 'contract, never a caller flag) and STILL ALWAYS refuses. Real send/testnet broadcast is a separate, '
+      + 'explicitly-approved PR.',
   });
 }
 
@@ -133,6 +143,17 @@ export function evaluateSendPreflight(input) {
     if (!isTrue(input, 'preflight_ok')) blockers.push('preflight_not_ok');
     if (!(input != null && typeof input === 'object' && input.custody_status === 'ACTIVE')) {
       blockers.push('custody_not_active');
+    }
+
+    // MILESTONE 2 — consume the rpc-provider CONTRACT result, never trusting a caller flag. Readiness is DERIVED
+    // from the contract: evaluateRpcReadiness is always not-ready and validateRpcProviderConfig never configures,
+    // so a supplied provider always yields rpc_provider_not_ready; a missing provider yields rpc_provider_missing.
+    const provider = (input != null && typeof input === 'object') ? input.rpc_provider : undefined;
+    if (provider === undefined || provider === null) {
+      blockers.push('rpc_provider_missing');
+    } else {
+      if (validateRpcProviderConfig(provider).status === 'invalid_key_material') blockers.push('rpc_provider_key_material');
+      if (evaluateRpcReadiness(provider).ready !== true) blockers.push('rpc_provider_not_ready');
     }
   } catch {
     // Fail-safe-not-fail-open: a request whose inspection throws is still refused (never re-thrown, never an

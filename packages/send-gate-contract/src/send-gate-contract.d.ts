@@ -13,6 +13,7 @@ export interface SendGateContractDescriptor {
   readonly is_live: false;
   readonly accepts_key_material_input: false;
   readonly requires_sign_only_success: true;
+  readonly consumes_rpc_provider: true;
   readonly status: SendGateStatus;
   readonly operations: readonly string[];
   readonly note: string;

@@ -7,6 +7,16 @@ This package defines *what a send gate must be* and ships a *fail-closed gate th
 serialization, no signing/sending, no broadcast, no network call, no KMS/vault, no `KeyManager`, no key
 material, no DB. It performs no work, contacts nothing, and never produces a signature.
 
+## Milestone 2 — consumes the rpc-provider contract (fail-closed)
+This gate **consumes the sibling `@soltrade/rpc-provider-contract` CONTRACT result** in a fail-closed way. It
+imports `evaluateRpcReadiness` / `validateRpcProviderConfig` (relative, internal — no external/SDK import) and
+**derives** provider readiness/config from the contract — it never trusts a caller-supplied readiness flag. This
+is **NOT** live integration: `evaluateRpcReadiness` is always not-ready and `validateRpcProviderConfig` never
+configures, so a supplied `rpc_provider` always yields `rpc_provider_not_ready` and a missing one yields
+`rpc_provider_missing`. The foundational refusal (`send_gate_unconfigured_no_rpc`) remains **always present**, so
+every evaluation still resolves to refused. No live RPC, no SDK, no dependency, no send/broadcast, no
+serialization is introduced.
+
 ## Why a standalone package (outside the allowlist)
 A pure contract/skeleton has no live mechanism, so it lives **outside** the mechanism guard's allowlist
 (`packages/isolated-signer-runtime/src/`) and is **fully scanned** — proving it carries zero forbidden
@@ -25,7 +35,8 @@ A conforming send gate is a component that:
   path is integrated.
 
 ## API (contract/skeleton)
-- `describeSendGateContract()` → frozen capability descriptor (all send/broadcast/serialize/RPC/live caps `false`).
+- `describeSendGateContract()` → frozen capability descriptor (all send/broadcast/serialize/RPC/live caps `false`;
+  `consumes_rpc_provider: true` records that the gate consumes the rpc-provider contract result fail-closed).
 - `createFailClosedSendGate()` → opaque gate; `isConfigured()` is `false`; exposes only `describe()` and
   `evaluateSendPreflight()` — **no** `send`/`broadcast`/`serialize` method.
 - `evaluateSendPreflight(input)` → pure; **always** returns the refused result below.
@@ -55,6 +66,9 @@ there is no RPC and no send path at all).
 - `serialized_or_raw_tx_blocked` — serialized / raw / wire transaction indicator.
 - `sign_only_not_completed` — prior sign-only success is missing.
 - `readiness_not_ready` / `preflight_not_ok` / `custody_not_active` — gate preconditions unmet.
+- `rpc_provider_missing` — no `rpc_provider` supplied on the request (consumed from the rpc-provider contract).
+- `rpc_provider_not_ready` — the rpc-provider contract reports not-ready (always, since it never configures).
+- `rpc_provider_key_material` — the rpc-provider contract classified the provider config as key-material.
 - `input_inspection_error` — a hostile/throwing accessor in the request; inspection is caught and the request
   is still refused (never re-thrown, never echoed) — fail-safe-not-fail-open.
 - `send_gate_unconfigured_no_rpc` — **foundational**, always present: no RPC, no send path.

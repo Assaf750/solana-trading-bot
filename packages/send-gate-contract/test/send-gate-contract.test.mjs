@@ -15,6 +15,7 @@ import {
   runMechanismGuard,
   ALLOWLIST,
   isAllowlisted,
+  stripComments,
   stripCommentsAndStrings,
 } from '../../../tools/check-mechanism-guards.mjs';
 
@@ -62,6 +63,9 @@ test('contract descriptor pins all send capabilities to false (no execution auth
   assert.equal(c.is_live, false);
   assert.equal(c.accepts_key_material_input, false);
   assert.equal(c.requires_sign_only_success, true);
+  // MILESTONE 2: descriptor records that the gate consumes the rpc-provider contract result fail-closed.
+  assert.equal(c.consumes_rpc_provider, true);
+  assert.ok(/rpc-provider/.test(c.note), 'descriptor note mentions the rpc-provider consumption');
   assert.equal(c.status, 'unconfigured_no_rpc');
   assert.equal(Object.isFrozen(c), true);
 });
@@ -237,11 +241,71 @@ test('package src is NOT allowlisted (fully scanned by the mechanism guard)', ()
 
 // ---- no live imports / no forbidden mechanisms in src (self-scan) ----
 
-test('src contains NO imports (pure local module)', () => {
+// MILESTONE 2: the gate now CONSUMES the sibling rpc-provider contract, so src is no longer import-free. It is
+// allowed EXACTLY ONE relative internal import ('../../rpc-provider-contract/src/index.mjs') and NOTHING else:
+// no require(), and no external/forbidden import family (Solana/Jupiter/Helius/Jito/@noble/tweetnacl/bs58/axios/
+// node-fetch/undici/pg/redis/clickhouse/node:net|http|https). Every import specifier must be relative.
+test('src allows ONLY the one relative internal rpc-provider import (no external/forbidden import, no require)', () => {
+  // Forbidden import families (matched against the bare specifier). Mirrors the mechanism guard's import layer.
+  const FORBIDDEN_SPEC = [
+    /^@solana\//,
+    /(^|\/)jupiter/i,
+    /(^|\/)helius/i,
+    /(^|\/)jito/i,
+    /^@jup-ag\//,
+    /^@noble\//,
+    /^tweetnacl$/,
+    /^bs58$/,
+    /^ed25519/,
+    /^(axios|node-fetch|undici|got|superagent)$/,
+    /^(pg|postgres|@clickhouse\/|clickhouse|ioredis|redis)$/,
+    /^node:(net|http|https|dgram|tls)$/,
+  ];
+  const ALLOWED_INTERNAL = '../../rpc-provider-contract/src/index.mjs';
+
   for (const fn of readdirSync(SRC).filter((x) => x.endsWith('.mjs'))) {
-    const code = stripCommentsAndStrings(readFileSync(join(SRC, fn), 'utf8'));
-    assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, `no imports allowed in ${fn}`);
+    const raw = readFileSync(join(SRC, fn), 'utf8');
+    const noStrings = stripCommentsAndStrings(raw); // for mechanism checks (require)
+    const withStrings = stripComments(raw);         // for specifier extraction (keeps the specifier text)
+    // NO require() anywhere (CommonJS interop is forbidden in these pure ESM contracts).
+    assert.equal(/\brequire\s*\(/.test(noStrings), false, `no require() allowed in ${fn}`);
+    // Extract every `... from '<spec>'` import/export specifier from the comment-stripped (string-kept) code.
+    const specs = [];
+    for (const m of withStrings.matchAll(/\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+    for (const m of withStrings.matchAll(/\bimport\s*['"]([^'"]+)['"]/g)) specs.push(m[1]); // bare `import '<spec>'`
+    for (const spec of specs) {
+      // Every specifier MUST be relative (starts with ./ or ../) — never a bare/external module.
+      assert.ok(
+        spec.startsWith('./') || spec.startsWith('../'),
+        `import specifier must be relative in ${fn}: ${spec}`,
+      );
+      // And it must not match any forbidden import family.
+      for (const re of FORBIDDEN_SPEC) {
+        assert.equal(re.test(spec), false, `forbidden import family in ${fn}: ${spec}`);
+      }
+    }
+    // The only NON-trivially-local (cross-package) specifier permitted is the rpc-provider internal import.
+    const crossPkg = specs.filter((s) => s !== ALLOWED_INTERNAL && !s.startsWith('./'));
+    assert.deepEqual(crossPkg, [], `only ${ALLOWED_INTERNAL} cross-package import is allowed in ${fn}`);
   }
+});
+
+// The single permitted cross-package import is actually PRESENT in the gate source (consumption is real).
+// NOTE: specifiers must be read from the comment-stripped-but-string-PRESERVING view (`stripComments`), because
+// `stripCommentsAndStrings` blanks string contents and would erase the specifier text.
+test('src DOES import the rpc-provider contract (consumption is wired)', () => {
+  const gateSrc = readFileSync(join(SRC, 'send-gate-contract.mjs'), 'utf8');
+  const code = stripComments(gateSrc); // keeps string literals (specifiers) intact, removes comments
+  const specs = [];
+  for (const m of code.matchAll(/\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g)) specs.push(m[1]);
+  assert.ok(
+    specs.includes('../../rpc-provider-contract/src/index.mjs'),
+    'send-gate-contract.mjs must import the rpc-provider contract (relative internal specifier)',
+  );
+  // references the two consumption functions (and nothing live).
+  const noStrings = stripCommentsAndStrings(gateSrc);
+  assert.ok(/\bevaluateRpcReadiness\b/.test(noStrings), 'must reference evaluateRpcReadiness');
+  assert.ok(/\bvalidateRpcProviderConfig\b/.test(noStrings), 'must reference validateRpcProviderConfig');
 });
 
 test('src contains NO sign/send/serialize/Connection/Keypair/KeyManager/fetch/WebSocket/.query/activate_real_live', () => {
