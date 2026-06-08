@@ -20,7 +20,21 @@
 // ALWAYS refuses — evaluateRpcReadiness is always not-ready and validateRpcProviderConfig never configures, so a
 // supplied provider always yields rpc_provider_not_ready and a missing provider yields rpc_provider_missing. The
 // foundational refusal (send_gate_unconfigured_no_rpc) remains ALWAYS present. NOT live integration.
-import { evaluateRpcReadiness, validateRpcProviderConfig } from '../../rpc-provider-contract/src/index.mjs';
+//
+// MILESTONE 3 (E2-F-12): this gate now ALSO CONSUMES the sibling rpc-provider F11 endpoint-reference BINDING
+// HARNESS (bindEndpointReferenceForTest / validateEndpointReferenceBinding) in a FAIL-CLOSED way. When an
+// endpoint_binding_map is supplied it delegates to the harness — which reads NO env, reads NO secret file,
+// contacts NO provider, makes NO network call, and returns ONLY fixed false flags. Even a VALID reference-bound
+// Helius binding NEVER opens send: a successful bind is recorded as the blocker endpoint_binding_no_live, an
+// unbound/invalid binding as endpoint_binding_not_bound, and the harness's own fixed reason tokens are surfaced
+// with an 'endpoint_binding:' prefix. The foundational refusal (send_gate_unconfigured_no_rpc) remains ALWAYS
+// present. The import specifier stays RELATIVE/internal — no external/SDK/Solana/Jupiter/Helius/Jito import.
+import {
+  evaluateRpcReadiness,
+  validateRpcProviderConfig,
+  bindEndpointReferenceForTest,
+  validateEndpointReferenceBinding,
+} from '../../rpc-provider-contract/src/index.mjs';
 
 const UNCONFIGURED = 'unconfigured_no_rpc';
 
@@ -105,12 +119,15 @@ export function describeSendGateContract() {
     accepts_key_material_input: false,    // key-material-shaped input is refused
     requires_sign_only_success: true,     // send may never happen without prior sign-only success
     consumes_rpc_provider: true,          // consumes the rpc-provider CONTRACT result fail-closed (still refuses)
+    consumes_endpoint_binding: true,      // consumes the F11 endpoint-reference binding harness fail-closed (refuses)
     status: UNCONFIGURED,
     operations: Object.freeze(['describe', 'evaluateSendPreflight']),
     note: 'Send-gate CONTRACT + fail-closed SKELETON (E2-F-1). Always refuses: no RPC, no send, no broadcast, '
       + 'no transaction build/serialization, no network, no KMS, no KeyManager, no key material, no execution '
       + 'authority. CONSUMES the rpc-provider CONTRACT result fail-closed (derives readiness/config from the '
-      + 'contract, never a caller flag) and STILL ALWAYS refuses. Real send/testnet broadcast is a separate, '
+      + 'contract, never a caller flag) and STILL ALWAYS refuses. ALSO CONSUMES the F11 endpoint-reference '
+      + 'binding harness (bindEndpointReferenceForTest / validateEndpointReferenceBinding) fail-closed: even a '
+      + 'valid reference-bound Helius binding never opens send. Real send/testnet broadcast is a separate, '
       + 'explicitly-approved PR.',
   });
 }
@@ -154,6 +171,41 @@ export function evaluateSendPreflight(input) {
     } else {
       if (validateRpcProviderConfig(provider).status === 'invalid_key_material') blockers.push('rpc_provider_key_material');
       if (evaluateRpcReadiness(provider).ready !== true) blockers.push('rpc_provider_not_ready');
+    }
+
+    // MILESTONE 3 — consume the F11 endpoint-reference BINDING HARNESS, never trusting a caller flag. ONLY when an
+    // endpoint_binding_map is supplied: readiness is DERIVED from the CONTRACT (bindEndpointReferenceForTest is
+    // fail-closed — reads no env/secret, makes no network call, returns only fixed false flags). Even a VALID
+    // reference-bound binding NEVER opens send: a successful bind is recorded as endpoint_binding_no_live, an
+    // unbound/invalid binding as endpoint_binding_not_bound, and the harness's own fixed reason tokens are surfaced
+    // with an 'endpoint_binding:' prefix (fixed-literal strings — input is NEVER echoed). This stays INSIDE the
+    // try/catch, so a hostile rpc_provider OR endpoint_binding_map yields the existing input_inspection_error.
+    const bindingMap = (input != null && typeof input === 'object') ? input.endpoint_binding_map : undefined;
+    const prov = (input != null && typeof input === 'object') ? input.rpc_provider : undefined;
+    if (bindingMap !== undefined) {
+      // First record the binding INPUT shape classification (reference-only; helius-only; opaque endpoint_ref free
+      // of secret/endpoint/url/rpc indicators) via the harness's shape validator — never trusting a caller flag.
+      // A valid INPUT shape is STILL reference-only and never live (status reference_bound_no_live), so it is
+      // surfaced as the fixed blocker endpoint_binding_input_no_live; an invalid shape's fixed reason tokens are
+      // surfaced under the 'endpoint_binding:' prefix. Input is NEVER echoed.
+      const shape = validateEndpointReferenceBinding(prov);
+      if (shape.valid === true) {
+        if (!blockers.includes('endpoint_binding_input_no_live')) blockers.push('endpoint_binding_input_no_live');
+      } else {
+        for (const r of (shape.reasons || [])) {
+          const tag = 'endpoint_binding:' + r;
+          if (!blockers.includes(tag)) blockers.push(tag);
+        }
+      }
+
+      // Then delegate to the F11 binding harness (fail-closed; reads no env/secret; makes no network call).
+      const b = bindEndpointReferenceForTest(prov, bindingMap);
+      if (b.bound !== true) blockers.push('endpoint_binding_not_bound');
+      else blockers.push('endpoint_binding_no_live');   // even a valid reference-bound binding never opens send
+      for (const r of (b.reasons || [])) {
+        const tag = 'endpoint_binding:' + r;
+        if (!blockers.includes(tag)) blockers.push(tag);
+      }
     }
   } catch {
     // Fail-safe-not-fail-open: a request whose inspection throws is still refused (never re-thrown, never an
