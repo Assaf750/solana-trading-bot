@@ -80,6 +80,62 @@ Config validation reasons (`validateRpcProviderConfig`):
 Config status values: `reference_valid_no_rpc` (valid references-only shape) · `unconfigured_no_rpc` (missing
 core fields) · `invalid_key_material` (key material) · `invalid` (other blocked indicators).
 
+## Provider registry (Helius first, 3 slots, no-live)
+**Gate E / PR-E2-F-9 — a CONTRACT-ONLY provider registry over up to 3 provider SLOTS.** It is additive: it does
+not change any existing export or behaviour. It carries **no live mechanism** — no SDK, no dependency, no endpoint
+URL, no API key, no secret, no send. Every result is **fail-closed** (`configured: false`, `has_rpc: false`,
+`can_send: false`, `is_live: false`) and is built from **fixed literals** + a numeric count + frozen reason
+tokens; slot contents / `provider_ref` / endpoint values are **never echoed**. Per-slot validation **reuses** the
+hardened `validateRpcProviderConfig` (shape + testnet + endpoint + key-material + unknown-field) — it is not
+weakened.
+
+### Docs alignment (provider roles — do NOT mix)
+- **`helius`** — the **only ENABLED** provider reference now (reference-only, **NO live**).
+- **`triton`, `yellowstone`** — **doc-listed DISABLED/future** references only (placeholders; **not enabled, not
+  live**). A slot naming one of these is rejected with `provider_not_enabled`.
+- **Jito** (execution/bundle) and **Jupiter** (routing) are **NOT RPC providers** in this contract and are
+  **excluded** from the registry.
+
+The provider tokens `'helius'` / `'triton'` / `'yellowstone'` are **string-literal VALUES** (provider references),
+never import specifiers — the module stays import-free and guard-safe.
+
+### Registry surface
+- `RPC_PROVIDER_MAX_SLOTS` → `3`.
+- `describeRpcProviderRegistry()` → frozen descriptor: `contract: 'rpc-provider-registry'`, `version`,
+  `max_provider_slots: 3`, `supported_provider_refs: ['helius']`,
+  `doc_listed_disabled_provider_refs: ['triton','yellowstone']`, all of `configured`/`has_rpc`/`can_send`/`is_live`
+  `false`, `status: 'unconfigured_no_rpc'`, plus a one-line `note`.
+- `listSupportedRpcProviderRefs()` → frozen `['helius']`.
+- `normalizeRpcProviderSlots(input)` → frozen `{ count, within_capacity (count>=1 && count<=3),
+  max_provider_slots: 3, status }`. Coerces input (`Array` → itself · `{slots:Array}` → `slots` · a single
+  slot-shaped object → `[it]` · `null`/`undefined`/other → `[]`), counts entries (iteration capped to guard huge
+  inputs), and **never echoes slot contents**. `status` is `unconfigured_no_rpc` (count 0) ·
+  `within_capacity_no_rpc` · `over_capacity`. **Never throws** — a hostile/throwing accessor returns
+  `{ count: 0, within_capacity: false, max_provider_slots: 3, status: 'invalid' }`.
+- `validateRpcProviderSelection(selection)` → frozen `{ valid, status, reasons, configured: false,
+  has_rpc: false, can_send: false, slot_count, max_provider_slots: 3 }`. Coerces to a slots array (same coercion),
+  validates each slot via `validateRpcProviderConfig` (per-slot reasons propagated as fixed tokens), then
+  classifies each slot's `provider_ref` against the enabled / doc-listed-disabled lists. A `valid` selection is
+  **references-only** and stays `configured: false` / `has_rpc: false` / `can_send: false` (**NOT live**). The
+  result is built from **fixed literal** reason tokens + a numeric `slot_count` — slot / `provider_ref` / endpoint
+  / secret VALUES are **never echoed**. **Never throws** — a hostile/throwing accessor returns a fixed
+  `status: 'invalid'`, `reasons: ['input_inspection_error']` refusal.
+
+### Selection reason vocabulary (`validateRpcProviderSelection`)
+- `no_provider_slots` — zero slots after coercion.
+- `too_many_provider_slots` — more than 3 slots.
+- `provider_not_enabled` — slot names a doc-listed DISABLED reference (`triton` / `yellowstone`).
+- `unknown_provider` — slot names a reference outside the enabled and doc-listed lists.
+- `duplicate_provider` — the same enabled reference appears in more than one slot.
+- *(propagated per-slot from `validateRpcProviderConfig`)* `missing_config`, `missing_provider_ref`,
+  `mainnet_or_nontestnet_environment_blocked`, `endpoint_or_rpc_indicator_blocked`,
+  `send_or_broadcast_indicator_blocked`, `key_material_not_accepted`, `unknown_field_rejected`,
+  `input_inspection_error`.
+
+Selection status values: `selection_valid_no_rpc` (valid references-only selection of 1–3 enabled providers) ·
+`unconfigured_no_rpc` (zero slots) · `invalid` (any blocking reason). Slots normalization status values:
+`unconfigured_no_rpc` · `within_capacity_no_rpc` · `over_capacity` · `invalid`.
+
 ## Failure model
 `unconfigured_no_rpc` is the only contract status. There is no configured/live branch. No operation does I/O,
 crypto, signing, serialization, broadcast, or any network call.

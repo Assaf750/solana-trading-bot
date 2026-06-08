@@ -11,6 +11,12 @@ import {
   evaluateRpcReadiness,
   refusesKeyMaterial,
   RPC_PROVIDER_CONTRACT_STATUS,
+  // PR-E2-F-9 — provider registry (contract-only, Helius enabled reference-only, 3 slots, fail-closed, no-live).
+  RPC_PROVIDER_MAX_SLOTS,
+  describeRpcProviderRegistry,
+  listSupportedRpcProviderRefs,
+  normalizeRpcProviderSlots,
+  validateRpcProviderSelection,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -18,6 +24,8 @@ import {
   isAllowlisted,
   stripCommentsAndStrings,
 } from '../../../tools/check-mechanism-guards.mjs';
+// Test-only cross-package import (allowed): prove a Helius selection is STILL refused by the send gate.
+import { evaluateSendPreflight } from '../../send-gate-contract/src/index.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
@@ -373,4 +381,337 @@ test('(13) package src is NOT allowlisted (fully scanned by the mechanism guard)
 
 test('status constant is unconfigured_no_rpc', () => {
   assert.equal(RPC_PROVIDER_CONTRACT_STATUS, 'unconfigured_no_rpc');
+});
+
+// ===========================================================================================================
+// PR-E2-F-9 — PROVIDER REGISTRY (contract-only, Helius enabled reference-only, 3 slots, fail-closed, NOT live)
+// ===========================================================================================================
+// 22 required proofs. The registry is references-only: a "valid" selection is configured:false / has_rpc:false /
+// can_send:false / NOT live, slot contents are never echoed, and Helius is STILL refused by the send gate.
+
+// Every registry selection result must be fail-closed (references-only, NOT live) regardless of validity.
+function assertSelectionFailClosed(r) {
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.max_provider_slots, 3);
+  assert.equal(typeof r.slot_count, 'number');
+  assert.equal(Object.isFrozen(r.reasons), true);
+  // a registry selection result NEVER carries is_live:true and NEVER any live/handle/endpoint surface field.
+  assert.notEqual(r.is_live, true);
+  for (const k of ['key', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'endpoint', 'rpc_endpoint', 'provider_url', 'url', 'credential', 'handle', 'provider_ref']) {
+    assert.equal(k in r, false, `selection result must not carry ${k}`);
+  }
+}
+
+// ---- (R1)(R2)(R3)(R4)(R5) Helius accepted references-only; configured/has_rpc/can_send false; one slot valid ----
+
+test('(R1-R5) Helius ref accepted references-only — valid/selection_valid_no_rpc, configured/has_rpc/can_send false, one slot', () => {
+  const r = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet' }]);
+  assert.equal(r.valid, true, JSON.stringify([...r.reasons]));            // (1) accepted references-only
+  assert.equal(r.status, 'selection_valid_no_rpc');
+  assert.equal(r.configured, false);                                      // (2) configured:false
+  assert.equal(r.has_rpc, false);                                         // (3) has_rpc:false
+  assert.equal(r.can_send, false);                                        // (4) can_send:false
+  assert.equal(r.slot_count, 1);                                          // (5) one slot valid
+  assert.deepEqual([...r.reasons], []);
+  assertSelectionFailClosed(r);
+  // references-only: a valid Helius selection is NOT configured and does NOT activate anything.
+});
+
+// ---- (R6)(R7) 2-/3-slot CAPACITY via describe().max_provider_slots===3 and normalize within_capacity:true ----
+
+test('(R6-R7) capacity: max_provider_slots===3; 2 and 3 slots are within_capacity:true', () => {
+  assert.equal(RPC_PROVIDER_MAX_SLOTS, 3);
+  const d = describeRpcProviderRegistry();
+  assert.equal(d.max_provider_slots, 3);                                  // (6) capacity is 3
+  const two = normalizeRpcProviderSlots([{ provider_ref: 'a' }, { provider_ref: 'b' }]);
+  assert.equal(two.count, 2);
+  assert.equal(two.within_capacity, true);                                // (6) two slots within capacity
+  assert.equal(two.status, 'within_capacity_no_rpc');
+  const three = normalizeRpcProviderSlots([{ provider_ref: 'a' }, { provider_ref: 'b' }, { provider_ref: 'c' }]);
+  assert.equal(three.count, 3);
+  assert.equal(three.within_capacity, true);                              // (7) three slots within capacity
+  assert.equal(three.status, 'within_capacity_no_rpc');
+  assert.equal(three.max_provider_slots, 3);
+  assert.equal(Object.isFrozen(three), true);
+  // {slots:Array} wrapper coercion counts the same.
+  const wrapped = normalizeRpcProviderSlots({ slots: [{}, {}, {}] });
+  assert.equal(wrapped.count, 3);
+  assert.equal(wrapped.within_capacity, true);
+});
+
+// ---- (R8) 4+ slots -> selection too_many_provider_slots; normalize within_capacity:false / over_capacity ----
+
+test('(R8) four+ slots -> too_many_provider_slots (selection) and over_capacity (normalize)', () => {
+  const four = [
+    { provider_ref: 'helius', environment: 'devnet' },
+    { provider_ref: 'helius', environment: 'testnet' },
+    { provider_ref: 'helius', environment: 'localnet' },
+    { provider_ref: 'helius', environment: 'devnet' },
+  ];
+  const sel = validateRpcProviderSelection(four);
+  assert.equal(sel.valid, false);
+  assert.equal(sel.status, 'invalid');
+  assert.equal(sel.slot_count, 4);
+  assert.ok(sel.reasons.includes('too_many_provider_slots'));
+  assertSelectionFailClosed(sel);
+  const norm = normalizeRpcProviderSlots([{}, {}, {}, {}]);
+  assert.equal(norm.count, 4);
+  assert.equal(norm.within_capacity, false);
+  assert.equal(norm.status, 'over_capacity');
+  assert.equal(Object.isFrozen(norm), true);
+});
+
+// ---- (R9) zero slots -> selection no_provider_slots/unconfigured_no_rpc; normalize unconfigured_no_rpc ----
+
+test('(R9) zero slots -> no_provider_slots + unconfigured_no_rpc (selection); unconfigured_no_rpc (normalize)', () => {
+  for (const empty of [[], null, undefined, { slots: [] }]) {
+    const sel = validateRpcProviderSelection(empty);
+    assert.equal(sel.valid, false);
+    assert.equal(sel.status, 'unconfigured_no_rpc');
+    assert.equal(sel.slot_count, 0);
+    assert.ok(sel.reasons.includes('no_provider_slots'), `no_provider_slots for ${JSON.stringify(empty)}`);
+    assertSelectionFailClosed(sel);
+  }
+  for (const empty of [[], null, undefined, { slots: [] }]) {
+    const norm = normalizeRpcProviderSlots(empty);
+    assert.equal(norm.count, 0);
+    assert.equal(norm.within_capacity, false);
+    assert.equal(norm.status, 'unconfigured_no_rpc');
+  }
+});
+
+// ---- (R10) unknown provider ref -> unknown_provider ----
+
+test('(R10) unknown provider ref -> unknown_provider (invalid, fail-closed)', () => {
+  const r = validateRpcProviderSelection([{ provider_ref: 'unknown-xyz', environment: 'devnet' }]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_provider'));
+  // a doc-listed-disabled ref does NOT classify as unknown_provider (that's provider_not_enabled — proof 12-set).
+  assert.equal(r.reasons.includes('provider_not_enabled'), false);
+  assertSelectionFailClosed(r);
+});
+
+// ---- (R11) duplicate Helius across two slots -> duplicate_provider ----
+
+test('(R11) duplicate Helius across two slots -> duplicate_provider (invalid)', () => {
+  const r = validateRpcProviderSelection([
+    { provider_ref: 'helius', environment: 'devnet' },
+    { provider_ref: 'helius', environment: 'testnet' },
+  ]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.equal(r.slot_count, 2);
+  assert.ok(r.reasons.includes('duplicate_provider'));
+  assertSelectionFailClosed(r);
+});
+
+// ---- (R12) mainnet environment slot -> mainnet_or_nontestnet_environment_blocked (propagated) ----
+
+test('(R12) mainnet environment slot -> mainnet_or_nontestnet_environment_blocked; triton/yellowstone -> provider_not_enabled', () => {
+  for (const env of ['mainnet', 'mainnet-beta', 'prod']) {
+    const r = validateRpcProviderSelection([{ provider_ref: 'helius', environment: env }]);
+    assert.equal(r.valid, false);
+    assert.ok(r.reasons.includes('mainnet_or_nontestnet_environment_blocked'), `mainnet block for ${env}`);
+    assertSelectionFailClosed(r);
+  }
+  // doc-listed DISABLED references are refused with provider_not_enabled (NOT enabled, NOT live).
+  for (const ref of ['triton', 'yellowstone']) {
+    const r = validateRpcProviderSelection([{ provider_ref: ref, environment: 'devnet' }]);
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('provider_not_enabled'), `provider_not_enabled for ${ref}`);
+    assert.equal(r.reasons.includes('unknown_provider'), false);
+    assertSelectionFailClosed(r);
+  }
+});
+
+// ---- (R13) endpoint URL literal in a slot value -> endpoint_or_rpc_indicator_blocked AND not echoed ----
+
+test('(R13) endpoint URL literal in a slot -> endpoint_or_rpc_indicator_blocked; URL never echoed', () => {
+  const URL_LITERAL = 'https://x/';
+  const r = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: URL_LITERAL }]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(r).includes(URL_LITERAL), false, 'endpoint URL must not be echoed');
+  assert.equal(JSON.stringify(r).includes('https://'), false);
+  assertSelectionFailClosed(r);
+});
+
+// ---- (R14) api_key / endpoint secret indicator -> blocked and not echoed ----
+
+test('(R14) api_key / endpoint secret indicator -> blocked and never echoed', () => {
+  const MARK = 'MY-api_key-INDICATOR-ABC123';
+  const r = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: MARK }]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'api_key indicator value must not be echoed');
+  assert.equal(JSON.stringify(r).includes('api_key'), false);
+  assertSelectionFailClosed(r);
+});
+
+// ---- (R15) key-material-shaped provider_ref -> key_material_not_accepted and not echoed ----
+
+test('(R15) key-material-shaped provider_ref (PEM / long base58 / mnemonic) -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    const r = validateRpcProviderSelection([{ provider_ref: km, environment: 'devnet' }]);
+    assert.equal(r.valid, false, `key material refused: ${km.slice(0, 16)}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r).includes(km), false, 'key material never echoed');
+    assertSelectionFailClosed(r);
+    // smuggled as endpoint_ref value (with a clean Helius provider_ref) is also refused as key material.
+    const r2 = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: km }]);
+    assert.equal(r2.valid, false);
+    assert.ok(r2.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r2).includes(km), false);
+  }
+});
+
+// ---- (R16) Helius selection is STILL refused by the send gate (cross-package, Milestone 2 preserved) ----
+
+test('(R16) a Helius rpc_provider is STILL refused by the send gate (can_send:false)', () => {
+  const sg = evaluateSendPreflight({
+    sign_only_success: true,
+    readiness_ready: true,
+    preflight_ok: true,
+    custody_status: 'ACTIVE',
+    network: 'devnet',
+    rpc_provider: { provider_ref: 'helius', environment: 'devnet' },
+  });
+  assert.equal(sg.can_send, false, 'Helius provider must NOT enable send — fail-closed boundary preserved');
+});
+
+// ---- (R17) faked {provider_ref:'helius',ready:true} is NOT configured/ready (unknown_field_rejected) ----
+
+test('(R17) faked ready:true Helius slot -> unknown_field_rejected; never configured/has_rpc/can_send true', () => {
+  const r = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet', ready: true }]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_field_rejected'), 'a surprise ready:true field is rejected');
+  // a faked readiness flag can NEVER flip the fail-closed surface.
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.can_send, false);
+  assert.notEqual(r.is_live, true);
+  // the registry descriptor itself is fail-closed and never live.
+  const d = describeRpcProviderRegistry();
+  assert.equal(d.configured, false);
+  assert.equal(d.has_rpc, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.status, 'unconfigured_no_rpc');
+  assert.equal(d.contract, 'rpc-provider-registry');
+  assert.deepEqual([...d.supported_provider_refs], ['helius']);
+  assert.deepEqual([...d.doc_listed_disabled_provider_refs], ['triton', 'yellowstone']);
+  assert.equal(Object.isFrozen(d), true);
+  assert.deepEqual([...listSupportedRpcProviderRefs()], ['helius']);
+  assert.equal(Object.isFrozen(listSupportedRpcProviderRefs()), true);
+});
+
+// ---- (R18) no SDK import — self-scan src specifiers: only relative, no @solana/jupiter/helius/jito/@noble/etc ----
+
+test('(R18) src declares NO SDK/provider/network import specifier (only local relative paths)', () => {
+  const reFrom = /\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g;
+  const reBare = /\bimport\s*['"]([^'"]+)['"]/g;
+  const reCall = /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const FORBIDDEN_SPEC = /(@solana|@solana-program|solana|web3\.js|jupiter|@jup-ag|jito|helius|@noble|@coral-xyz|anchor|bs58|tweetnacl|ed25519|node:net|node:http|node:https|node:tls|node:dgram|undici|ws|axios|pg|redis|node:crypto)/i;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    const specs = [];
+    for (const re of [reFrom, reBare, reCall]) {
+      for (const m of text.matchAll(re)) specs.push(m[1]);
+    }
+    for (const s of specs) {
+      assert.equal(s.startsWith('.'), true, `${fn} must only import LOCAL relative paths: ${s}`);
+      assert.equal(FORBIDDEN_SPEC.test(s), false, `${fn} must not import an SDK/provider/network module: ${s}`);
+    }
+  }
+});
+
+// ---- (R19) no dependency — package.json has no dependencies/devDependencies (registry adds none) ----
+
+test('(R19) package.json still declares NO dependencies/devDependencies (registry is dependency-free)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false);
+  assert.equal('devDependencies' in pkg, false);
+  assert.equal('peerDependencies' in pkg, false);
+  assert.equal('optionalDependencies' in pkg, false);
+});
+
+// ---- (R20) no network/provider call — src import-free, no fetch/Connection in the registry code ----
+
+test('(R20) src (incl. the registry) is import-free and carries NO network/provider mechanism', () => {
+  const NETWORK_MECH = /(\b(fetch|XMLHttpRequest)\s*\(|new\s+WebSocket|WebSocket\s*\(|new\s+Connection\s*\(|XMLHttpRequest|EventSource|node:net|node:http)/;
+  for (const fn of srcMjsFiles()) {
+    const code = stripCommentsAndStrings(readFileSync(join(SRC, fn), 'utf8'));
+    assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, `no imports allowed in ${fn}`);
+    assert.equal(NETWORK_MECH.test(code), false, `no network/provider mechanism in ${fn}`);
+  }
+});
+
+// ---- (R21) no send/broadcast/serialize methods on createFailClosedRpcProvider (unchanged by the registry) ----
+
+test('(R21) createFailClosedRpcProvider still exposes NO send/broadcast/serialize/rpc method', () => {
+  const p = createFailClosedRpcProvider();
+  for (const m of ['send', 'broadcast', 'serialize', 'sendTransaction', 'sendRawTransaction', 'submit', 'sign', 'connect', 'rpc', 'request', 'call', 'query', 'addProvider', 'selectProvider', 'register']) {
+    assert.equal(typeof p[m], 'undefined', `provider must NOT expose ${m}`);
+  }
+  // the registry functions are pure/contract-only — none returns a configured or live surface.
+  assert.equal(describeRpcProviderRegistry().is_live, false);
+  assert.equal(validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet' }]).can_send, false);
+});
+
+// ---- (R22) hostile/throwing input -> frozen refusal (input_inspection_error / invalid), never throws, no echo ----
+
+test('(R22) hostile/throwing input to selection & normalize -> frozen refusal, never throws, secret not echoed', () => {
+  const SECRET = 'boom-secret-trap-XYZ';
+  // a Proxy whose get trap throws on ANY property access -> coerceToSlots throws -> OUTER catch.
+  const throwAll = new Proxy({}, { get() { throw new Error(SECRET); } });
+  // a single throwing-getter object: wrapped as one slot; per-slot validateRpcProviderConfig catches internally.
+  const throwingGetter = { get provider_ref() { throw new Error(SECRET); } };
+  // an object with a throwing `slots` getter -> coerceToSlots throws -> OUTER catch.
+  const throwingSlots = { get slots() { throw new Error(SECRET); } };
+
+  for (const hostile of [throwAll, throwingGetter, throwingSlots]) {
+    let sel;
+    assert.doesNotThrow(() => { sel = validateRpcProviderSelection(hostile); }, 'selection must not propagate the exception');
+    assert.equal(sel.valid, false);
+    assert.equal(sel.status, 'invalid');
+    assert.ok(sel.reasons.includes('input_inspection_error'));
+    assertSelectionFailClosed(sel);
+    assert.equal(JSON.stringify(sel).includes(SECRET), false, 'secret/error message never echoed (selection)');
+
+    let norm;
+    assert.doesNotThrow(() => { norm = normalizeRpcProviderSlots(hostile); }, 'normalize must not propagate the exception');
+    assert.equal(Object.isFrozen(norm), true);
+    assert.equal(norm.max_provider_slots, 3);
+    assert.equal(JSON.stringify(norm).includes(SECRET), false, 'secret/error message never echoed (normalize)');
+  }
+  // the two outer-catch hostiles produce the documented fixed refusal shapes.
+  for (const outer of [throwAll, throwingSlots]) {
+    const norm = normalizeRpcProviderSlots(outer);
+    assert.equal(norm.count, 0);
+    assert.equal(norm.within_capacity, false);
+    assert.equal(norm.status, 'invalid');
+    const sel = validateRpcProviderSelection(outer);
+    assert.equal(sel.slot_count, 0);
+    assert.deepEqual([...sel.reasons], ['input_inspection_error']);
+  }
+  // primitive / weird inputs never throw either.
+  for (const input of [42, 'x', true]) {
+    assert.doesNotThrow(() => validateRpcProviderSelection(input));
+    assert.doesNotThrow(() => normalizeRpcProviderSlots(input));
+    // a non-array/non-object primitive coerces to [] -> zero slots.
+    assert.equal(validateRpcProviderSelection(input).slot_count, 0);
+    assert.equal(normalizeRpcProviderSlots(input).count, 0);
+  }
 });

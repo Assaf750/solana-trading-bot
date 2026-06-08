@@ -327,3 +327,183 @@ export function refusesKeyMaterial(input) {
 }
 
 export const RPC_PROVIDER_CONTRACT_STATUS = UNCONFIGURED;
+
+// ===========================================================================================================
+// PR-E2-F-9 — PROVIDER REGISTRY (CONTRACT-ONLY, FAIL-CLOSED, NOT LIVE)
+// ===========================================================================================================
+// SOURCE: docs/00-ARCHITECTURE.md §15.12 (Wave 4 execution/providers boundary) + docs/01-SSOT Group 40.
+//
+// CONTRACT-ONLY registry over up to 3 provider SLOTS. Helius is the ONLY ENABLED provider reference now
+// (reference-only — NO live). triton / yellowstone are DOC-LISTED DISABLED/future references (placeholders;
+// NOT enabled, NOT live). Jito (execution/bundle) and Jupiter (routing) are NOT RPC providers in this contract
+// and are deliberately EXCLUDED from the registry.
+//
+// The provider tokens 'helius'/'triton'/'yellowstone' below are STRING LITERAL VALUES (provider references),
+// never import specifiers — guard-safe. This registry has NO live mechanism: no SDK, no dependency, no endpoint
+// URL, no API key, no secret, no send. Every result is fail-closed (configured:false / has_rpc:false /
+// can_send:false / is_live:false) and built from FIXED LITERALS + a numeric count + frozen reason tokens —
+// slot contents / provider_ref / endpoint values are NEVER echoed. Per-slot validation REUSES the existing
+// hardened validateRpcProviderConfig (shape + testnet + endpoint + key-material + unknown-field).
+
+const MAX_PROVIDER_SLOTS = 3;
+export const RPC_PROVIDER_MAX_SLOTS = MAX_PROVIDER_SLOTS;
+
+// The only ENABLED provider reference now (reference-only, NO live).
+const SUPPORTED_PROVIDER_REFS = Object.freeze(['helius']);
+// Doc-listed DISABLED/future references only (placeholders; NOT enabled, NOT live).
+const DOC_LISTED_DISABLED_PROVIDER_REFS = Object.freeze(['triton', 'yellowstone']);
+
+// Hard cap on iteration so a hostile huge input can never make us loop unboundedly. We only ever COUNT and
+// per-slot-classify; slot CONTENTS are never echoed.
+const SLOT_ITERATION_CAP = 100;
+
+// Coerce arbitrary input into a slots array WITHOUT echoing contents:
+//   Array                       -> itself
+//   { slots: Array }            -> slots
+//   a single slot-shaped object -> [it]
+//   null / undefined / other    -> []
+// A "slot-shaped object" is a plain object that is not the {slots:Array} wrapper.
+function coerceToSlots(input) {
+  if (Array.isArray(input)) return input;
+  if (input != null && typeof input === 'object') {
+    if (Array.isArray(input.slots)) return input.slots;
+    // a single slot-shaped object (not a {slots:Array} wrapper) -> wrap as one slot.
+    return [input];
+  }
+  return [];
+}
+
+// Describe the provider REGISTRY contract: contract-only, Helius enabled reference-only, others doc-listed/
+// disabled, fail-closed, no live/SDK/endpoint/send. Read-only; describes intent, performs nothing.
+export function describeRpcProviderRegistry() {
+  return Object.freeze({
+    contract: 'rpc-provider-registry',
+    version: '0.0.0',
+    max_provider_slots: MAX_PROVIDER_SLOTS,
+    supported_provider_refs: SUPPORTED_PROVIDER_REFS,
+    doc_listed_disabled_provider_refs: DOC_LISTED_DISABLED_PROVIDER_REFS,
+    configured: false,
+    has_rpc: false,
+    can_send: false,
+    is_live: false,
+    status: UNCONFIGURED,
+    note: 'Provider registry is CONTRACT-ONLY: Helius enabled reference-only, triton/yellowstone doc-listed/'
+      + 'disabled, Jito/Jupiter excluded; fail-closed, no live, no SDK, no endpoint, no send.',
+  });
+}
+
+// The list of ENABLED provider references (reference-only). Frozen; references-only, NOT live.
+export function listSupportedRpcProviderRefs() {
+  return SUPPORTED_PROVIDER_REFS;
+}
+
+// Normalize/count provider slots WITHOUT echoing slot contents. Coerces input as coerceToSlots, counts entries
+// (capped at SLOT_ITERATION_CAP to guard huge inputs), and reports capacity classification. Never throws — the
+// whole body is wrapped so a hostile/throwing accessor RETURNS a fixed 'invalid' refusal.
+export function normalizeRpcProviderSlots(input) {
+  try {
+    const slots = coerceToSlots(input);
+    // Count entries with a hard cap so a hostile huge input cannot make us iterate unboundedly.
+    let count = 0;
+    const len = slots.length;
+    const bound = len > SLOT_ITERATION_CAP ? SLOT_ITERATION_CAP : len;
+    for (let i = 0; i < bound; i += 1) count += 1;
+    const withinCapacity = count >= 1 && count <= MAX_PROVIDER_SLOTS;
+    let status;
+    if (count === 0) status = UNCONFIGURED;
+    else if (withinCapacity) status = 'within_capacity_no_rpc';
+    else status = 'over_capacity';
+    return Object.freeze({
+      count,
+      within_capacity: withinCapacity,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+      status,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      count: 0,
+      within_capacity: false,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+      status: 'invalid',
+    });
+  }
+}
+
+// Validate a provider SELECTION (up to 3 slots) WITHOUT activating anything. Reuses the hardened
+// validateRpcProviderConfig per slot (shape + testnet + endpoint + key-material + unknown-field), then classifies
+// each slot's provider_ref against the ENABLED list (helius), the doc-listed DISABLED list (triton/yellowstone),
+// and detects duplicates / unknown refs. A 'valid' selection is REFERENCES-ONLY and stays configured:false /
+// has_rpc:false / can_send:false (NOT live). The result is built from FIXED LITERAL reason tokens + a numeric
+// slot_count — slot / provider_ref / endpoint / secret VALUES are NEVER echoed. Never throws.
+export function validateRpcProviderSelection(selection) {
+  try {
+    const slots = coerceToSlots(selection);
+    const slotCount = slots.length;
+    const reasons = [];
+
+    if (slotCount === 0) reasons.push('no_provider_slots');
+    if (slotCount > MAX_PROVIDER_SLOTS) reasons.push('too_many_provider_slots');
+
+    const seen = [];
+    const bound = slotCount > SLOT_ITERATION_CAP ? SLOT_ITERATION_CAP : slotCount;
+    for (let i = 0; i < bound; i += 1) {
+      const slot = slots[i];
+      // Reuse the existing hardened validator (NOT weakened). It is itself try/catch-wrapped and never throws.
+      const cfg = validateRpcProviderConfig(slot);
+      if (!cfg.valid) {
+        // Propagate per-slot reasons as FIXED tokens (no values echoed): key_material_not_accepted /
+        // mainnet_or_nontestnet_environment_blocked / endpoint_or_rpc_indicator_blocked / unknown_field_rejected
+        // / missing_provider_ref / missing_config / send_or_broadcast_indicator_blocked / input_inspection_error.
+        for (const r of cfg.reasons) reasons.push(r);
+      } else {
+        const ref = (slot != null && typeof slot === 'object' && typeof slot.provider_ref === 'string')
+          ? slot.provider_ref
+          : '';
+        if (SUPPORTED_PROVIDER_REFS.includes(ref)) {
+          if (seen.includes(ref)) reasons.push('duplicate_provider');
+          else seen.push(ref);
+        } else if (DOC_LISTED_DISABLED_PROVIDER_REFS.includes(ref)) {
+          reasons.push('provider_not_enabled');
+        } else {
+          reasons.push('unknown_provider');
+        }
+      }
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0 && slotCount >= 1 && slotCount <= MAX_PROVIDER_SLOTS;
+    let status;
+    if (valid) status = 'selection_valid_no_rpc';
+    else if (slotCount === 0) status = UNCONFIGURED;
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `valid` means the selection SHAPE is acceptable as opaque references — it does NOT configure or activate
+      // anything; configured/has_rpc/can_send stay false (resolution remains fail-closed, NOT live).
+      valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      can_send: false,
+      slot_count: slotCount,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      can_send: false,
+      slot_count: 0,
+      max_provider_slots: MAX_PROVIDER_SLOTS,
+    });
+  }
+}
