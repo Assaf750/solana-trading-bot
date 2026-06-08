@@ -14,7 +14,7 @@
 
 ---
 
-## 1. Custody vendor decision criteria — status: `UNDECIDED`
+## 1. Custody vendor decision criteria — status: `DECIDED` (class level; ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` — KMS/HSM class, vendor-neutral; specific instance deferred to deployment approval)
 **Options:** cloud KMS · HSM · self-hosted secret vault. Vendor is an **implementation parameter within the
 `09-THREAT §4` boundary**, not an architecture change.
 
@@ -30,11 +30,11 @@
 custody across environments (dev/test/live); a path that exposes raw key material to API/UI/hot-path; "bring
 key in code/config". 
 
-**Decision owner:** _TBD._ **Decision:** _UNDECIDED._
+**Decision owner:** governance + `signer_control`. **Decision:** _DECIDED — KMS/HSM class, vendor-neutral; specific instance deferred to deployment approval (`DR-E2-B1B2-001`)._
 
 ---
 
-## 2. Deployment boundary — status: `UNDECIDED`
+## 2. Deployment boundary — status: `DECIDED` (boundary level; ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` — isolated signer runtime in a separate container/process; tier (container vs VM) deferred to deployment approval)
 - SignerService runs as an **isolated process/container**, separate from API, dashboard, and hot-path.
 - **No API/UI/hot-path key access**: other services request a signature for a specific `intent_id` /
   `execution_wallet_id` / `signer_profile_id` and receive a signature or refusal — never a key.
@@ -42,7 +42,7 @@ key in code/config".
   no inbound public exposure; no key egress.
 - **No debug/core dumps in live**; no verbose memory logging for signer/execution (`09-THREAT §4/§5.10`).
 
-**Decision owner:** _TBD._ **Decision:** _UNDECIDED._
+**Decision owner:** governance + ops. **Decision:** _DECIDED — isolated signer runtime in a separate container/process boundary; tier (container vs VM) deferred to deployment approval (`DR-E2-B1B2-001`)._
 
 ---
 
@@ -111,8 +111,8 @@ key in code/config".
 
 | # | Item | Status |
 |---|---|---|
-| B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — options compared in `E2-CUSTODY-VENDOR-DEPLOYMENT-OPTIONS.md` (preference recorded, vendor **not** ratified) | **UNDECIDED** |
-| B2 | Deployment boundary defined (isolated process; no API/UI/hot-path key access; no dumps) (§2) — options compared in `E2-CUSTODY-VENDOR-DEPLOYMENT-OPTIONS.md` (separate container preferred, tier **not** ratified) | **UNDECIDED** |
+| B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **KMS/HSM class, vendor-neutral**; specific instance deferred to deployment approval | **DECIDED** (class level) |
+| B2 | Deployment boundary defined (isolated process; no API/UI/hot-path key access; no dumps) (§2) — ratified in `E2-RATIFICATION-B1-B2-VENDOR-DEPLOYMENT.md` (`DR-E2-B1B2-001`): **isolated separate container/process**; tier deferred to deployment approval | **DECIDED** (boundary level) |
 | B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — policy proposed in `E2-DUAL-CONTROL-SIGNER-CONTROL-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B4 | Key generation/import policy decided (§4) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
 | B5 | Rotation/revocation policy + cadence decided (§5) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (triggers mapped; cadence **not** ratified) | **UNDECIDED** |
@@ -121,7 +121,7 @@ key in code/config".
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
-**Aggregate readiness:** **NOT READY** — 7 `UNDECIDED` + 1 `BLOCKED`.
+**Aggregate readiness:** **NOT READY** — 5 `UNDECIDED` (B3–B7) + 2 `DECIDED` (B1, B2) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
 
 ---
 
