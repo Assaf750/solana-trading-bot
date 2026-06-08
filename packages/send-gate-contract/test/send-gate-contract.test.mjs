@@ -211,6 +211,22 @@ test('result is built from fixed literals and never echoes request fields', () =
   assert.equal('marker_field' in r, false);
 });
 
+// ---- hostile/throwing input still RETURNS a refusal (never throws) ----
+
+test('a request whose inspection throws (getter / Proxy trap) still RETURNS a frozen refusal', () => {
+  const throwingGetter = { get sign_only_success() { throw new Error('boom'); } };
+  const throwingProxy = new Proxy({}, { ownKeys() { throw new Error('ownKeys boom'); } });
+  for (const hostile of [throwingGetter, throwingProxy]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSendPreflight(hostile); }, 'must not propagate the exception');
+    assertRefusedShape(r);
+    assert.ok(r.blockers.includes('input_inspection_error'), 'inspection error recorded as a blocker');
+    assert.ok(r.blockers.includes('send_gate_unconfigured_no_rpc'));
+  }
+  // the caught error message is never echoed into the result
+  assert.equal(JSON.stringify(evaluateSendPreflight(throwingGetter)).includes('boom'), false);
+});
+
 // ---- this package is OUTSIDE the allowlist and fully scanned ----
 
 test('package src is NOT allowlisted (fully scanned by the mechanism guard)', () => {

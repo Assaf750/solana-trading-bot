@@ -55,6 +55,8 @@ there is no RPC and no send path at all).
 - `serialized_or_raw_tx_blocked` — serialized / raw / wire transaction indicator.
 - `sign_only_not_completed` — prior sign-only success is missing.
 - `readiness_not_ready` / `preflight_not_ok` / `custody_not_active` — gate preconditions unmet.
+- `input_inspection_error` — a hostile/throwing accessor in the request; inspection is caught and the request
+  is still refused (never re-thrown, never echoed) — fail-safe-not-fail-open.
 - `send_gate_unconfigured_no_rpc` — **foundational**, always present: no RPC, no send path.
 
 ## Failure model

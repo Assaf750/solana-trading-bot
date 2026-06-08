@@ -113,23 +113,31 @@ export function describeSendGateContract() {
 export function evaluateSendPreflight(input) {
   const blockers = [];
 
-  // key material — refuse first; never echo it back.
-  if (looksLikeKeyMaterial(input)) blockers.push('key_material_not_accepted');
-  // mainnet — a send gate must never carry a mainnet indicator.
-  if (hasIndicator(input, MAINNET_TOKENS)) blockers.push('mainnet_indicator_blocked');
-  // endpoint / RPC / provider URL — no live endpoint surface.
-  if (hasIndicator(input, ENDPOINT_RPC_TOKENS)) blockers.push('endpoint_or_rpc_blocked');
-  // broadcast / send intent — the gate never broadcasts or sends.
-  if (hasIndicator(input, BROADCAST_SEND_TOKENS)) blockers.push('broadcast_or_send_indicator_blocked');
-  // serialized / raw transaction — the gate never builds or serializes a transaction.
-  if (hasIndicator(input, SERIALIZED_TX_TOKENS)) blockers.push('serialized_or_raw_tx_blocked');
+  // Inspect the request defensively: a hostile/throwing accessor (getter / Proxy trap) must NOT escape the
+  // gate as an exception — every request must RETURN a refusal. Any inspection error itself becomes a blocker.
+  try {
+    // key material — refuse first; never echo it back.
+    if (looksLikeKeyMaterial(input)) blockers.push('key_material_not_accepted');
+    // mainnet — a send gate must never carry a mainnet indicator.
+    if (hasIndicator(input, MAINNET_TOKENS)) blockers.push('mainnet_indicator_blocked');
+    // endpoint / RPC / provider URL — no live endpoint surface.
+    if (hasIndicator(input, ENDPOINT_RPC_TOKENS)) blockers.push('endpoint_or_rpc_blocked');
+    // broadcast / send intent — the gate never broadcasts or sends.
+    if (hasIndicator(input, BROADCAST_SEND_TOKENS)) blockers.push('broadcast_or_send_indicator_blocked');
+    // serialized / raw transaction — the gate never builds or serializes a transaction.
+    if (hasIndicator(input, SERIALIZED_TX_TOKENS)) blockers.push('serialized_or_raw_tx_blocked');
 
-  // gate preconditions (even a clean request still ends up refused foundationally below).
-  if (!isTrue(input, 'sign_only_success')) blockers.push('sign_only_not_completed');
-  if (!isTrue(input, 'readiness_ready')) blockers.push('readiness_not_ready');
-  if (!isTrue(input, 'preflight_ok')) blockers.push('preflight_not_ok');
-  if (!(input != null && typeof input === 'object' && input.custody_status === 'ACTIVE')) {
-    blockers.push('custody_not_active');
+    // gate preconditions (even a clean request still ends up refused foundationally below).
+    if (!isTrue(input, 'sign_only_success')) blockers.push('sign_only_not_completed');
+    if (!isTrue(input, 'readiness_ready')) blockers.push('readiness_not_ready');
+    if (!isTrue(input, 'preflight_ok')) blockers.push('preflight_not_ok');
+    if (!(input != null && typeof input === 'object' && input.custody_status === 'ACTIVE')) {
+      blockers.push('custody_not_active');
+    }
+  } catch {
+    // Fail-safe-not-fail-open: a request whose inspection throws is still refused (never re-thrown, never an
+    // error message echoed). The caught error object is deliberately NOT read — only a fixed blocker is added.
+    if (!blockers.includes('input_inspection_error')) blockers.push('input_inspection_error');
   }
 
   // FOUNDATIONAL refusal — there is no RPC and no send path at all. This is ALWAYS present, so a perfectly
