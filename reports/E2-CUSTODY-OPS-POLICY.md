@@ -112,8 +112,8 @@ key in code/config".
 | B1 | Custody vendor (KMS/HSM/vault) chosen + minimum controls ratified (§1) — options compared in `E2-CUSTODY-VENDOR-DEPLOYMENT-OPTIONS.md` (preference recorded, vendor **not** ratified) | **UNDECIDED** |
 | B2 | Deployment boundary defined (isolated process; no API/UI/hot-path key access; no dumps) (§2) — options compared in `E2-CUSTODY-VENDOR-DEPLOYMENT-OPTIONS.md` (separate container preferred, tier **not** ratified) | **UNDECIDED** |
 | B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — policy proposed in `E2-DUAL-CONTROL-SIGNER-CONTROL-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
-| B4 | Key generation/import policy decided (§4) | **UNDECIDED** |
-| B5 | Rotation/revocation policy + cadence decided (§5) | **UNDECIDED** |
+| B4 | Key generation/import policy decided (§4) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
+| B5 | Rotation/revocation policy + cadence decided (§5) — policy proposed in `E2-KEY-GENERATION-ROTATION-POLICY.md` (triggers mapped; cadence **not** ratified) | **UNDECIDED** |
 | B6 | Emergency break-glass procedure defined (§6) | **UNDECIDED** |
 | B7 | Audit retention decided (§7) | **UNDECIDED** |
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
