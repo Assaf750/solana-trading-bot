@@ -19,25 +19,30 @@ test('DECLARED_ALLOWLIST_PATHS has exactly one explicit isolated-signer path', (
   assert.equal(DECLARED, 'packages/isolated-signer-runtime/src/');
 });
 
-test('declaration is NOT activation: ALLOWLIST stays empty and guard runs at allowlist=0', () => {
-  assert.equal(ALLOWLIST.length, 0);
+test('B8 ACTIVATED: ALLOWLIST now equals the single declared path and guard runs at allowlist=1', () => {
+  assert.equal(ALLOWLIST.length, 1);
+  assert.deepEqual([...ALLOWLIST], [...DECLARED_ALLOWLIST_PATHS]); // ALLOWLIST === DECLARED (one path)
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
-  // the declared path is not part of the ACTIVE allowlist
-  assert.equal(isAllowlisted(DECLARED_FILE, ALLOWLIST), false);
+  assert.equal(res.counts.allowlist, 1);
+  // the declared path is now part of the ACTIVE allowlist
+  assert.equal(isAllowlisted(DECLARED_FILE, ALLOWLIST), true);
 });
 
-test('the declared path is NOT activated: the active (empty) ALLOWLIST exempts no source file', () => {
-  // The isolated-signer-runtime skeleton package now EXISTS (PR-E2-1), but the declared path is still
-  // NOT in the active ALLOWLIST -> no source file is exempt and the guard scans everything.
+test('the declared path is ACTIVATED: the active ALLOWLIST exempts ONLY files under that path', () => {
+  // The isolated-signer-runtime skeleton package EXISTS (PR-E2-1); post-B8 the declared path is in the
+  // ACTIVE ALLOWLIST -> only its files are exempt; every other source file is still fully scanned.
+  // mirror the guard: compare on the repo-relative path (collectSourceFiles returns absolute paths).
+  const toRel = (f) => { const n = f.replaceAll('\\', '/'); const i = n.indexOf('packages/'); return i >= 0 ? n.slice(i) : n; };
   for (const f of collectSourceFiles()) {
-    assert.equal(isAllowlisted(f, ALLOWLIST), false, `active allowlist must not exempt ${f}`);
+    const rel = toRel(f);
+    const expected = rel.startsWith('packages/isolated-signer-runtime/src/');
+    assert.equal(isAllowlisted(rel, ALLOWLIST), expected, `active allowlist exemption mismatch for ${rel}`);
   }
-  // The guard runs over the now-existing skeleton and still passes at allowlist=0.
+  // The guard runs over the now-activated skeleton and still passes at allowlist=1 (skeleton has no live mechanism).
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
+  assert.equal(res.counts.allowlist, 1);
 });
 
 // ---- the declared path WOULD exempt live mechanisms (only when explicitly activated) ----
@@ -81,13 +86,16 @@ test('declared path matches by path-segment prefix only (no sibling over-match)'
   assert.equal(isAllowlisted('packages\\isolated-signer-runtime\\src\\signer.mjs', DECLARED_ALLOWLIST_PATHS), true);
 });
 
-// ---- the active guard (empty ALLOWLIST) still fails closed everywhere ----
+// ---- the active guard still fails closed everywhere EXCEPT the one activated path ----
 
-test('forbidden mechanisms still fail in every path under the active empty ALLOWLIST', () => {
-  assert.ok(rules(scanText(DECLARED_FILE, "import x from '@solana/web3.js';")).includes('solana-sdk-import')); // declared path NOT exempt by default
+test('forbidden mechanisms still fail in every path EXCEPT the activated declared path', () => {
+  // declared path is now exempt from live-mechanism checks (B8 activated)
+  assert.deepEqual(scanText(DECLARED_FILE, "import x from '@solana/web3.js';"), []);
+  // every OTHER path still fails closed under the active allowlist
+  assert.ok(rules(scanText(OTHER_FILE, "import x from '@solana/web3.js';")).includes('solana-sdk-import'));
   assert.ok(rules(scanText(OTHER_FILE, 'new KeyManager();')).includes('key-manager'));
-  // current repo is clean and fully closed
+  // current repo is clean and passes at allowlist=1
   const res = runMechanismGuard();
   assert.equal(res.ok, true);
-  assert.equal(res.counts.allowlist, 0);
+  assert.equal(res.counts.allowlist, 1);
 });

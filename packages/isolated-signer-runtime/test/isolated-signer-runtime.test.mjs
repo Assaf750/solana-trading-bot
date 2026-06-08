@@ -51,23 +51,26 @@ test('no forbidden SSOT names; no candidate_*', () => {
   }
 });
 
-// ---- the path now EXISTS but is NOT activated: still scanned, still fail-closed ----
+// ---- the path now EXISTS and is ACTIVATED (B8, DR-E2-B8-001): exempt for THIS path only ----
 
-test('the existing package is scanned by the guard and NOT exempt; ALLOWLIST stays empty', () => {
+test('B8 activated: ALLOWLIST holds exactly this one path and the guard passes at allowlist=1', () => {
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
-  assert.equal(ALLOWLIST.length, 0);
-  // none of this package's files are exempt under the ACTIVE (empty) allowlist
+  assert.equal(res.counts.allowlist, 1);
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
+  // this package's files ARE now exempt under the ACTIVE allowlist (this is the activated path)
   const here = 'packages/isolated-signer-runtime/src/index.mjs';
-  assert.equal(isAllowlisted(here, ALLOWLIST), false);
+  assert.equal(isAllowlisted(here, ALLOWLIST), true);
 });
 
-test('a HYPOTHETICAL live mechanism at this path is still REJECTED under the active empty ALLOWLIST', () => {
+test('post-B8 a HYPOTHETICAL live mechanism at THIS (activated) path is exempt; key material still forbidden', () => {
   const label = 'packages/isolated-signer-runtime/src/index.mjs';
-  // default ALLOWLIST (empty) -> live mechanism here is flagged
-  assert.ok(scanText(label, "import x from '@solana/web3.js';").some((v) => v.rule === 'solana-sdk-import'));
-  assert.ok(scanText(label, 'wallet.signTransaction(tx);').some((v) => v.rule === 'tx-sign'));
-  // ONLY if the declared path were activated would it be exempt (proof of declaration-not-activation)
-  assert.deepEqual(scanText(label, "import x from '@solana/web3.js';", { allowlist: DECLARED_ALLOWLIST_PATHS }), []);
+  // active ALLOWLIST now contains this path -> live mechanism here is exempt from live-mechanism checks
+  assert.deepEqual(scanText(label, "import x from '@solana/web3.js';"), []);
+  assert.deepEqual(scanText(label, 'wallet.signTransaction(tx);'), []);
+  // but key material stays HARD-forbidden even inside the activated path
+  assert.ok(scanText(label, "const k = '-----BEGIN PRIVATE KEY-----';").some((v) => v.rule.startsWith('allowlisted_but_key_material:')));
+  // and ALLOWLIST equals the declared path set (no drift, no extra path)
+  assert.deepEqual([...ALLOWLIST], [...DECLARED_ALLOWLIST_PATHS]);
 });

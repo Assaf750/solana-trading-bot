@@ -163,11 +163,13 @@ test('missing audit_actor => refused before any effect', () => {
 
 // ---- guard / allowlist invariants ----
 
-test('package is scanned by the mechanism guard, not exempt, and ALLOWLIST stays empty', () => {
+test('package is scanned by the mechanism guard, not exempt; ALLOWLIST holds only the isolated-signer path (B8)', () => {
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
-  assert.equal(ALLOWLIST.length, 0);
+  // post-B8 the active allowlist contains exactly the one isolated-signer path (not this package)
+  assert.equal(res.counts.allowlist, 1);
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
 });
 
 // ---- code governance scans ----

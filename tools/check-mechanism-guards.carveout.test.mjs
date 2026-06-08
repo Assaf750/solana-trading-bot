@@ -16,22 +16,29 @@ const FUTURE = 'packages/__future_isolated_signer__/src/';
 const FUTURE_FILE = `${FUTURE}signer.mjs`;
 const OTHER_FILE = 'packages/some-runtime/src/x.mjs';
 
-// ---- default is closed (empty allowlist; current behavior preserved) ----
+// ---- post-B8 activation: ALLOWLIST holds EXACTLY the one declared isolated-signer path ----
 
-test('ALLOWLIST is empty by default (fail-closed; no path exempt)', () => {
+test('ALLOWLIST contains exactly one path: the declared isolated-signer path (B8 activated)', () => {
   assert.equal(Array.isArray(ALLOWLIST), true);
-  assert.equal(ALLOWLIST.length, 0);
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
 });
 
-test('runMechanismGuard() still PASSES on the real repo with the default empty allowlist', () => {
+test('runMechanismGuard() still PASSES on the real repo with the activated allowlist', () => {
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
+  assert.equal(res.counts.allowlist, 1);
   assert.ok(res.counts.sources > 0);
 });
 
-test('default allowlist matches NO existing source file (opens no package)', () => {
-  for (const f of collectSourceFiles()) assert.equal(isAllowlisted(f, ALLOWLIST), false);
+test('the active allowlist exempts ONLY files under the declared path; no other source file', () => {
+  // mirror the guard: compare on the repo-relative path (collectSourceFiles returns absolute paths)
+  const toRel = (f) => { const n = f.replaceAll('\\', '/'); const i = n.indexOf('packages/'); return i >= 0 ? n.slice(i) : n; };
+  for (const f of collectSourceFiles()) {
+    const rel = toRel(f);
+    const expected = rel.startsWith('packages/isolated-signer-runtime/src/');
+    assert.equal(isAllowlisted(rel, ALLOWLIST), expected, `allowlist exemption mismatch for ${rel}`);
+  }
   // and the example future carve-out path does not correspond to an existing directory
   assert.equal(existsSync(join(ROOT, 'packages', '__future_isolated_signer__')), false);
 });

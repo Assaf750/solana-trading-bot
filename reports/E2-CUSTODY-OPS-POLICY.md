@@ -6,7 +6,9 @@
 > are **document statuses only**, not SSOT enums.
 >
 > **Purpose:** convert the eight open blockers from the E2 Go/No-Go review into governed decisions/checklist
-> items. **E2 implementation remains NO-GO until every item is `DECIDED` and reviewed** (see §9).
+> items. **All eight (B1–B8) are now `DECIDED`** (B8 activated the guard path, `DR-E2-B8-001`); aggregate is
+> **READY FOR E2 IMPLEMENTATION REVIEW**. **E2 implementation itself has NOT started — it remains a separate,
+> explicitly-approved PR** (see §9).
 >
 > **State at authoring:** `main` @ `79365c2` · 372/372 tests · `ALLOWLIST=[]` · declared path
 > `packages/isolated-signer-runtime/src/` exists but is **not exempt** · keyless scaffolding (E0/E1/E2-0/E2-1) merged.
@@ -118,25 +120,34 @@ key in code/config".
 | B5 | Rotation/revocation policy + cadence decided (§5) — ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` (`DR-E2-B4B5-001`): triggers per `rotation_trigger`; revoke terminal+zeroize; disable→governed re-enable; KMS failure → DEGRADED; cadence deferred to ops | **DECIDED** (cadence deferred) |
 | B6 | Emergency break-glass procedure defined (§6) — ratified in `E2-RATIFICATION-B6-B7-BREAKGLASS-AUDIT.md` (`DR-E2-B6B7-001`): incident-only; dual-control `signer_control`+independent approver (admin insufficient); safer-state-only actions (`trigger_kill_switch`/`revoke_signer`/`revoke_/disable_signer_profile`/`EXITS_ONLY`/`PAUSED`/`KILLED`); no key exposure / no Risk-Gate / no OperatingStateMachine bypass / no REAL-LIVE; quorum/threshold deferred to ops | **DECIDED** (quorum deferred) |
 | B7 | Audit retention decided (§7) — ratified in `E2-RATIFICATION-B6-B7-BREAKGLASS-AUDIT.md` (`DR-E2-B6B7-001`): all sensitive events retained; append-only; references-only/no-secrets; before/after for sensitive attempts; purge preserves financial/security audit; retention duration deferred to compliance/ops | **DECIDED** (duration deferred) |
-| B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
+| B8 | Allowlist activation of the declared path approved (separate governance decision) — ratified in `E2-RATIFICATION-B8-ALLOWLIST-ACTIVATION.md` (`DR-E2-B8-001`): single declared path `packages/isolated-signer-runtime/src/` moved into `ALLOWLIST`; no wildcard/general bypass; key material still HARD-forbidden; fail-closed elsewhere; **E2 implementation not started** | **DECIDED** (guard activation only) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
-**Aggregate readiness:** **NOT READY** — 7 `DECIDED` (B1–B7) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO** because B8 / allowlist activation is not approved (`ALLOWLIST=[]`).
+**Aggregate readiness:** **READY FOR E2 IMPLEMENTATION REVIEW** — 8 `DECIDED` (B1–B8). All custody-ops blockers are decided and the single declared isolated-signer path is activated in the guard (`ALLOWLIST=['packages/isolated-signer-runtime/src/']`). **This does NOT start E2 implementation:** real KMS/custody/signing is a separate, explicitly-approved PR (§9), and deferred ops/compliance parameters (break-glass quorum, audit retention duration, post-incident review, vendor instance, deployment tier) remain pending their own approvals.
 
 ---
 
-## 9. Explicit NO-GO statement
-- **E2 implementation (real KMS/custody/signing) remains NO-GO** until **every** checklist item B1–B7 is
-  `DECIDED` and reviewed, and B8 (allowlist activation) is separately approved.
-- **H5 / allowlist activation remains a separate approval** — declaring the path (H4) and creating the skeleton
-  (E2-1) do **not** authorize activation; `ALLOWLIST` stays `[]`.
-- **KMS/Vault integration remains a separate approval** — even after B1–B8, real custody/signing requires its own
-  PR with positive isolation tests, fail-closed `DEGRADED`, zeroization, least-privilege, and `09-THREAT §7`
+## 9. Explicit E2-implementation gate statement (post-B8)
+- **B1–B8 are all `DECIDED`** and the single declared isolated-signer path is activated in the guard
+  (`ALLOWLIST=['packages/isolated-signer-runtime/src/']`, ratified `DR-E2-B8-001`). Aggregate is
+  **READY FOR E2 IMPLEMENTATION REVIEW**.
+- **E2 implementation (real KMS/custody/signing) has NOT started and remains a separate, explicitly-approved
+  PR.** B8 activation is **guard-scope only**: it exempts one path from live-mechanism checks so a future
+  isolated-signer package can be built; it adds no live mechanism. The package at that path is still a
+  capabilities-all-false skeleton (PR-E2-1).
+- **KMS/Vault integration remains a separate approval** — real custody/signing requires its own PR with
+  positive isolation tests, fail-closed `DEGRADED`, zeroization, least-privilege, and `09-THREAT §7`
   readiness with zero `§7.8` blockers.
-- **Fail-safe stance:** until then, the system stays fully keyless/simulated; the mechanism guard remains
-  fail-closed (`ALLOWLIST=[]`), and no live signing/sending/transfer is possible.
+- **Deferred ops/compliance parameters remain pending their own approvals** — break-glass quorum/threshold
+  (B6), audit retention duration (B7), post-incident review process, custody vendor instance (B1), and
+  deployment tier (B2).
+- **Fail-safe stance:** until an implementation PR lands, the system stays fully keyless/simulated; the
+  mechanism guard stays fail-closed **everywhere except the one activated path**, key material stays
+  HARD-forbidden even inside it, and no live signing/sending/transfer is possible.
 
 ---
 
-**Confirmations:** Doc-only · E2 implementation remains NO-GO · No allowlist activation · No KMS/Vault/KeyManager
-introduced · No key material introduced · No execution authority introduced.
+**Confirmations:** Guard/governance-only · B1–B8 `DECIDED` · Single declared path activated (no wildcard/general
+bypass) · Key material HARD-forbidden even inside the allowlist · Fail-closed everywhere else · E2
+implementation NOT started · No KMS/Vault/KeyManager introduced · No key material introduced · No execution
+authority introduced.

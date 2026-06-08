@@ -105,23 +105,25 @@ export const FORBIDDEN_SECRETS = [
   { label: 'base58-key-blob', re: /\b[1-9A-HJ-NP-Za-km-z]{64,}\b/ },
 ];
 
-// ---- carve-out allowlist (PR-H3) ---------------------------------------------
-// CLOSED BY DEFAULT: ALLOWLIST is EMPTY, so no path is exempt and the guard is fail-closed everywhere
-// exactly as before. A future Gate E PR may add ONE explicit isolated signer/execution path prefix here
-// (e.g. 'packages/<isolated-signer>/src/'), per-path, accompanied by its own positive isolation tests.
+// ---- carve-out allowlist (PR-H3, ACTIVATED PR-E2-R5/B8) ----------------------
+// ACTIVATED — governance decision B8 (`DR-E2-B8-001`) moved the single DECLARED isolated-signer path into
+// ALLOWLIST. ALLOWLIST now contains EXACTLY ONE explicit path prefix and nothing else. There is NO
+// wildcard, NO regex, and NO general bypass: every path NOT under this exact prefix stays fail-closed.
 //
 // An allowlisted path is exempt from the LIVE-MECHANISM checks (FORBIDDEN_IMPORTS + FORBIDDEN_CODE) ONLY.
 // Hardcoded KEY MATERIAL stays HARD-FORBIDDEN even inside an allowlisted path (keys come from KMS/secret
-// vault at runtime, never from source). There is no general bypass and no wildcard.
-export const ALLOWLIST = Object.freeze([]);
+// vault at runtime, never from source) — see scanText `allowlisted_but_key_material:*`.
+//
+// Activation opens the path for a FUTURE, separately-approved isolated-signer/execution package; it adds NO
+// KMS/Vault, NO KeyManager, NO crypto/signing library, NO keys, NO signing/sending, NO tx build, NO RPC by
+// itself. The package at this path is currently a capabilities-all-false SKELETON (PR-E2-1). E2
+// implementation does NOT start here and requires its own separate approval.
+export const ALLOWLIST = Object.freeze(['packages/isolated-signer-runtime/src/']);
 
-// ---- DECLARED (reserved) allowlist path (PR-H4) ------------------------------
-// DECLARATION ONLY — NOT ACTIVATION. This names the single future isolated-signer/execution path that a
-// LATER PR may move into ALLOWLIST, right before real custody/signing exists there. It is NOT wired into
-// the active guard: ALLOWLIST stays []. Declaring it does NOT enable KMS, signing, crypto, or any live
-// mechanism; it does NOT exempt anything today; the path is non-existent (no package, no placeholder).
-// Even once activated, KEY MATERIAL in source stays HARD-FORBIDDEN there. Activation = moving this entry
-// into ALLOWLIST in a future, separately-approved PR with its own positive isolation tests.
+// ---- DECLARED allowlist path (PR-H4) — now ACTIVE (PR-E2-R5/B8) --------------
+// This names the single isolated-signer/execution path. As of B8 (`DR-E2-B8-001`) it has been moved into
+// ALLOWLIST above; ALLOWLIST === DECLARED_ALLOWLIST_PATHS (one path). Even when active, KEY MATERIAL in
+// source stays HARD-FORBIDDEN here. No other path may be added without a separate governance decision.
 export const DECLARED_ALLOWLIST_PATHS = Object.freeze(['packages/isolated-signer-runtime/src/']);
 
 /** True iff `relPath` is under an explicit allowlist directory prefix (path-segment match, no wildcards). */

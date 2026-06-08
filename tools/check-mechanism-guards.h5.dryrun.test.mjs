@@ -1,11 +1,12 @@
-// PR-H5 — Allowlist Activation DRY-RUN evidence.
+// PR-H5 — Allowlist Activation DRY-RUN evidence (UPDATED post-B8 activation, PR-E2-R5).
 //
-// This is TEST/REPORT-ONLY. It proves that activating the declared allowlist path is *testable in theory*
-// WITHOUT actually activating it. Activation here is SIMULATED purely by passing an explicit `allowlist`
-// PARAMETER into the guard's public API (`runMechanismGuard({ allowlist })` / `scanText(..., { allowlist })`).
-// The real module-level `ALLOWLIST` stays `[]` and is never modified. This file changes NO guard core.
-//
-// It is NOT B8 activation: B8 (moving the declared path into the real `ALLOWLIST`) remains BLOCKED.
+// This is TEST/REPORT-ONLY. It originally proved that activating the declared allowlist path was *testable
+// in theory* via an explicit `allowlist` PARAMETER, while the real `ALLOWLIST` stayed `[]`. As of B8
+// (`DR-E2-B8-001`) the declared path has been ACTIVATED: the real `ALLOWLIST` now contains exactly that one
+// path. The assertions below are updated to the post-activation reality, and the parameter-vs-real
+// divergence proof now uses a DIFFERENT, non-activated hypothetical path to show that passing a parameter
+// still never mutates the real `ALLOWLIST` (which remains exactly the one activated path). This file
+// changes NO guard core.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,54 +22,64 @@ const DECLARED = DECLARED_ALLOWLIST_PATHS[0];                 // 'packages/isola
 const DECLARED_FILE = `${DECLARED}signer.mjs`;
 const OUTSIDE_FILE = 'packages/signer-service-boundary/src/x.mjs';
 
-// A SIMULATED allowlist passed ONLY as a parameter — never assigned to the real ALLOWLIST.
-const SIMULATED_ALLOWLIST = Object.freeze([...DECLARED_ALLOWLIST_PATHS]);
+// A SIMULATED, NON-activated extra path passed ONLY as a parameter — never assigned to the real ALLOWLIST.
+const HYPOTHETICAL_EXTRA = 'packages/__hypothetical_other__/src/';
+const SIMULATED_ALLOWLIST = Object.freeze([...DECLARED_ALLOWLIST_PATHS, HYPOTHETICAL_EXTRA]);
 
-// ---- Proof 1: the REAL ALLOWLIST is actually empty ---------------------------
+// ---- Proof 1: the REAL ALLOWLIST now holds exactly the one activated path -----
 
-test('H5.1 real ALLOWLIST is [] (empty) and the active guard runs at allowlist=0', () => {
-  assert.equal(ALLOWLIST.length, 0);
-  const res = runMechanismGuard();                            // no args -> uses the real empty ALLOWLIST
+test('H5.1 real ALLOWLIST is the single activated declared path and guard runs at allowlist=1', () => {
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], DECLARED);
+  const res = runMechanismGuard();                            // no args -> uses the real ALLOWLIST
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
+  assert.equal(res.counts.allowlist, 1);
 });
 
-// ---- Proof 2: the declared path EXISTS but is NOT activated ------------------
+// ---- Proof 2: the declared path EXISTS and is now ACTIVATED ------------------
 
-test('H5.2 isolated-signer-runtime/src exists yet is NOT activated under the real ALLOWLIST', () => {
+test('H5.2 isolated-signer-runtime/src exists and is ACTIVATED; only its files are exempt', () => {
   const sources = collectSourceFiles();
   // the skeleton package source is actually present in the scan set
   assert.ok(
     sources.some((f) => f.replaceAll('\\', '/').includes('isolated-signer-runtime/src/')),
     'expected isolated-signer-runtime/src files to be scanned',
   );
-  // but the real (empty) allowlist exempts none of them
-  assert.equal(isAllowlisted(DECLARED_FILE, ALLOWLIST), false);
-  for (const f of sources) assert.equal(isAllowlisted(f, ALLOWLIST), false, `real allowlist must not exempt ${f}`);
+  // the real allowlist now exempts the declared path, and ONLY files under it
+  assert.equal(isAllowlisted(DECLARED_FILE, ALLOWLIST), true);
+  // mirror the guard: compare on the repo-relative path (collectSourceFiles returns absolute paths)
+  const toRel = (f) => { const n = f.replaceAll('\\', '/'); const i = n.indexOf('packages/'); return i >= 0 ? n.slice(i) : n; };
+  for (const f of sources) {
+    const rel = toRel(f);
+    const expected = rel.startsWith('packages/isolated-signer-runtime/src/');
+    assert.equal(isAllowlisted(rel, ALLOWLIST), expected, `real allowlist exemption mismatch for ${rel}`);
+  }
 });
 
-// ---- Proof 3: live mechanism FAILS under the empty (real) allowlist ----------
+// ---- Proof 3: a live mechanism OUTSIDE the activated path still FAILS ---------
 
-test('H5.3 a live mechanism at the declared path FAILS under the real empty ALLOWLIST', () => {
-  const v = scanText(DECLARED_FILE, "import { Connection } from '@solana/web3.js';\nc.sendRawTransaction(tx);");
+test('H5.3 a live mechanism OUTSIDE the declared path FAILS under the real ALLOWLIST', () => {
+  const v = scanText(OUTSIDE_FILE, "import { Connection } from '@solana/web3.js';\nc.sendRawTransaction(tx);");
   assert.ok(rules(v).includes('solana-sdk-import'));
   assert.ok(rules(v).includes('tx-send'));
 });
 
-// ---- Proof 4: PASSES only via an explicit allowlist PARAMETER (not the real ALLOWLIST) ----
+// ---- Proof 4: a PARAMETER never mutates the real ALLOWLIST (still exactly one path) ----
 
-test('H5.4 the SAME file is exempt ONLY when an allowlist is passed as a parameter; real state stays []', () => {
-  const live = "import { Connection, Keypair } from '@solana/web3.js';\nconn.sendRawTransaction(tx);\nnew KeyManager();";
-  // simulated activation via PARAMETER -> exempt
-  assert.deepEqual(scanText(DECLARED_FILE, live, { allowlist: SIMULATED_ALLOWLIST }), []);
-  // real guard (default arg) STILL fails on the very same content -> proves divergence
-  assert.ok(scanText(DECLARED_FILE, live).length > 0);
-  // and the real module-level ALLOWLIST was NOT mutated by passing a parameter
-  assert.equal(ALLOWLIST.length, 0);
-  assert.equal(runMechanismGuard().counts.allowlist, 0);
-  // a simulated run reports the simulated count, the real run reports 0 — they do not bleed into each other
+test('H5.4 passing an extra allowlist path as a parameter does NOT mutate the real ALLOWLIST', () => {
+  const live = "import { Connection } from '@solana/web3.js';\nconn.sendRawTransaction(tx);";
+  const hypoFile = `${HYPOTHETICAL_EXTRA}x.mjs`;
+  // under the simulated (param) allowlist the hypothetical extra path is exempt...
+  assert.deepEqual(scanText(hypoFile, live, { allowlist: SIMULATED_ALLOWLIST }), []);
+  // ...but under the REAL allowlist that same hypothetical path still fails (it was never activated)
+  assert.ok(scanText(hypoFile, live).length > 0);
+  // the real module-level ALLOWLIST was NOT mutated: still exactly the one activated path
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], DECLARED);
+  assert.equal(runMechanismGuard().counts.allowlist, 1);
+  // a simulated run reports the simulated count; the real run still reports 1 — no bleed-through
   assert.equal(runMechanismGuard({ allowlist: SIMULATED_ALLOWLIST }).counts.allowlist, SIMULATED_ALLOWLIST.length);
-  assert.equal(runMechanismGuard().counts.allowlist, 0);
+  assert.equal(runMechanismGuard().counts.allowlist, 1);
 });
 
 // ---- Proof 5: key material stays HARD-forbidden even inside the simulated allowlist ----
@@ -103,11 +114,12 @@ test('H5.6 live mechanisms OUTSIDE the declared path are rejected even under the
   }
 });
 
-// ---- Proof 7 (closing invariant): repo is fully closed at the real empty ALLOWLIST ----
+// ---- Proof 7 (closing invariant): repo passes with exactly one activated path; everywhere else closed ----
 
-test('H5.7 dry-run leaves the repo fully closed: real guard PASS at allowlist=0, B8 not activated', () => {
+test('H5.7 post-B8 the repo passes at allowlist=1; only the one declared path is activated', () => {
   const res = runMechanismGuard();
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
-  assert.equal(res.counts.allowlist, 0);
-  assert.equal(ALLOWLIST.length, 0);
+  assert.equal(res.counts.allowlist, 1);
+  assert.equal(ALLOWLIST.length, 1);
+  assert.equal(ALLOWLIST[0], DECLARED);
 });
