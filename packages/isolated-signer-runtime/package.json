@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/isolated-signer-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Signer Runtime SKELETON (Gate E / E2-1): the declared isolated-signer path created as a safe, empty placeholder. No keys, no live mechanism, no signing authority. NOT activated in the mechanism guard's ALLOWLIST (which stays []), so this source is fully scanned and any live mechanism added here is rejected until a future, separately-approved PR activates the path. No KMS/vault; no KeyManager; no crypto/signing library; no transaction building/serialization; no signing/sending; no RPC/provider; no DB; no REAL-LIVE; no execution authority.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}

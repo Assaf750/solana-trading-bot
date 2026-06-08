@@ -1,14 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
 
 import {
   scanText, runMechanismGuard, isAllowlisted, ALLOWLIST, DECLARED_ALLOWLIST_PATHS, collectSourceFiles,
 } from './check-mechanism-guards.mjs';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const rules = (vs) => vs.map((v) => v.rule).sort();
 
 const DECLARED = DECLARED_ALLOWLIST_PATHS[0];                 // 'packages/isolated-signer-runtime/src/'
@@ -32,11 +28,16 @@ test('declaration is NOT activation: ALLOWLIST stays empty and guard runs at all
   assert.equal(isAllowlisted(DECLARED_FILE, ALLOWLIST), false);
 });
 
-test('the declared path opens NO existing package (non-existent; matches no current source file)', () => {
-  assert.equal(existsSync(join(ROOT, 'packages', 'isolated-signer-runtime')), false);
+test('the declared path is NOT activated: the active (empty) ALLOWLIST exempts no source file', () => {
+  // The isolated-signer-runtime skeleton package now EXISTS (PR-E2-1), but the declared path is still
+  // NOT in the active ALLOWLIST -> no source file is exempt and the guard scans everything.
   for (const f of collectSourceFiles()) {
-    assert.equal(isAllowlisted(f, DECLARED_ALLOWLIST_PATHS), false, `declared path must not match ${f}`);
+    assert.equal(isAllowlisted(f, ALLOWLIST), false, `active allowlist must not exempt ${f}`);
   }
+  // The guard runs over the now-existing skeleton and still passes at allowlist=0.
+  const res = runMechanismGuard();
+  assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
+  assert.equal(res.counts.allowlist, 0);
 });
 
 // ---- the declared path WOULD exempt live mechanisms (only when explicitly activated) ----
