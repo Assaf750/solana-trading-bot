@@ -116,12 +116,12 @@ key in code/config".
 | B3 | Dual-control / `signer_control` ops + two-person rule ratified (§3) — ratified in `E2-RATIFICATION-B3-DUAL-CONTROL.md` (`DR-E2-B3-001`): `signer_control` separate from admin; requester ≠ approver; two-person rule; operator roster deferred to ops | **DECIDED** |
 | B4 | Key generation/import policy decided (§4) — ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` (`DR-E2-B4B5-001`): generate-in-custody default; import exception-only + dual-control + non-persistence proof; no seed/mnemonic; no plaintext key | **DECIDED** |
 | B5 | Rotation/revocation policy + cadence decided (§5) — ratified in `E2-RATIFICATION-B4-B5-KEY-ROTATION.md` (`DR-E2-B4B5-001`): triggers per `rotation_trigger`; revoke terminal+zeroize; disable→governed re-enable; KMS failure → DEGRADED; cadence deferred to ops | **DECIDED** (cadence deferred) |
-| B6 | Emergency break-glass procedure defined (§6) — procedure proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (proposed, **not** ratified) | **UNDECIDED** |
-| B7 | Audit retention decided (§7) — policy proposed in `E2-BREAKGLASS-AUDIT-RETENTION-POLICY.md` (append-only/no-secrets affirmed; duration **not** ratified) | **UNDECIDED** |
+| B6 | Emergency break-glass procedure defined (§6) — ratified in `E2-RATIFICATION-B6-B7-BREAKGLASS-AUDIT.md` (`DR-E2-B6B7-001`): incident-only; dual-control `signer_control`+independent approver (admin insufficient); safer-state-only actions (`trigger_kill_switch`/`revoke_signer`/`revoke_/disable_signer_profile`/`EXITS_ONLY`/`PAUSED`/`KILLED`); no key exposure / no Risk-Gate / no OperatingStateMachine bypass / no REAL-LIVE; quorum/threshold deferred to ops | **DECIDED** (quorum deferred) |
+| B7 | Audit retention decided (§7) — ratified in `E2-RATIFICATION-B6-B7-BREAKGLASS-AUDIT.md` (`DR-E2-B6B7-001`): all sensitive events retained; append-only; references-only/no-secrets; before/after for sensitive attempts; purge preserves financial/security audit; retention duration deferred to compliance/ops | **DECIDED** (duration deferred) |
 | B8 | Allowlist activation of the declared path approved (separate governance decision) | **BLOCKED** (not approved) |
 | R | E0 readiness `ready=true` + E1 contract green + Risk/OperatingState/admission/signer all `ACTIVE` + audit path active, on testnet/devnet first | **READY FOR IMPLEMENTATION REVIEW** (mechanism present; gated on B1–B8) |
 
-**Aggregate readiness:** **NOT READY** — 2 `UNDECIDED` (B6, B7) + 5 `DECIDED` (B1–B5) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO**.
+**Aggregate readiness:** **NOT READY** — 7 `DECIDED` (B1–B7) + 1 `BLOCKED` (B8). E2 implementation remains **NO-GO** because B8 / allowlist activation is not approved (`ALLOWLIST=[]`).
 
 ---
 
