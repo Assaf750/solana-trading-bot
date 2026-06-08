@@ -204,6 +204,62 @@ export function createProviderAdapterSkeleton(config) {
   });
 }
 
+// ---- E2-KMS-6: provider config VALIDATION (no SDK, no live call, validation-only) ----
+
+const TESTNET_ENVS = ['devnet', 'testnet', 'localnet'];
+// Indicators that mark a value as mainnet/prod or as a live endpoint/send surface — blocked in validation.
+const MAINNET_OR_ENDPOINT = /(mainnet|prod|broadcast|rpc|endpoint|https?:\/\/|provider_url|cluster)/i;
+
+// Validate a provider config WITHOUT activating anything. This NEVER contacts a provider, never loads an SDK,
+// and never returns a handle or key. It classifies the config shape only: references are opaque strings;
+// environment must be testnet-family; mainnet/prod or endpoint/RPC indicators are blocked; key material is
+// refused. A "valid" shape does NOT configure the provider — resolution stays fail-closed (separate KMS PR).
+export function validateProviderConfig(config) {
+  const reasons = [];
+  if (config == null || typeof config !== 'object') {
+    return Object.freeze({ valid: false, status: UNCONFIGURED, reasons: Object.freeze(['missing_config']), activated: false, recommended_signer_profile_status: 'DEGRADED' });
+  }
+  if (looksLikeKeyMaterial(config)) {
+    return Object.freeze({ valid: false, status: 'invalid_key_material', reasons: Object.freeze(['key_material_not_accepted']), activated: false, recommended_signer_profile_status: 'DEGRADED' });
+  }
+
+  // provider_ref: required opaque reference string (not a secret, not an endpoint/URL).
+  const refOk = typeof config.provider_ref === 'string' && config.provider_ref.length > 0 && !MAINNET_OR_ENDPOINT.test(config.provider_ref);
+  if (typeof config.provider_ref !== 'string' || config.provider_ref.length === 0) reasons.push('missing_provider_ref');
+  else if (MAINNET_OR_ENDPOINT.test(config.provider_ref)) reasons.push('provider_ref_endpoint_or_mainnet_blocked');
+
+  // environment: must be testnet-family. mainnet/prod (or any non-testnet value) is blocked.
+  const env = config.environment;
+  if (typeof env !== 'string' || env.length === 0) reasons.push('missing_environment');
+  else if (!TESTNET_ENVS.includes(env)) reasons.push('mainnet_or_nontestnet_environment_blocked');
+
+  // key alias/id: OPTIONAL opaque reference strings only (never secrets, never endpoints).
+  for (const k of ['key_alias', 'key_id']) {
+    const v = config[k];
+    if (v !== undefined && (typeof v !== 'string' || v.length === 0 || MAINNET_OR_ENDPOINT.test(v))) reasons.push(`${k}_invalid_reference`);
+  }
+
+  // env/ref mixing: a mainnet/prod indicator anywhere with a testnet environment is a mismatch.
+  if (typeof env === 'string' && TESTNET_ENVS.includes(env)) {
+    for (const [kk, vv] of Object.entries(config)) {
+      if (typeof vv === 'string' && /mainnet|prod/i.test(vv)) { reasons.push('env_ref_mismatch_mainnet_in_testnet'); break; }
+      if (/mainnet|prod/i.test(String(kk))) { reasons.push('env_ref_mismatch_mainnet_in_testnet'); break; }
+    }
+  }
+
+  const valid = reasons.length === 0 && refOk;
+  return Object.freeze({
+    // `valid` means the config SHAPE is acceptable as references — it does NOT configure or activate anything.
+    valid,
+    status: valid ? 'reference_valid_no_sdk' : (reasons.includes('missing_config') || reasons.includes('missing_provider_ref') || reasons.includes('missing_environment') ? UNCONFIGURED : 'invalid'),
+    reasons: Object.freeze([...reasons]),
+    activated: false,                 // validation NEVER activates a provider
+    recommended_signer_profile_status: valid ? undefined : 'DEGRADED',
+    note: 'validation-only: shape check of opaque references; NO SDK, NO live provider, NO activation. A valid '
+      + 'shape stays fail-closed (handle:null) until a real KMS adapter PR.',
+  });
+}
+
 // Explicit predicate the rest of the system can use to assert refusal behaviour in tests/diagnostics.
 export function refusesKeyMaterial(input) {
   return looksLikeKeyMaterial(input);

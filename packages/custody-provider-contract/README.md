@@ -15,6 +15,16 @@ There is **no real handle** — resolution is **always fail-closed** (`ok:false`
 `status:'unconfigured'`, `recommended_signer_profile_status:'DEGRADED'`). **No real provider, no KMS/Vault SDK,
 no network, no signing here.** A real KMS-backed adapter is a separate, explicitly-approved PR.
 
+## E2-KMS-6 — provider config validation (no SDK, validation-only)
+`validateProviderConfig(config)` is **validation-only**: it classifies a config's **shape** (opaque
+`provider_ref` + testnet-family `environment` + optional opaque `key_alias`/`key_id` references) and **never**
+contacts a provider, loads an SDK, or returns a handle/key. It **fails closed**: missing/malformed config →
+`valid:false` + DEGRADED; mainnet/prod `environment` (or a mainnet/prod/endpoint indicator mixed into a testnet
+config) → blocked; key-material-shaped config → refused (`invalid_key_material`), never echoed. A `valid` shape
+(`reference_valid_no_sdk`) **does NOT activate** anything (`activated:false`) — the adapter stays
+`isConfigured()===false` and `resolveKeyHandle()` stays fail-closed (`handle:null`, DEGRADED). No `sign`/
+`exportKey`. Real KMS-backed activation is a separate, explicitly-approved PR.
+
 ## E2-KMS-4 — provider adapter skeleton (no SDK, fail-closed)
 `createProviderAdapterSkeleton(config)` is a **contract-shaped** provider adapter with **no SDK, no network, no
 live provider, no key material**. It is **never configured** (`isConfigured() === false`, `has_sdk:false`), so

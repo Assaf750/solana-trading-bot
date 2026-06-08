@@ -12,6 +12,7 @@ import {
   describeKeyHandleContract,
   resolveCustodyKeyHandle,
   createProviderAdapterSkeleton,
+  validateProviderConfig,
   CUSTODY_PROVIDER_CONTRACT_STATUS,
   CUSTODY_KEY_HANDLE_KIND,
 } from '../src/index.mjs';
@@ -240,4 +241,56 @@ test('E2-KMS-4 key-material in request or config is refused and never echoed', (
   assert.equal(r2.reason, 'config_invalid_key_material');
   assert.equal(r2.handle, null);
   assert.equal(JSON.stringify(bad.describe()).includes('leaked'), false);
+});
+
+// ================= E2-KMS-6: provider config VALIDATION (no SDK, validation-only) =================
+
+test('E2-KMS-6 valid-looking refs validate as references only and do NOT activate', () => {
+  const r = validateProviderConfig({ provider_ref: 'kms-key-ref-1', environment: 'devnet', key_alias: 'signer-alias-1' });
+  assert.equal(r.valid, true);
+  assert.equal(r.status, 'reference_valid_no_sdk');
+  assert.equal(r.activated, false);
+  assert.deepEqual([...r.reasons], []);
+  // validation does NOT make the adapter configured / does NOT resolve a handle
+  const a = createProviderAdapterSkeleton({ provider_ref: 'kms-key-ref-1', environment: 'devnet' });
+  assert.equal(a.isConfigured(), false);
+  assert.equal(a.resolveKeyHandle({ request: 'x' }).handle, null);
+});
+
+test('E2-KMS-6 missing / malformed config fails closed (DEGRADED, not valid)', () => {
+  for (const cfg of [undefined, null, 'x', 42, {}, { environment: 'devnet' }, { provider_ref: 'r' }]) {
+    const r = validateProviderConfig(cfg);
+    assert.equal(r.valid, false, `must be invalid: ${JSON.stringify(cfg)}`);
+    assert.equal(r.recommended_signer_profile_status, 'DEGRADED');
+    assert.equal(r.activated, false);
+  }
+});
+
+test('E2-KMS-6 mainnet/prod environment or mainnet ref in testnet env is blocked', () => {
+  assert.equal(validateProviderConfig({ provider_ref: 'r', environment: 'mainnet' }).valid, false);
+  assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'mainnet-beta' }).reasons.includes('mainnet_or_nontestnet_environment_blocked'));
+  assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'prod' }).reasons.includes('mainnet_or_nontestnet_environment_blocked'));
+  // mainnet indicator mixed into a testnet env -> mismatch
+  const mix = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', cluster: 'mainnet' });
+  assert.equal(mix.valid, false);
+  assert.ok(mix.reasons.includes('env_ref_mismatch_mainnet_in_testnet'));
+  // endpoint/URL in provider_ref blocked
+  assert.ok(validateProviderConfig({ provider_ref: 'https://node/', environment: 'devnet' }).reasons.includes('provider_ref_endpoint_or_mainnet_blocked'));
+});
+
+test('E2-KMS-6 key-material-shaped config refused and never echoed; no key/raw fields in result', () => {
+  const r = validateProviderConfig({ provider_ref: 'r', environment: 'devnet', secret: 'super-secret' });
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid_key_material');
+  assert.ok(r.reasons.includes('key_material_not_accepted'));
+  assert.equal(JSON.stringify(r).includes('super-secret'), false);
+  for (const k of ['key', 'privateKey', 'private_key', 'seed', 'mnemonic', 'keypair', 'handle', 'raw']) {
+    assert.equal(k in r, false, `result must not carry ${k}`);
+  }
+});
+
+test('E2-KMS-6 key_alias/key_id must be opaque reference strings (no endpoints/secrets)', () => {
+  assert.equal(validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_alias: 'alias-ok' }).valid, true);
+  assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_alias: 'https://x/' }).reasons.includes('key_alias_invalid_reference'));
+  assert.ok(validateProviderConfig({ provider_ref: 'r', environment: 'devnet', key_id: '' }).reasons.includes('key_id_invalid_reference'));
 });

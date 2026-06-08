@@ -94,9 +94,19 @@ export interface ProviderAdapterSkeleton {
   resolveKeyHandle(request?: unknown): KeyHandleResolveResult;
 }
 
+export interface ProviderConfigValidationResult {
+  readonly valid: boolean;
+  readonly status: 'reference_valid_no_sdk' | 'invalid' | 'invalid_key_material' | CustodyProviderStatus;
+  readonly reasons: readonly string[];
+  readonly activated: false;
+  readonly recommended_signer_profile_status?: 'DEGRADED';
+  readonly note?: string;
+}
+
 export function refusesKeyMaterial(input?: unknown): boolean;
 export function describeKeyHandleContract(): KeyHandleContractDescriptor;
 export function resolveCustodyKeyHandle(selection?: unknown): KeyHandleResolveResult;
 export function createProviderAdapterSkeleton(config?: unknown): ProviderAdapterSkeleton;
+export function validateProviderConfig(config?: unknown): ProviderConfigValidationResult;
 export const CUSTODY_PROVIDER_CONTRACT_STATUS: CustodyProviderStatus;
 export const CUSTODY_KEY_HANDLE_KIND: 'key-handle';
