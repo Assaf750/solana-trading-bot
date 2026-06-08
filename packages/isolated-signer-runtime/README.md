@@ -33,6 +33,15 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-C3-1 native WebCrypto Ed25519 probe (test-only capability check, NOT E2-C3)
+A **test-only** probe (`test/webcrypto-signing-probe.test.mjs`) checks whether `node:crypto.webcrypto.subtle`
+supports Ed25519 and, if so, that an **ephemeral** key generated in test memory can sign+verify a **local test
+payload** (and reject a tampered one). It is **not** E2-C3 implementation: no project/transaction signing, no
+custody/preflight wiring, no dependency, no persisted/static key material, no key export (private key is
+non-extractable), no `src` change, and `capabilities()` stays all-false. If Ed25519 is unsupported in the
+environment, the probe records that a fallback (`@noble/curves`) will be needed later and **does not fail the
+suite**. Real signing remains a separate **E2-C3** approval.
+
 ### E2-C2 mock signer adapter wiring (mock only, no real signing)
 `createMockSignerAdapter({ auditLog })` wires the preflight gate (preflight + readiness + audit before/after)
 to the signing-adapter **contract** (`@soltrade/signing-adapter-contract`). `attemptMockSign(input)` runs the
