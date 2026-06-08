@@ -185,3 +185,109 @@ test('E2-B guard still PASSES with allowlist exactly one path (no allowlist chan
   assert.equal(res.counts.allowlist, 1);
   assert.equal(ALLOWLIST[0], 'packages/isolated-signer-runtime/src/');
 });
+
+// ================= E2-C0: signing PREFLIGHT GATE (mock / no signing) =================
+
+// A fully-satisfied (mock) preflight input. provider_status:'configured' is a HYPOTHETICAL input — the real
+// E2-B wiring never produces it; here it only exercises the gate's logic. The gate STILL never signs.
+const VALID_PREFLIGHT = Object.freeze({
+  risk_approved: true,
+  real_live_config_valid: true,
+  signer_profile_status: 'ACTIVE',
+  execution_wallet_status: 'ACTIVE',
+  operating_state: 'ACTIVE',
+  custody_phase: 'loaded',
+  provider_status: 'configured',
+  payload_digest: 'digest-abc',
+  approved_payload_digest: 'digest-abc',
+  approval_age_slots: 2,
+  max_approval_age_slots: 10,
+  intent_id: 'intent-1',
+  idempotency_key: 'idem-1',
+});
+
+test('E2-C0 happy path: preflight_ok but NEVER signs/sends', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT });
+  assert.equal(r.preflight_ok, true);
+  assert.equal(r.blockers.length, 0);
+  // never signs, never sends, never attempts
+  assert.equal(r.can_attempt_signing, false);
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(r.can_send, false);
+  assert.match(r.note, /separate E2-C approval/);
+});
+
+test('E2-C0 each missing/invalid precondition yields its blocker (fail-closed)', () => {
+  const cases = [
+    [{ risk_approved: false }, 'risk_not_approved'],
+    [{ real_live_config_valid: false }, 'real_live_config_invalid'],
+    [{ signer_profile_status: 'DEGRADED' }, 'signer_not_active'],
+    [{ execution_wallet_status: 'DISABLED' }, 'execution_wallet_not_active'],
+    [{ operating_state: 'EXITS_ONLY' }, 'operating_state_not_active'],
+    [{ custody_phase: 'degraded' }, 'custody_degraded'],
+    [{ provider_status: 'unconfigured' }, 'custody_unconfigured'],
+    [{ payload_digest: 'x', approved_payload_digest: 'y' }, 'payload_digest_mismatch'],
+    [{ approval_age_slots: 99 }, 'approval_stale'],
+    [{ intent_id: undefined }, 'missing_intent_id'],
+    [{ idempotency_key: undefined }, 'missing_idempotency_key'],
+  ];
+  for (const [override, blocker] of cases) {
+    const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, ...override });
+    assert.equal(r.preflight_ok, false, `expected blocked for ${blocker}`);
+    assert.ok(r.blockers.includes(blocker), `expected blocker ${blocker}, got ${r.blockers.join(',')}`);
+    assert.equal(r.signed, false); assert.equal(r.signature, null); assert.equal(r.can_send, false);
+  }
+});
+
+test('E2-C0 fail-closed: empty/invalid input is fully blocked, never ok', () => {
+  for (const bad of [undefined, null, {}, 'x', 42]) {
+    const r = runtime.evaluateSigningPreflight(bad);
+    assert.equal(r.preflight_ok, false);
+    assert.equal(r.can_attempt_signing, false);
+    assert.equal(r.signed, false);
+  }
+  // missing provider_status is treated as unconfigured (fail-closed)
+  const noProvider = { ...VALID_PREFLIGHT };
+  delete noProvider.provider_status;
+  assert.ok(runtime.evaluateSigningPreflight(noProvider).blockers.includes('custody_unconfigured'));
+});
+
+test('E2-C0 key-material-shaped input is refused (no further evaluation, never echoed)', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT, secret: 'nope' });
+  assert.equal(r.preflight_ok, false);
+  assert.deepEqual([...r.blockers], ['key_material_not_accepted']);
+  assert.equal(JSON.stringify(r).includes('nope'), false);
+});
+
+test('E2-C0 output envelope carries NO signature/bytes/transaction', () => {
+  const r = runtime.evaluateSigningPreflight({ ...VALID_PREFLIGHT });
+  assert.equal('signature' in r, true);
+  assert.equal(r.signature, null);
+  for (const k of ['bytes', 'tx', 'transaction', 'serialized', 'raw']) {
+    assert.equal(k in r, false, `envelope must not carry ${k}`);
+  }
+});
+
+test('E2-C0 audited gate records outcome without signing', () => {
+  const events = [];
+  const gate = runtime.createSigningPreflightGate({ auditLog: { append: (e) => events.push(e) } });
+  const ok = gate.evaluate({ ...VALID_PREFLIGHT, audit_actor: 'op', request_id: 'r1' });
+  assert.equal(ok.preflight_ok, true);
+  assert.equal(ok.signed, false);
+  const blocked = gate.evaluate({ ...VALID_PREFLIGHT, risk_approved: false, audit_actor: 'op' });
+  assert.equal(blocked.preflight_ok, false);
+  assert.equal(events.length, 2);
+  assert.equal(events[0].resource_type, 'signer_profile');
+  assert.match(events[1].audit_reason, /signing_preflight_blocked/);
+});
+
+test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {
+  // module-level: only the gate functions are added; no sign/send/execute exports
+  for (const k of ['sign', 'send', 'submit', 'execute', 'serialize', 'buildTransaction', 'loadKey', 'requestSign']) {
+    assert.equal(typeof runtime[k], 'undefined', `runtime must not export ${k}`);
+  }
+  // capabilities remain all-false
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
+});

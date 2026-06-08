@@ -23,6 +23,16 @@ The **isolated-signer path** (`DECLARED_ALLOWLIST_PATHS`, PR-H4; **activated** i
 - **Capabilities stay all-false:** `describeCustodyLifecycle()` reports `can_sign:false`, `can_send:false`,
   `has_key_material:false`, `provider_status:'unconfigured'`.
 
+## E2-C0 signing preflight gate (mock / no signing)
+`evaluateSigningPreflight(input)` / `createSigningPreflightGate({ auditLog })` evaluate whether the theoretical
+preconditions for signing hold — **without signing**. They check `risk_approved`, `real_live_config_valid`,
+`signer_profile_status==='ACTIVE'`, `execution_wallet_status==='ACTIVE'`, `operating_state==='ACTIVE'`, custody
+not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness (mock), and presence of
+`intent_id`/`idempotency_key`. Each failure adds a `blocker`. The result is a **non-signing envelope**:
+`{ preflight_ok, can_attempt_signing:false, signed:false, signature:null, can_send:false, blockers:[…] }`.
+**Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
+Key-material-shaped input is refused. No crypto, no serialization, no key.
+
 ## Allowlist status — activated for THIS path only (B8)
 `ALLOWLIST = ['packages/isolated-signer-runtime/src/']` (one path, no wildcard). Live-mechanism checks are
 exempt **only here**; **key material in source stays HARD-forbidden** (`allowlisted_but_key_material:*`), and

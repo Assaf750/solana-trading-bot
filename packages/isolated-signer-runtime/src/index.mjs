@@ -5,3 +5,4 @@
 // in the mechanism guard's ALLOWLIST (B8), but key material stays HARD-forbidden even here.
 export * from './isolated-signer-runtime.mjs';
 export * from './custody-lifecycle-wiring.mjs';
+export * from './signing-preflight-gate.mjs';
