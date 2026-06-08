@@ -251,6 +251,38 @@ test('(10) key-material config/input is refused and never echoed', () => {
   assert.equal(JSON.stringify(vSecret).includes('super-secret-value'), false);
 });
 
+// ---- (10b) key-material-shaped VALUES smuggled into provider_ref/endpoint_ref are refused (not accepted as a valid reference) ----
+
+test('(10b) key-material-shaped reference VALUES (provider_ref/endpoint_ref) are refused, never accepted/echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    // smuggled as provider_ref value
+    const a = validateRpcProviderConfig({ provider_ref: km, environment: 'devnet' });
+    assert.equal(a.valid, false, `provider_ref key-material must be refused: ${km.slice(0, 16)}`);
+    assert.equal(a.status, 'invalid_key_material');
+    assert.ok(a.reasons.includes('key_material_not_accepted'));
+    assert.equal(a.configured, false);
+    assert.equal(a.has_rpc, false);
+    assert.equal(JSON.stringify(a).includes(km), false, 'key material value never echoed');
+    // smuggled as endpoint_ref value (with a clean provider_ref)
+    const b = validateRpcProviderConfig({ provider_ref: 'opaque-ref-1', environment: 'devnet', endpoint_ref: km });
+    assert.equal(b.valid, false, `endpoint_ref key-material must be refused: ${km.slice(0, 16)}`);
+    assert.equal(b.status, 'invalid_key_material');
+    assert.ok(b.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(b).includes(km), false);
+    // refusesKeyMaterial predicate agrees for the shaped-value object
+    assert.equal(refusesKeyMaterial({ provider_ref: km, environment: 'devnet' }), true);
+  }
+  // a clean opaque reference is still valid (no over-rejection of legitimate refs)
+  const ok = validateRpcProviderConfig({ provider_ref: 'opaque-ref-handle-2', environment: 'devnet', endpoint_ref: 'opaque-ep-handle-3' });
+  assert.equal(ok.valid, true);
+  assert.equal(ok.status, 'reference_valid_no_rpc');
+  assert.equal(ok.configured, false);
+  assert.equal(ok.has_rpc, false);
+});
+
 // ---- (11) hostile/throwing input to evaluateRpcReadiness returns a frozen refusal and does NOT throw ----
 
 test('(11) hostile/throwing input still RETURNS a frozen refusal (input_inspection_error), never throws', () => {

@@ -39,21 +39,34 @@ const ENDPOINT_RPC_TOKENS = Object.freeze([
 // broadcast / send-intent indicators — the boundary never broadcasts or sends.
 const BROADCAST_SEND_TOKENS = Object.freeze(['broadcast', 'send']);
 
+// String-level key-material heuristic: PEM, a long base58 blob, or a mnemonic-length word list.
+// (Regexes are guard-safe — lowercase, not the capitalized FORBIDDEN_CODE keypair forms.)
+function stringLooksLikeKeyMaterial(s) {
+  if (typeof s !== 'string') return false;
+  const t = s.trim();
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(t)) return true;       // PEM private key
+  if (/^[1-9A-HJ-NP-Za-km-z]{64,}$/.test(t)) return true;              // long base58 blob
+  if (t.split(/\s+/).length >= 12) return true;                        // mnemonic-length word list
+  return false;
+}
+
 // Is the given input "key-material-shaped"? Used ONLY to REFUSE such input — never to accept/store/return it.
-// Conservative heuristic: PEM, a long base58 blob, a multi-word mnemonic, or an object exposing a secret field.
-// (Copied verbatim from the proven custody-provider-contract heuristic — lowercase regexes are guard-safe.)
+// Conservative: refuses a PEM / long-base58 / mnemonic STRING, an object exposing a secret-NAMED field, AND an
+// object carrying a key-material-shaped string VALUE (incl. one nested level) — so a secret smuggled into an
+// opaque reference field (e.g. provider_ref / endpoint_ref) is refused, never accepted as a "valid reference".
 function looksLikeKeyMaterial(input) {
   if (input == null) return false;
-  if (typeof input === 'string') {
-    const s = input.trim();
-    if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(s)) return true;       // PEM private key
-    if (/^[1-9A-HJ-NP-Za-km-z]{64,}$/.test(s)) return true;              // long base58 blob
-    if (s.split(/\s+/).length >= 12) return true;                        // mnemonic-length word list
-    return false;
-  }
+  if (typeof input === 'string') return stringLooksLikeKeyMaterial(input);
   if (typeof input === 'object') {
-    for (const k of Object.keys(input)) {
+    for (const [k, v] of Object.entries(input)) {
       if (/secret|private|seed|mnemonic|keypair|key_material|raw_key/i.test(k)) return true;
+      if (typeof v === 'string' && stringLooksLikeKeyMaterial(v)) return true;
+      if (v != null && typeof v === 'object') {
+        for (const [k2, v2] of Object.entries(v)) {
+          if (/secret|private|seed|mnemonic|keypair|key_material|raw_key/i.test(k2)) return true;
+          if (typeof v2 === 'string' && stringLooksLikeKeyMaterial(v2)) return true;
+        }
+      }
     }
   }
   return false;

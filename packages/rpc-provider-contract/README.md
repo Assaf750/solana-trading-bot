@@ -61,7 +61,10 @@ Readiness blockers (`evaluateRpcReadiness`):
 - `mainnet_indicator_blocked` — any `mainnet` / `mainnet-beta` / `prod` indicator.
 - `endpoint_or_rpc_blocked` — endpoint / RPC / provider-URL / cluster / websocket indicator.
 - `send_or_broadcast_indicator_blocked` — broadcast / send intent.
-- `key_material_not_accepted` — key-material-shaped input (refused, never echoed).
+- `key_material_not_accepted` — key-material-shaped input (refused, never echoed). This includes a secret-NAMED
+  field, a key-material-shaped STRING (PEM / long base58 / mnemonic), AND a key-material-shaped string **value**
+  smuggled into an opaque reference field (e.g. `provider_ref` / `endpoint_ref`) — such a value is never accepted
+  as a "valid reference".
 - `input_inspection_error` — a hostile/throwing accessor; inspection is caught and the input is still refused.
 - `rpc_provider_unconfigured_no_rpc` — **foundational**, always present and always last: no RPC, no live path.
 
