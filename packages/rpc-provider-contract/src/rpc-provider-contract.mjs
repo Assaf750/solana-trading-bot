@@ -693,3 +693,212 @@ export function validateProviderEndpointRefs(selection) {
     });
   }
 }
+
+// ===========================================================================================================
+// PR-E2-F-11 — ENDPOINT-REFERENCE BINDING HARNESS (CONTRACT-ONLY, REFERENCE-ONLY, FAIL-CLOSED, NOT LIVE)
+// ===========================================================================================================
+// SOURCE: docs/00-ARCHITECTURE.md §15.12 (Wave 4 execution/providers boundary) + docs/01-SSOT Group 40
+// (candidate provider vocabulary — provider_key_ref by reference only, no raw key).
+//
+// CONTRACT-ONLY BINDING HARNESS that proves an opaque endpoint_ref can be BOUND to a TEST-ONLY IN-MEMORY binding
+// map and STAY fail-closed. It is NOT live: it reads NO env, reads NO secret file, contacts NO provider, accepts
+// NO URL / API key / secret, returns NO raw endpoint, makes NO network call, and NEVER sets has_rpc / ready /
+// can_send / is_live true. "Binding" here means a pure in-memory lookup that CLASSIFIES whether an endpoint_ref is
+// present in a caller-supplied TEST-ONLY map of opaque reference-only entries — it binds/activates/contacts
+// nothing real. Every result is built from FIXED LITERALS + frozen reason tokens + a boolean `bound` flag; the
+// input / endpoint_ref / binding entry VALUES are NEVER echoed. Input + binding-entry shape validation REUSES the
+// hardened validateHeliusEndpointProvisioning + looksLikeKeyMaterial + the existing indicator token lists
+// (ENDPOINT_RPC_TOKENS / SECRET_INDICATOR_TOKENS / MAINNET_TOKENS) — they are NOT weakened.
+//
+// A binding-map ENTRY is screened EXACTLY like an input: a hostile entry that smuggles an endpoint/url/rpc
+// indicator, a secret/token/credential indicator, a mainnet/prod indicator, or key-material is REFUSED (and never
+// echoed). Any entry has_rpc/ready/can_send/is_live/configured flag is IGNORED and NEVER trusted — the result
+// flags are FIXED LITERALS (all false). A real endpoint binding / live wiring is a separate, explicitly-approved
+// PR and is NOT started here.
+
+// The canonical TEST-ONLY binding-entry shape's known keys. These are part of the mandated reference-only entry
+// ({ bound, provider_ref, environment, endpoint_kind }) and are NOT smuggled live surfaces — they are excluded
+// from the entry KEY-NAME indicator scan (so the legitimate `endpoint_kind` key is not mistaken for an endpoint
+// indicator). Their string VALUES are STILL fully scanned, and any UNKNOWN key name is STILL scanned.
+const BINDING_ENTRY_KNOWN_KEYS = Object.freeze(['bound', 'provider_ref', 'environment', 'endpoint_kind']);
+
+// Screen a binding-map ENTRY (its keys OR string values, shallow + one nested level) for blocked indicators,
+// EXACTLY as an input is screened. Returns a list of FIXED reason tokens (never echoes the entry's values).
+// Reuses the existing indicator token lists + looksLikeKeyMaterial — not weakened. The canonical entry keys are
+// excluded from the KEY-NAME indicator scan (the mandated `endpoint_kind` key is not a smuggled live surface),
+// but ALL string values (and any unknown key names) are still scanned, shallow + one nested level.
+function screenBindingEntry(entry) {
+  const reasons = [];
+  if (entry == null || typeof entry !== 'object') return reasons;
+
+  // Build the match set: scan every string VALUE; scan KEY NAMES only when the key is not a known canonical key.
+  // One nested level: a nested object's values are scanned, and its unknown key names too.
+  const hay = [];
+  for (const [k, val] of Object.entries(entry)) {
+    if (!BINDING_ENTRY_KNOWN_KEYS.includes(k)) hay.push(String(k).toLowerCase());
+    if (typeof val === 'string') hay.push(val.toLowerCase());
+    else if (val != null && typeof val === 'object') {
+      for (const [k2, v2] of Object.entries(val)) {
+        if (!BINDING_ENTRY_KNOWN_KEYS.includes(k2)) hay.push(String(k2).toLowerCase());
+        if (typeof v2 === 'string') hay.push(v2.toLowerCase());
+      }
+    }
+  }
+  const carries = (tokens) => tokens.some((t) => hay.some((s) => s.indexOf(t) !== -1));
+
+  if (carries(ENDPOINT_RPC_TOKENS)) reasons.push('endpoint_or_rpc_indicator_blocked');
+  if (carries(SECRET_INDICATOR_TOKENS)) reasons.push('endpoint_secret_indicator_blocked');
+  if (carries(MAINNET_TOKENS)) reasons.push('mainnet_or_nontestnet_environment_blocked');
+  // key-material heuristic over the whole entry (secret-NAMED fields / key-material-shaped string values).
+  if (looksLikeKeyMaterial(entry)) reasons.push('key_material_not_accepted');
+  return reasons;
+}
+
+// Describe the endpoint-reference BINDING HARNESS contract: test-only, in-memory, reference-only, fail-closed,
+// no env / no secret file / no URL / no API key / no secret / no live. Read-only; describes intent, performs
+// nothing.
+export function describeEndpointReferenceBindingHarness() {
+  return Object.freeze({
+    contract: 'endpoint-reference-binding-harness',
+    version: '0.0.0',
+    test_only: true,
+    reads_env: false,
+    reads_secret_files: false,
+    provider_ref: 'helius',
+    supported_environments: Object.freeze(['devnet', 'testnet', 'localnet']),
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    is_live: false,
+    network_call_made: false,
+    status: UNCONFIGURED,
+    note: 'Test-only in-memory reference binding; reads no env/secret; no URL, no API key, no secret; never live.',
+  });
+}
+
+// Validate a SINGLE binding INPUT object {provider_ref, environment, endpoint_ref, ...} as a reference-only
+// binding shape. Reuses the hardened validateHeliusEndpointProvisioning (testnet-family environment; helius-only;
+// required opaque endpoint_ref free of secret/endpoint/url/rpc indicators; refuses key material / unknown fields).
+// The result is built from FIXED LITERALS + frozen reason tokens — input / endpoint_ref VALUES are NEVER echoed.
+// Never throws — a hostile/throwing accessor RETURNS a frozen invalid refusal.
+export function validateEndpointReferenceBinding(input) {
+  try {
+    const v = validateHeliusEndpointProvisioning(input);
+    return Object.freeze({
+      // `valid` means the binding INPUT SHAPE is acceptable as opaque references — it does NOT bind or activate
+      // anything; configured/has_rpc/ready/can_send/is_live stay false (fail-closed, NOT live).
+      valid: v.valid,
+      status: v.valid ? 'reference_bound_no_live' : v.status,
+      reasons: Object.freeze([...v.reasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      network_call_made: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      network_call_made: false,
+    });
+  }
+}
+
+// The binding-harness CORE: prove an endpoint_ref can be BOUND to a TEST-ONLY IN-MEMORY binding map and stay
+// fail-closed. input = {provider_ref, environment, endpoint_ref}; bindingMap = a TEST-ONLY plain object mapping
+// endpoint_ref -> { bound: true, provider_ref, environment, endpoint_kind: 'reference_only' }. This performs a
+// PURE in-memory lookup: it binds/activates/contacts NOTHING real, makes NO network call, reads NO env/secret.
+// Every path is wrapped so a hostile/throwing accessor RETURNS a frozen invalid refusal (never throws, never
+// echoes). The result flags are FIXED LITERALS (all false) — any entry flags are IGNORED and NEVER trusted.
+export function bindEndpointReferenceForTest(input, bindingMap) {
+  try {
+    const reasons = [];
+
+    // 1) Validate the binding INPUT shape via the hardened provisioning validator (NOT weakened). It is itself
+    //    try/catch-wrapped and never throws. On invalid shape, propagate its reasons and stay unbound.
+    const v = validateHeliusEndpointProvisioning(input);
+    if (!v.valid) for (const r of v.reasons) reasons.push(r);
+
+    // 2) bindingMap must be a non-null plain object (the TEST-ONLY in-memory map). Reject otherwise.
+    const mapOk = bindingMap != null && typeof bindingMap === 'object' && !Array.isArray(bindingMap);
+    if (!mapOk) reasons.push('endpoint_ref_unbound');
+
+    // 3) Look up the entry for the input's endpoint_ref WITHOUT echoing it. Absent / not-bound -> unbound.
+    let entry;
+    let entryPresentAndBound = false;
+    if (mapOk) {
+      const epRef = (input != null && typeof input === 'object' && typeof input.endpoint_ref === 'string')
+        ? input.endpoint_ref
+        : '';
+      entry = epRef.length > 0 ? bindingMap[epRef] : undefined;
+      if (entry == null || typeof entry !== 'object' || entry.bound !== true) {
+        if (!reasons.includes('endpoint_ref_unbound')) reasons.push('endpoint_ref_unbound');
+      } else {
+        entryPresentAndBound = true;
+        // 4) SCREEN the entry EXACTLY like an input — refuse (and NEVER echo) any blocked indicator.
+        for (const r of screenBindingEntry(entry)) {
+          if (!reasons.includes(r)) reasons.push(r);
+        }
+        // 5) Mismatch checks: entry provider_ref / environment must match the input (references-only).
+        if (entry.provider_ref !== (input != null ? input.provider_ref : undefined)) {
+          reasons.push('endpoint_ref_provider_mismatch');
+        }
+        if (entry.environment !== (input != null ? input.environment : undefined)) {
+          reasons.push('endpoint_ref_environment_mismatch');
+        }
+        // 6) IGNORE any entry.has_rpc / entry.ready / entry.can_send / entry.is_live / entry.configured flags —
+        //    they are NEVER trusted; the result flags below are FIXED LITERALS (all false).
+      }
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const bound = uniqueReasons.length === 0 && entryPresentAndBound;
+    const valid = bound;
+    let status;
+    if (bound) status = 'reference_bound_no_live';
+    else if (uniqueReasons.includes('endpoint_ref_unbound')) status = 'unbound';
+    else status = 'invalid';
+
+    return Object.freeze({
+      // `bound`/`valid` mean the endpoint_ref matched a TEST-ONLY in-memory reference entry — it does NOT bind or
+      // activate anything real; configured/has_rpc/ready/can_send/is_live/network_call_made stay false (NOT live).
+      bound,
+      valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      network_call_made: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      bound: false,
+      valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      is_live: false,
+      network_call_made: false,
+    });
+  }
+}

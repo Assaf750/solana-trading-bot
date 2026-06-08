@@ -21,6 +21,10 @@ import {
   describeHeliusEndpointProvisioningContract,
   validateHeliusEndpointProvisioning,
   validateProviderEndpointRefs,
+  // PR-E2-F-11 — endpoint-reference binding harness (test-only, in-memory, reference-only, fail-closed, no-live).
+  describeEndpointReferenceBindingHarness,
+  validateEndpointReferenceBinding,
+  bindEndpointReferenceForTest,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -1194,6 +1198,605 @@ test('(P30) can_send/is_live stay false across the whole provisioning matrix (va
   assert.equal(d.ready, false);
   assert.equal(d.can_send, false);
   assert.equal(d.is_live, false);
+  assert.equal(d.status, 'unconfigured_no_rpc');
+  assert.equal(Object.isFrozen(d), true);
+  assert.equal(typeof d.note, 'string');
+});
+
+// ===========================================================================================================
+// PR-E2-F-11 — ENDPOINT-REFERENCE BINDING HARNESS (test-only, in-memory, reference-only, fail-closed, NOT live)
+// ===========================================================================================================
+// 32 required proofs. The harness proves an opaque endpoint_ref can be BOUND to a TEST-ONLY IN-MEMORY binding map
+// and STAY fail-closed. It is NOT live: reads NO env, reads NO secret file, contacts NO provider, accepts NO
+// URL/API key/secret, returns NO raw endpoint, makes NO network call, and NEVER sets has_rpc/ready/can_send/
+// is_live/network_call_made true. A "bound" result is references-only — the result flags are FIXED LITERALS
+// (all false), and the input / endpoint_ref / binding-entry VALUES are NEVER echoed. Any entry has_rpc/ready/
+// can_send/is_live/configured flag is IGNORED and NEVER trusted.
+//
+// IMPORTANT — opaque endpoint_ref / binding VALUES must avoid EVERY refused substring (no 'endpoint','rpc','url',
+// 'http','ws','provider_url','api_key','secret','token','credential','mainnet','prod'). We use 'helius-bind-ref-N'
+// and 'reference_only'.
+
+const BIND_REF_1 = 'helius-bind-ref-1';
+const BIND_REF_2 = 'helius-bind-ref-2';
+
+// A clean TEST-ONLY in-memory binding map: endpoint_ref -> reference-only entry. No live surface, no secret.
+function cleanBindingMap(ref = BIND_REF_1, providerRef = 'helius', environment = 'devnet') {
+  return { [ref]: { bound: true, provider_ref: providerRef, environment, endpoint_kind: 'reference_only' } };
+}
+
+// Every binding result must be fail-closed (references-only, NOT live) regardless of bound/validity. The result
+// flags are FIXED LITERALS (all false); no live/handle/endpoint/key surface field is ever present.
+function assertBindingFailClosed(r) {
+  assert.equal(Object.isFrozen(r), true);
+  assert.equal(r.configured, false);
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.is_live, false);
+  assert.equal(r.network_call_made, false);
+  assert.notEqual(r.is_live, true);
+  assert.equal(Object.isFrozen(r.reasons), true);
+  // never carries a live/handle/endpoint/key surface field, and never echoes provider_ref/endpoint_ref/binding.
+  for (const k of ['key', 'private_key', 'secret', 'seed', 'mnemonic', 'keypair', 'endpoint', 'rpc_endpoint', 'provider_url', 'url', 'credential', 'handle', 'provider_ref', 'endpoint_ref', 'binding', 'entry', 'bindingMap']) {
+    assert.equal(k in r, false, `binding result must not carry ${k}`);
+  }
+}
+
+// ---- (1) valid binding -> bound:true / reference_bound_no_live ----
+
+test('(B1) valid Helius binding -> bound:true, reference_bound_no_live', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    cleanBindingMap(BIND_REF_1),
+  );
+  assert.equal(r.bound, true, JSON.stringify([...r.reasons]));
+  assert.equal(r.valid, true);
+  assert.equal(r.status, 'reference_bound_no_live');
+  assert.deepEqual([...r.reasons], []);
+  assertBindingFailClosed(r);
+});
+
+// ---- (2)-(7) a bound result still has configured/has_rpc/ready/can_send/is_live/network_call_made all false ----
+
+test('(B2-B7) a bound result has configured/has_rpc/ready/can_send/is_live/network_call_made all false', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    cleanBindingMap(BIND_REF_1),
+  );
+  assert.equal(r.bound, true);
+  assert.equal(r.configured, false);          // (2) configured:false
+  assert.equal(r.has_rpc, false);             // (3) has_rpc:false
+  assert.equal(r.ready, false);               // (4) ready:false
+  assert.equal(r.can_send, false);            // (5) can_send:false
+  assert.equal(r.is_live, false);             // (6) is_live:false
+  assert.equal(r.network_call_made, false);   // (7) network_call_made:false
+  assertBindingFailClosed(r);
+});
+
+// ---- (8) missing binding (empty map) -> endpoint_ref_unbound / bound:false ----
+
+test('(B8) missing binding (empty map) -> endpoint_ref_unbound, bound:false (unbound)', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    {},
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'unbound');
+  assert.ok(r.reasons.includes('endpoint_ref_unbound'));
+  assertBindingFailClosed(r);
+});
+
+// ---- (9) empty/{} binding map -> refused (a present-but-different ref is also unbound) ----
+
+test('(B9) empty {} binding map and a ref absent from a populated map are both refused (unbound)', () => {
+  // empty {} map
+  const empty = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    {},
+  );
+  assert.equal(empty.bound, false);
+  assert.equal(empty.status, 'unbound');
+  assert.ok(empty.reasons.includes('endpoint_ref_unbound'));
+  assertBindingFailClosed(empty);
+  // a populated map that does NOT contain the requested ref is likewise unbound.
+  const absent = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    cleanBindingMap(BIND_REF_2),
+  );
+  assert.equal(absent.bound, false);
+  assert.equal(absent.status, 'unbound');
+  assert.ok(absent.reasons.includes('endpoint_ref_unbound'));
+  assertBindingFailClosed(absent);
+  // an entry whose bound flag is NOT true is also unbound (lookup hit but not bound).
+  const notBound = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: false, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only' } },
+  );
+  assert.equal(notBound.bound, false);
+  assert.ok(notBound.reasons.includes('endpoint_ref_unbound'));
+  assertBindingFailClosed(notBound);
+});
+
+// ---- (10) mismatched provider (entry.provider_ref !== 'helius') -> endpoint_ref_provider_mismatch ----
+
+test('(B10) entry provider_ref mismatch -> endpoint_ref_provider_mismatch (invalid, bound:false)', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'other-ref', environment: 'devnet', endpoint_kind: 'reference_only' } },
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_ref_provider_mismatch'));
+  // the entry value 'other-ref' is never echoed.
+  assert.equal(JSON.stringify(r).includes('other-ref'), false);
+  assertBindingFailClosed(r);
+});
+
+// ---- (11) mismatched environment -> endpoint_ref_environment_mismatch ----
+
+test('(B11) entry environment mismatch -> endpoint_ref_environment_mismatch (invalid, bound:false)', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'testnet', endpoint_kind: 'reference_only' } },
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_ref_environment_mismatch'));
+  assertBindingFailClosed(r);
+});
+
+// ---- (12) URL in binding entry value -> blocked AND URL not echoed ----
+
+test('(B12) URL in binding entry value -> endpoint_or_rpc_indicator_blocked; URL never echoed', () => {
+  const URL_LITERAL = 'https://x/';
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: URL_LITERAL } },
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(r).includes(URL_LITERAL), false, 'URL value never echoed');
+  assert.equal(JSON.stringify(r).includes('https://'), false);
+  assertBindingFailClosed(r);
+});
+
+// ---- (13) api_key indicator in binding entry -> blocked & not echoed ----
+
+test('(B13) api_key indicator in binding entry -> endpoint_or_rpc_indicator_blocked; value never echoed', () => {
+  // 'api_key' is in ENDPOINT_RPC_TOKENS; carried as an UNKNOWN entry value -> blocked. Value never echoed.
+  const MARK = 'MY-api_key-VALUE-B13';
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', extra: MARK } },
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'));
+  assert.equal(JSON.stringify(r).includes(MARK), false, 'api_key value never echoed');
+  assert.equal(JSON.stringify(r).includes('api_key'), false);
+  assertBindingFailClosed(r);
+});
+
+// ---- (14) secret/token indicator in binding entry -> blocked & not echoed ----
+
+test('(B14) secret/token indicator in binding entry -> endpoint_secret_indicator_blocked; value never echoed', () => {
+  for (const MARK of ['MY-secret-VALUE-B14', 'MY-token-VALUE-B14', 'A-credential-VALUE-B14']) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+      { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', extra: MARK } },
+    );
+    assert.equal(r.bound, false, `secret/token entry must be refused: ${MARK}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('endpoint_secret_indicator_blocked'), `endpoint_secret_indicator_blocked for ${MARK}`);
+    assert.equal(JSON.stringify(r).includes(MARK), false, 'secret/token value never echoed');
+    assertBindingFailClosed(r);
+  }
+});
+
+// ---- (15) raw endpoint field (provider_url / rpc_endpoint) in entry -> blocked & not echoed ----
+
+test('(B15) raw endpoint field name (provider_url / rpc_endpoint) in entry -> blocked; value never echoed', () => {
+  for (const [field, MARK] of [['provider_url', 'PROVIDER-URL-VAL-B15'], ['rpc_endpoint', 'RPC-ENDPOINT-VAL-B15']]) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+      { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', [field]: MARK } },
+    );
+    assert.equal(r.bound, false, `${field} entry must be refused`);
+    assert.equal(r.status, 'invalid');
+    // an UNKNOWN entry key carrying an endpoint/rpc indicator (provider_url / rpc_endpoint) is screened & blocked.
+    assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'), `endpoint_or_rpc_indicator_blocked for ${field}`);
+    assert.equal(JSON.stringify(r).includes(MARK), false, `${field} value never echoed`);
+    assert.equal(field in r, false);
+    assertBindingFailClosed(r);
+  }
+});
+
+// ---- (16) mainnet/prod in entry OR input -> blocked ----
+
+test('(B16) mainnet/prod in binding entry OR input -> blocked', () => {
+  // mainnet/prod smuggled into a binding entry VALUE (unknown key) -> mainnet_or_nontestnet_environment_blocked.
+  for (const MARK of ['some-mainnet-marker', 'a-prod-marker']) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+      { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', extra: MARK } },
+    );
+    assert.equal(r.bound, false, `mainnet/prod entry must be refused: ${MARK}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('mainnet_or_nontestnet_environment_blocked'), `mainnet block for ${MARK}`);
+    assertBindingFailClosed(r);
+  }
+  // mainnet/prod in the INPUT environment is refused by the reused provisioning validator (input shape invalid).
+  for (const env of ['mainnet', 'mainnet-beta', 'prod']) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: env, endpoint_ref: BIND_REF_1 },
+      cleanBindingMap(BIND_REF_1, 'helius', env),
+    );
+    assert.equal(r.bound, false, `mainnet input must be refused: ${env}`);
+    assert.ok(r.reasons.includes('mainnet_or_nontestnet_environment_blocked'), `mainnet input block for ${env}`);
+    assertBindingFailClosed(r);
+  }
+});
+
+// ---- (17) unknown provider input -> unknown_provider ----
+
+test('(B17) unknown provider input -> unknown_provider (invalid input shape, bound:false)', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'unknown-xyz', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    cleanBindingMap(BIND_REF_1, 'unknown-xyz'),
+  );
+  assert.equal(r.bound, false);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.ok(r.reasons.includes('unknown_provider'));
+  assertBindingFailClosed(r);
+});
+
+// ---- (18) triton / yellowstone input -> provider_not_enabled ----
+
+test('(B18) triton / yellowstone input -> provider_not_enabled (doc-listed disabled, bound:false)', () => {
+  for (const ref of ['triton', 'yellowstone']) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: ref, environment: 'devnet', endpoint_ref: BIND_REF_1 },
+      cleanBindingMap(BIND_REF_1, ref),
+    );
+    assert.equal(r.bound, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('provider_not_enabled'), `provider_not_enabled for ${ref}`);
+    assert.equal(r.reasons.includes('unknown_provider'), false);
+    assertBindingFailClosed(r);
+  }
+});
+
+// ---- (19) duplicate endpoint_ref via validateProviderEndpointRefs still duplicate_endpoint_ref (existing) ----
+
+test('(B19) existing provisioning duplicate_endpoint_ref still holds (F10 surface unaffected by F11)', () => {
+  const r = validateProviderEndpointRefs([
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { provider_ref: 'helius', environment: 'testnet', endpoint_ref: BIND_REF_1 },
+  ]);
+  assert.equal(r.valid, false);
+  assert.equal(r.status, 'invalid');
+  assert.equal(r.slot_count, 2);
+  assert.ok(r.reasons.includes('duplicate_endpoint_ref'));
+  assert.equal(r.can_send, false);
+  assert.equal(r.is_live, false);
+});
+
+// ---- (20) key-material-shaped endpoint_ref (PEM/base58/mnemonic) -> key_material_not_accepted & not echoed ----
+
+test('(B20) key-material-shaped endpoint_ref (input) -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: km },
+      cleanBindingMap(km),
+    );
+    assert.equal(r.bound, false, `key material refused: ${km.slice(0, 16)}`);
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r).includes(km), false, 'key material never echoed');
+    assert.equal(JSON.stringify(r).includes('LEAKBYTES'), false);
+    assertBindingFailClosed(r);
+    // validateEndpointReferenceBinding agrees: key-material input is refused & not echoed.
+    const v = validateEndpointReferenceBinding({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: km });
+    assert.equal(v.valid, false);
+    assert.ok(v.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(v).includes(km), false);
+  }
+});
+
+// ---- (21) key-material-shaped binding VALUE -> key_material_not_accepted & not echoed ----
+
+test('(B21) key-material-shaped binding entry VALUE -> key_material_not_accepted; never echoed', () => {
+  const pem = '-----BEGIN PRIVATE KEY-----\nLEAKBYTES2\n-----END PRIVATE KEY-----';
+  const base58 = '4xQy7KQ2t1FZ9bM3nP8sVwLrCeDhGjKuYtZaBcDfHkLmNpQrStUvWxYz12345678ABCDEFGHJKLMNPQRSTUVWXY';
+  const mnemonic = Array(12).fill('abandon').join(' ');
+  for (const km of [pem, base58, mnemonic]) {
+    const r = bindEndpointReferenceForTest(
+      { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+      { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', extra: km } },
+    );
+    assert.equal(r.bound, false, `key-material binding value refused: ${km.slice(0, 16)}`);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('key_material_not_accepted'));
+    assert.equal(JSON.stringify(r).includes(km), false, 'key-material binding value never echoed');
+    assert.equal(JSON.stringify(r).includes('LEAKBYTES2'), false);
+    assertBindingFailClosed(r);
+  }
+  // a secret-NAMED field in the entry is also refused as key material (never echoed).
+  const SECRET_VAL = 'SECRET-NAMED-FIELD-VALUE-B21';
+  const named = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', private_key: SECRET_VAL } },
+  );
+  assert.equal(named.bound, false);
+  assert.ok(named.reasons.includes('key_material_not_accepted'));
+  assert.equal(JSON.stringify(named).includes(SECRET_VAL), false);
+  assertBindingFailClosed(named);
+});
+
+// ---- (22) hostile throwing input (getter/Proxy) to both validators -> frozen input_inspection_error, no throw ----
+
+test('(B22) hostile/throwing input -> frozen input_inspection_error refusal, never throws, secret not echoed', () => {
+  const SECRET = 'boom-secret-trap-B22';
+  const throwingGetter = { get provider_ref() { throw new Error(SECRET); } };
+  const throwingEndpoint = { provider_ref: 'helius', environment: 'devnet', get endpoint_ref() { throw new Error(SECRET); } };
+  const throwAll = new Proxy({}, { get() { throw new Error(SECRET); } });
+
+  // validateEndpointReferenceBinding never throws.
+  for (const hostile of [throwingGetter, throwingEndpoint, throwAll]) {
+    let v;
+    assert.doesNotThrow(() => { v = validateEndpointReferenceBinding(hostile); }, 'validate must not propagate');
+    assert.equal(v.valid, false);
+    assert.equal(v.status, 'invalid');
+    assert.ok(v.reasons.includes('input_inspection_error'));
+    assert.equal(Object.isFrozen(v), true);
+    assert.equal(v.network_call_made, false);
+    assert.equal(JSON.stringify(v).includes(SECRET), false, 'secret never echoed (validate)');
+  }
+  // bindEndpointReferenceForTest never throws on a hostile input: it always returns a frozen, fail-closed refusal
+  // carrying input_inspection_error and never echoes the secret. The exact status is a refusal value (invalid for
+  // a getter that throws on the looked-up endpoint_ref / a throw-all Proxy; unbound when the provisioning step
+  // caught the throw internally and the absent endpoint_ref then reads as not-bound) — both are fail-closed.
+  for (const hostile of [throwingGetter, throwingEndpoint, throwAll]) {
+    let r;
+    assert.doesNotThrow(() => { r = bindEndpointReferenceForTest(hostile, cleanBindingMap(BIND_REF_1)); }, 'bind must not propagate');
+    assert.equal(r.bound, false);
+    assert.equal(r.valid, false);
+    assert.ok(['invalid', 'unbound'].includes(r.status), `hostile bind status must be a refusal: ${r.status}`);
+    assert.ok(r.reasons.includes('input_inspection_error'), `input_inspection_error recorded: ${JSON.stringify([...r.reasons])}`);
+    assertBindingFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret never echoed (bind)');
+  }
+  // a getter that throws on the LOOKED-UP endpoint_ref forces the outer catch -> a fixed 'invalid' refusal.
+  const throwOnEndpoint = { provider_ref: 'helius', environment: 'devnet', get endpoint_ref() { throw new Error(SECRET); } };
+  const rEp = bindEndpointReferenceForTest(throwOnEndpoint, cleanBindingMap(BIND_REF_1));
+  assert.equal(rEp.bound, false);
+  assert.equal(rEp.status, 'invalid');
+  assert.deepEqual([...rEp.reasons], ['input_inspection_error']);
+  assert.equal(JSON.stringify(rEp).includes(SECRET), false);
+  assertBindingFailClosed(rEp);
+  // primitive / weird inputs never throw either.
+  for (const input of [undefined, null, 42, 'x', true, []]) {
+    assert.doesNotThrow(() => validateEndpointReferenceBinding(input));
+    assert.doesNotThrow(() => bindEndpointReferenceForTest(input, cleanBindingMap(BIND_REF_1)));
+  }
+});
+
+// ---- (23) hostile throwing binding map (getter/Proxy) -> frozen refusal, no throw, no echo ----
+
+test('(B23) hostile/throwing binding map -> frozen refusal, never throws, secret not echoed', () => {
+  const SECRET = 'boom-map-trap-B23';
+  const input = { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 };
+  // a Proxy whose get trap throws on ANY property access (the bindingMap[epRef] lookup throws -> outer catch).
+  const throwAllMap = new Proxy({}, { get() { throw new Error(SECRET); } });
+  // a map whose target endpoint_ref slot is a throwing getter -> lookup throws -> outer catch.
+  const throwingSlotMap = { get [BIND_REF_1]() { throw new Error(SECRET); } };
+  // a map whose entry exposes a throwing accessor on a screened property -> screen throws -> outer catch.
+  const throwingEntryMap = { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', get endpoint_kind() { throw new Error(SECRET); } } };
+
+  for (const hostileMap of [throwAllMap, throwingSlotMap, throwingEntryMap]) {
+    let r;
+    assert.doesNotThrow(() => { r = bindEndpointReferenceForTest(input, hostileMap); }, 'bind must not propagate map exception');
+    assert.equal(r.bound, false);
+    assert.equal(r.valid, false);
+    assert.equal(r.status, 'invalid');
+    assert.ok(r.reasons.includes('input_inspection_error'));
+    assertBindingFailClosed(r);
+    assert.equal(JSON.stringify(r).includes(SECRET), false, 'secret/error message never echoed (hostile map)');
+  }
+  // an Array bindingMap is rejected (not a plain object) -> unbound, never throws.
+  const arrMap = bindEndpointReferenceForTest(input, [{ bound: true }]);
+  assert.equal(arrMap.bound, false);
+  assert.ok(arrMap.reasons.includes('endpoint_ref_unbound'));
+  assertBindingFailClosed(arrMap);
+  // a null / primitive bindingMap is rejected too.
+  for (const badMap of [null, undefined, 42, 'x', true]) {
+    let r;
+    assert.doesNotThrow(() => { r = bindEndpointReferenceForTest(input, badMap); });
+    assert.equal(r.bound, false);
+    assert.ok(r.reasons.includes('endpoint_ref_unbound'));
+    assertBindingFailClosed(r);
+  }
+});
+
+// ---- (24) endpoint binding + provider registry still no-live (validateProviderEndpointRefs / selection) ----
+
+test('(B24) endpoint binding leaves the provider registry / provisioning STILL no-live (can_send:false)', () => {
+  // a bound endpoint_ref does NOT change the registry/provisioning surfaces — they stay references-only / no-live.
+  const bound = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    cleanBindingMap(BIND_REF_1),
+  );
+  assert.equal(bound.bound, true);
+  assert.equal(bound.can_send, false);
+  // the F9 registry selection of the same Helius ref is still references-only / not sendable / not live.
+  const sel = validateRpcProviderSelection([{ provider_ref: 'helius', environment: 'devnet' }]);
+  assert.equal(sel.can_send, false);
+  assert.equal(sel.configured, false);
+  assert.notEqual(sel.is_live, true);
+  // the F10 provisioning of the same endpoint_ref is still references-only / not sendable / not live.
+  const prov = validateProviderEndpointRefs([{ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }]);
+  assert.equal(prov.can_send, false);
+  assert.equal(prov.configured, false);
+  assert.equal(prov.is_live, false);
+});
+
+// ---- (25) endpoint binding through the send gate is STILL refused (cross-package, can_send:false) ----
+
+test('(B25) a bound Helius endpoint_ref is STILL refused by the send gate (can_send:false)', () => {
+  const sg = evaluateSendPreflight({
+    sign_only_success: true,
+    readiness_ready: true,
+    preflight_ok: true,
+    custody_status: 'ACTIVE',
+    network: 'devnet',
+    rpc_provider: { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+  });
+  assert.equal(sg.can_send, false, 'a bound Helius endpoint must NOT enable send — fail-closed boundary preserved');
+});
+
+// ---- (26) faked entry flags {has_rpc:true, ready:true, can_send:true} are IGNORED (result flags stay false) ----
+
+test('(B26) faked entry has_rpc/ready/can_send/is_live/configured flags are IGNORED; result flags stay false', () => {
+  const r = bindEndpointReferenceForTest(
+    { provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 },
+    { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'reference_only', has_rpc: true, ready: true, can_send: true, is_live: true, configured: true, network_call_made: true } },
+  );
+  // the entry's faked flags can NEVER flip the fail-closed surface; result flags are FIXED LITERALS (all false).
+  // Note: a faked flag-key like 'has_rpc' contains the 'rpc' token (and is not a canonical key) -> screened &
+  // refused -> bound:false, AND the result flags stay false regardless (never-trust-entry-flags invariant).
+  assert.equal(r.has_rpc, false);
+  assert.equal(r.ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.is_live, false);
+  assert.equal(r.configured, false);
+  assert.equal(r.network_call_made, false);
+  assert.equal(r.bound, false, 'a flag-spoofing entry is screened & refused');
+  assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'), 'has_rpc/can_send keys carry the rpc token');
+  assertBindingFailClosed(r);
+});
+
+// ---- (27) no SDK import — self-scan src import specifiers (only local relative; no SDK/provider/network) ----
+
+test('(B27) src declares NO SDK/provider/network import specifier (binding harness adds none)', () => {
+  const reFrom = /\b(?:import|export)\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g;
+  const reBare = /\bimport\s*['"]([^'"]+)['"]/g;
+  const reCall = /\b(?:require|import)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+  const FORBIDDEN_SPEC = /(@solana|@solana-program|solana|web3\.js|jupiter|@jup-ag|jito|helius|@noble|@coral-xyz|anchor|bs58|tweetnacl|ed25519|node:net|node:http|node:https|node:tls|node:dgram|undici|ws|axios|pg|redis|node:crypto|node:fs|node:process)/i;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    const specs = [];
+    for (const re of [reFrom, reBare, reCall]) {
+      for (const m of text.matchAll(re)) specs.push(m[1]);
+    }
+    for (const s of specs) {
+      assert.equal(s.startsWith('.'), true, `${fn} must only import LOCAL relative paths: ${s}`);
+      assert.equal(FORBIDDEN_SPEC.test(s), false, `${fn} must not import an SDK/provider/network/fs module: ${s}`);
+    }
+  }
+});
+
+// ---- (28) no dependency — package.json still has no dependencies/devDependencies (binding adds none) ----
+
+test('(B28) package.json still declares NO dependencies/devDependencies (binding harness is dependency-free)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false);
+  assert.equal('devDependencies' in pkg, false);
+  assert.equal('peerDependencies' in pkg, false);
+  assert.equal('optionalDependencies' in pkg, false);
+});
+
+// ---- (29) no network/provider call + NO env read (grep src for process.env / readFileSync / node:fs / node:process) ----
+
+test('(B29) src (incl. binding harness) carries NO network/provider mechanism AND NO env/secret-file read', () => {
+  const NETWORK_MECH = /(\b(fetch|XMLHttpRequest)\s*\(|new\s+WebSocket|WebSocket\s*\(|new\s+Connection\s*\(|XMLHttpRequest|EventSource|node:net|node:http)/;
+  // env / secret-file read mechanisms must be entirely ABSENT from src (even inside comments/strings).
+  const ENV_SECRET_READ = /(process\.env|readFileSync|readFile\s*\(|node:fs|node:process|require\s*\(\s*['"]fs['"])/;
+  for (const fn of srcMjsFiles()) {
+    const raw = readFileSync(join(SRC, fn), 'utf8');
+    const code = stripCommentsAndStrings(raw);
+    assert.equal(/\bimport\b[^;]*\bfrom\b|\brequire\s*\(/.test(code), false, `no imports allowed in ${fn}`);
+    assert.equal(NETWORK_MECH.test(code), false, `no network/provider mechanism in ${fn}`);
+    assert.equal(FORBIDDEN_CODE.test(code), false, `no forbidden live mechanism in ${fn}`);
+    // full-text scan (raw, not just code): the harness reads NO env and NO secret file at all.
+    assert.equal(ENV_SECRET_READ.test(raw), false, `${fn} must not read env / secret files`);
+  }
+  // the descriptor explicitly pins reads_env / reads_secret_files / network_call_made to false.
+  const d = describeEndpointReferenceBindingHarness();
+  assert.equal(d.reads_env, false);
+  assert.equal(d.reads_secret_files, false);
+  assert.equal(d.network_call_made, false);
+});
+
+// ---- (30) no send/broadcast/serialize methods on createFailClosedRpcProvider (unchanged by binding harness) ----
+
+test('(B30) createFailClosedRpcProvider still exposes NO send/broadcast/serialize/rpc method (binding is pure)', () => {
+  const p = createFailClosedRpcProvider();
+  for (const m of ['send', 'broadcast', 'serialize', 'sendTransaction', 'sendRawTransaction', 'submit', 'sign', 'connect', 'rpc', 'request', 'call', 'query', 'bind', 'bindEndpoint', 'resolve', 'lookup', 'register']) {
+    assert.equal(typeof p[m], 'undefined', `provider must NOT expose ${m}`);
+  }
+  // the binding functions are pure/contract-only — none returns a configured/live/sendable surface.
+  assert.equal(describeEndpointReferenceBindingHarness().is_live, false);
+  assert.equal(bindEndpointReferenceForTest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }, cleanBindingMap(BIND_REF_1)).can_send, false);
+});
+
+// ---- (31) no literal endpoint URL / API key present in the new src (grep src for scheme://host / api key) ----
+
+test('(B31) src contains NO literal endpoint URL or API-key literal (full-text scan, binding harness adds none)', () => {
+  const URL_LITERAL = /(https?:\/\/[^\s'")]+|wss?:\/\/[^\s'")]+)/;
+  for (const fn of srcMjsFiles()) {
+    const text = readFileSync(join(SRC, fn), 'utf8');
+    assert.equal(URL_LITERAL.test(text), false, `${fn} must not contain a literal endpoint URL`);
+    assert.equal(/api_?key\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign an api key literal`);
+    assert.equal(/secret\s*[:=]\s*['"][^'"]+['"]/i.test(text), false, `${fn} must not assign a secret literal`);
+  }
+});
+
+// ---- (32) can_send:false unchanged across the whole binding matrix (bound + unbound + invalid shapes) ----
+
+test('(B32) can_send/is_live/network_call_made stay false across the whole binding matrix', () => {
+  const matrix = [
+    bindEndpointReferenceForTest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }, cleanBindingMap(BIND_REF_1)), // bound
+    bindEndpointReferenceForTest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }, {}),                          // unbound
+    bindEndpointReferenceForTest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }, cleanBindingMap(BIND_REF_1, 'helius', 'testnet')), // env mismatch
+    bindEndpointReferenceForTest({ provider_ref: 'unknown-xyz', environment: 'devnet', endpoint_ref: BIND_REF_1 }, cleanBindingMap(BIND_REF_1, 'unknown-xyz')),  // unknown provider
+    bindEndpointReferenceForTest({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }, { [BIND_REF_1]: { bound: true, provider_ref: 'helius', environment: 'devnet', endpoint_kind: 'https://x/' } }), // url in entry
+    validateEndpointReferenceBinding({ provider_ref: 'helius', environment: 'devnet', endpoint_ref: BIND_REF_1 }), // valid binding-input shape
+    validateEndpointReferenceBinding({ provider_ref: 'helius', environment: 'mainnet', endpoint_ref: BIND_REF_1 }), // mainnet input
+  ];
+  for (const r of matrix) {
+    assert.equal(r.can_send, false, `can_send must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.is_live, false, `is_live must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.network_call_made, false, `network_call_made must be false: ${JSON.stringify([...r.reasons])}`);
+    assert.equal(r.configured, false);
+    assert.equal(r.has_rpc, false);
+    assert.equal(r.ready, false);
+    assert.equal(Object.isFrozen(r), true);
+  }
+  // the descriptor is likewise fail-closed and test-only.
+  const d = describeEndpointReferenceBindingHarness();
+  assert.equal(d.contract, 'endpoint-reference-binding-harness');
+  assert.equal(d.version, '0.0.0');
+  assert.equal(d.test_only, true);
+  assert.equal(d.reads_env, false);
+  assert.equal(d.reads_secret_files, false);
+  assert.equal(d.provider_ref, 'helius');
+  assert.deepEqual([...d.supported_environments], ['devnet', 'testnet', 'localnet']);
+  assert.equal(d.configured, false);
+  assert.equal(d.has_rpc, false);
+  assert.equal(d.ready, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.network_call_made, false);
   assert.equal(d.status, 'unconfigured_no_rpc');
   assert.equal(Object.isFrozen(d), true);
   assert.equal(typeof d.note, 'string');

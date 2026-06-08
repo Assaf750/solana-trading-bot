@@ -198,6 +198,76 @@ Provisioning status values: `provisioning_valid_no_live` (valid references-only 
 live**) · `unconfigured_no_rpc` (missing `endpoint_ref`/`provider_ref`/environment, or zero slots) · `invalid`
 (any other blocking reason). A `valid` provisioning shape configures/activates **nothing**.
 
+## Endpoint reference binding harness (test-only, reference-only, no-live/no-secret)
+**Gate E / PR-E2-F-11 — a CONTRACT-ONLY endpoint-reference BINDING HARNESS.** It is additive: it does not change
+any existing export or behaviour. It proves that an opaque `endpoint_ref` can be **bound** to a **TEST-ONLY
+IN-MEMORY binding map** and **stay fail-closed**. It is **NOT live**: it reads **no env**, reads **no secret
+file**, contacts **no provider**, accepts **no URL / API key / secret**, returns **no raw endpoint**, makes **no
+network call**, and **never** sets `has_rpc` / `ready` / `can_send` / `is_live` true. "Binding" here means a pure
+in-memory lookup that **classifies** whether an `endpoint_ref` is present in a caller-supplied test-only map of
+opaque reference-only entries — it binds, activates, and contacts **nothing real**. Input + binding-entry shape
+validation **reuses** the hardened `validateHeliusEndpointProvisioning` + `looksLikeKeyMaterial` + the existing
+indicator token lists — they are **not weakened**.
+
+### Allowed binding input
+The binding `input` is the same **opaque-reference** shape validated elsewhere in this contract: a `provider_ref`
+(the enabled `helius` reference), a testnet-family `environment` (`devnet` / `testnet` / `localnet`), and a
+**required** non-empty opaque `endpoint_ref` string. There is **no endpoint URL, no host, no scheme, no API key,
+no secret, and no token** anywhere in the shape.
+
+### Test-only binding-map shape
+The `bindingMap` is a **TEST-ONLY plain object** supplied by the caller (a test), mapping `endpoint_ref` → an
+opaque reference-only entry of the form `{ bound: true, provider_ref, environment, endpoint_kind:
+'reference_only' }`. It exists **only in memory for a test** — it is never read from env or a secret file and
+never wired to anything live. The entry holds **opaque references only**: no URL, no host, no scheme, no API key,
+no secret, no token, no key material. Any `has_rpc` / `ready` / `can_send` / `is_live` / `configured` flag on an
+entry is **ignored and never trusted** — the result flags are **fixed literals** (all false).
+
+### Forbidden indicators (prose — no real URL/key shown)
+A binding-map entry is **screened exactly like an input** (its keys OR string values, shallow + one nested level,
+case-insensitive substring). It is **refused** (and never echoed) if it carries: an *endpoint / RPC / provider-URL
+/ cluster / websocket / url* indicator (→ `endpoint_or_rpc_indicator_blocked`); a *secret / token / credential /
+api-key / private-key* indicator (→ `endpoint_secret_indicator_blocked`); a *mainnet / prod* indicator (→
+`mainnet_or_nontestnet_environment_blocked`); or key-material-shaped content (→ `key_material_not_accepted`). No
+literal endpoint URL or API key is shown here or accepted anywhere.
+
+### Binding surface
+- `describeEndpointReferenceBindingHarness()` → frozen descriptor: `contract:
+  'endpoint-reference-binding-harness'`, `version`, `test_only: true`, `reads_env: false`, `reads_secret_files:
+  false`, `provider_ref: 'helius'`, `supported_environments: ['devnet','testnet','localnet']`, all of
+  `configured`/`has_rpc`/`ready`/`can_send`/`is_live`/`network_call_made` `false`, `status:
+  'unconfigured_no_rpc'`, plus a one-line `note`.
+- `validateEndpointReferenceBinding(input)` → validates a single binding **input** shape as opaque references
+  (reuses `validateHeliusEndpointProvisioning`). Frozen `{ valid, status, reasons, configured: false, has_rpc:
+  false, ready: false, can_send: false, is_live: false, network_call_made: false }`. A valid shape uses status
+  `reference_bound_no_live`; otherwise the provisioning status is propagated. **Never throws** — a
+  hostile/throwing accessor returns a fixed `status: 'invalid'`, `reasons: ['input_inspection_error']` refusal.
+  Input is **never echoed**.
+- `bindEndpointReferenceForTest(input, bindingMap)` → the harness **core**. Validates the input shape, requires a
+  non-null plain-object `bindingMap`, looks up `bindingMap[input.endpoint_ref]`, screens the entry like an input,
+  and checks `provider_ref` / `environment` match. Frozen `{ bound, valid, status, reasons, configured: false,
+  has_rpc: false, ready: false, can_send: false, is_live: false, network_call_made: false }`. `bound` is true
+  **only** when there are no reasons and the entry is present with `bound === true`; the result flags are **fixed
+  literals** (all false) and any entry flags are **ignored**. **Never throws** — a hostile/throwing accessor
+  returns a fixed `bound: false`, `status: 'invalid'`, `reasons: ['input_inspection_error']` refusal. Input /
+  `endpoint_ref` / binding-entry VALUES are **never echoed**.
+
+### Binding reason vocabulary
+- `endpoint_ref_unbound` — the `endpoint_ref` is absent from the binding map, or the map is missing / not a
+  plain object, or the matched entry is not `bound: true`.
+- `endpoint_ref_provider_mismatch` — the bound entry's `provider_ref` does not match the input's `provider_ref`.
+- `endpoint_ref_environment_mismatch` — the bound entry's `environment` does not match the input's `environment`.
+- *(also)* the screened-entry tokens `endpoint_or_rpc_indicator_blocked` / `endpoint_secret_indicator_blocked` /
+  `mainnet_or_nontestnet_environment_blocked` / `key_material_not_accepted`, plus the per-input tokens propagated
+  from `validateHeliusEndpointProvisioning` (`endpoint_ref_missing`, `provider_not_enabled`, `unknown_provider`,
+  `missing_config`, `missing_provider_ref`, `mainnet_or_nontestnet_environment_blocked`,
+  `endpoint_or_rpc_indicator_blocked`, `unknown_field_rejected`, `input_inspection_error`).
+
+Binding status values: `reference_bound_no_live` (the `endpoint_ref` matched a test-only in-memory reference entry
+— still **NOT live**) · `unbound` (`endpoint_ref` not bound) · `unconfigured_no_rpc` (missing core input fields,
+propagated from provisioning) · `invalid` (any other blocking reason). A `bound` result binds/activates **nothing
+real**, makes **no network call**, and reads **no env / secret**.
+
 ## Failure model
 `unconfigured_no_rpc` is the only contract status. There is no configured/live branch. No operation does I/O,
 crypto, signing, serialization, broadcast, or any network call.

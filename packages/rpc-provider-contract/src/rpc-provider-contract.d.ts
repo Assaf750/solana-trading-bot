@@ -160,3 +160,58 @@ export interface ProviderEndpointRefsResult {
 export function describeHeliusEndpointProvisioningContract(): HeliusEndpointProvisioningDescriptor;
 export function validateHeliusEndpointProvisioning(input?: unknown): HeliusEndpointProvisioningResult;
 export function validateProviderEndpointRefs(selection?: unknown): ProviderEndpointRefsResult;
+
+// --- PR-E2-F-11: endpoint-reference binding harness (test-only, reference-only, fail-closed, no-live/no-secret) ---
+
+export interface EndpointReferenceBindingHarnessDescriptor {
+  readonly contract: 'endpoint-reference-binding-harness';
+  readonly version: string;
+  readonly test_only: true;
+  readonly reads_env: false;
+  readonly reads_secret_files: false;
+  readonly provider_ref: 'helius';
+  readonly supported_environments: readonly ['devnet', 'testnet', 'localnet'];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+  readonly network_call_made: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export type EndpointReferenceBindingStatus =
+  | 'reference_bound_no_live'
+  | 'unbound'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface EndpointReferenceBindingValidationResult {
+  readonly valid: boolean;
+  readonly status: EndpointReferenceBindingStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+  readonly network_call_made: false;
+}
+
+export interface EndpointReferenceBindingResult {
+  readonly bound: boolean;
+  readonly valid: boolean;
+  readonly status: EndpointReferenceBindingStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly is_live: false;
+  readonly network_call_made: false;
+}
+
+export function describeEndpointReferenceBindingHarness(): EndpointReferenceBindingHarnessDescriptor;
+export function validateEndpointReferenceBinding(input?: unknown): EndpointReferenceBindingValidationResult;
+export function bindEndpointReferenceForTest(input?: unknown, bindingMap?: unknown): EndpointReferenceBindingResult;
