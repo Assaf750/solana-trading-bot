@@ -88,23 +88,56 @@ export function evaluateSigningPreflight(input = {}) {
   });
 }
 
-// Audited gate wrapper. Records the preflight outcome (no secrets, no key material) and returns the envelope.
+// Build a compact, secret-free reference suffix for audit_reason. intent_id / signer_profile_id are
+// IDENTIFIERS (not SSOT audit columns and not secrets); they are encoded INSIDE audit_reason so no audit
+// field outside AUDIT_COLUMNS is introduced. No payload, no digest, no signature, no key material here.
+function refSuffix(input) {
+  const parts = [];
+  if (isStr(input.intent_id)) parts.push(`intent:${input.intent_id}`);
+  if (isStr(input.signer_profile_id)) parts.push(`profile:${input.signer_profile_id}`);
+  return parts.length ? ` ${parts.join('|')}` : '';
+}
+
+// Build one audit entry using ONLY AUDIT_COLUMNS keys (resource_type, audit_scope, audit_actor, audit_reason,
+// request_id, idempotency_key). NEVER includes payload/digest/signature/key material.
+function auditEntry(input, audit_reason) {
+  const entry = {
+    resource_type: 'signer_profile',
+    audit_scope: 'signer_profile',
+    audit_actor: input.audit_actor,
+    audit_reason,
+  };
+  if (isStr(input.request_id)) entry.request_id = input.request_id;
+  if (isStr(input.idempotency_key)) entry.idempotency_key = input.idempotency_key;
+  return entry;
+}
+
+// Audited gate wrapper. Records BEFORE + AFTER for every preflight attempt (success and refusal), append-only,
+// refs-only (no secrets, no raw payload, no signature, no key material). It STILL never signs or sends.
 export function createSigningPreflightGate({ auditLog } = {}) {
-  const audit = auditLog || null;
+  const audit = auditLog && typeof auditLog.append === 'function' ? auditLog : null;
   return Object.freeze({
     evaluate(input = {}) {
-      const result = evaluateSigningPreflight(input);
-      if (audit && typeof audit.append === 'function') {
-        const entry = {
-          resource_type: 'signer_profile',
-          audit_scope: 'signer_profile',
-          audit_actor: input && isStr(input.audit_actor) ? input.audit_actor : 'system',
-          audit_reason: result.preflight_ok ? 'signing_preflight_ok_no_signing' : `signing_preflight_blocked:${result.blockers.join('|')}`,
-        };
-        if (input && isStr(input.request_id)) entry.request_id = input.request_id;
-        if (input && isStr(input.idempotency_key)) entry.idempotency_key = input.idempotency_key;
-        audit.append(entry);
+      // No audit configured -> pure passthrough (still never signs).
+      if (!audit) return evaluateSigningPreflight(input);
+
+      // Fail-closed: with audit configured, audit_actor is REQUIRED. Refuse with NO append (no partial entry).
+      if (input == null || typeof input !== 'object' || !isStr(input.audit_actor)) {
+        return envelope(['audit_actor_required']);
       }
+
+      // BEFORE: record the attempt.
+      audit.append(auditEntry(input, `signing_preflight_before${refSuffix(input)}`));
+
+      // Evaluate (pure; never signs).
+      const result = evaluateSigningPreflight(input);
+
+      // AFTER: record the outcome (ok-but-not-signed, or blocked with reasons).
+      const after = result.preflight_ok
+        ? `signing_preflight_after_ok_no_signing${refSuffix(input)}`
+        : `signing_preflight_after_blocked:${result.blockers.join('|')}${refSuffix(input)}`;
+      audit.append(auditEntry(input, after));
+
       return result;
     },
   });

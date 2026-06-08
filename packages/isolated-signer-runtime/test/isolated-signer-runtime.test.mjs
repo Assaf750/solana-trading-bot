@@ -8,6 +8,8 @@ import * as runtime from '../src/index.mjs';
 import { capabilities, describeIsolationBoundary } from '../src/index.mjs';
 import { runMechanismGuard, scanText, isAllowlisted, ALLOWLIST, DECLARED_ALLOWLIST_PATHS } from '../../../tools/check-mechanism-guards.mjs';
 import { FORBIDDEN_NAMES } from '../../ssot-types/src/forbidden.mjs';
+import { createAuditLog } from '../../data/src/audit.mjs';
+import { AUDIT_COLUMNS } from '../../data/src/schema.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, '..', 'src');
@@ -269,17 +271,77 @@ test('E2-C0 output envelope carries NO signature/bytes/transaction', () => {
   }
 });
 
-test('E2-C0 audited gate records outcome without signing', () => {
+// ================= E2-D: audit BEFORE/AFTER around the preflight attempt (no signing) =================
+
+test('E2-D before+after audited for SUCCESS path; never signs', () => {
   const events = [];
   const gate = runtime.createSigningPreflightGate({ auditLog: { append: (e) => events.push(e) } });
-  const ok = gate.evaluate({ ...VALID_PREFLIGHT, audit_actor: 'op', request_id: 'r1' });
+  const ok = gate.evaluate({ ...VALID_PREFLIGHT, audit_actor: 'op', request_id: 'r1', signer_profile_id: 'sp1' });
   assert.equal(ok.preflight_ok, true);
-  assert.equal(ok.signed, false);
-  const blocked = gate.evaluate({ ...VALID_PREFLIGHT, risk_approved: false, audit_actor: 'op' });
+  assert.equal(ok.signed, false); assert.equal(ok.signature, null); assert.equal(ok.can_send, false);
+  assert.equal(events.length, 2); // before + after
+  assert.match(events[0].audit_reason, /signing_preflight_before/);
+  assert.match(events[1].audit_reason, /signing_preflight_after_ok_no_signing/);
+});
+
+test('E2-D before+after audited for REFUSAL path', () => {
+  const events = [];
+  const gate = runtime.createSigningPreflightGate({ auditLog: { append: (e) => events.push(e) } });
+  const blocked = gate.evaluate({ ...VALID_PREFLIGHT, risk_approved: false, audit_actor: 'op', intent_id: 'i9' });
   assert.equal(blocked.preflight_ok, false);
   assert.equal(events.length, 2);
-  assert.equal(events[0].resource_type, 'signer_profile');
-  assert.match(events[1].audit_reason, /signing_preflight_blocked/);
+  assert.match(events[0].audit_reason, /signing_preflight_before/);
+  assert.match(events[1].audit_reason, /signing_preflight_after_blocked:.*risk_not_approved/);
+});
+
+test('E2-D audit entries validate against AUDIT_COLUMNS (real append-only log)', () => {
+  const log = createAuditLog();
+  const gate = runtime.createSigningPreflightGate({ auditLog: log });
+  gate.evaluate({ ...VALID_PREFLIGHT, audit_actor: 'op', request_id: 'r1', idempotency_key: 'k1', intent_id: 'i1', signer_profile_id: 'sp1' });
+  gate.evaluate({ ...VALID_PREFLIGHT, risk_approved: false, audit_actor: 'op' });
+  assert.equal(log.length, 4); // 2 attempts x (before + after); createAuditLog throws on unknown columns
+  const allowed = new Set(AUDIT_COLUMNS);
+  for (const e of log.list()) {
+    for (const k of Object.keys(e)) assert.ok(allowed.has(k), `audit key ${k} must be in AUDIT_COLUMNS`);
+  }
+});
+
+test('E2-D audit carries NO secrets / no raw payload / no signature / no tx bytes', () => {
+  const log = createAuditLog();
+  const gate = runtime.createSigningPreflightGate({ auditLog: log });
+  // include a digest + (refused) key-material-shaped field; neither must reach the audit
+  gate.evaluate({ ...VALID_PREFLIGHT, audit_actor: 'op', intent_id: 'i1', signer_profile_id: 'sp1', payload_digest: 'digest-abc', approved_payload_digest: 'digest-abc' });
+  for (const e of log.list()) {
+    const blob = JSON.stringify(e);
+    for (const bad of ['digest-abc', 'signature', 'serialized', 'transaction', 'bytes', 'secret', 'private_key', 'mnemonic']) {
+      assert.equal(blob.toLowerCase().includes(bad.toLowerCase()), false, `audit must not contain ${bad}`);
+    }
+  }
+});
+
+test('E2-D fail-closed: audit configured but audit_actor missing -> blocked, NO append (no partial)', () => {
+  const log = createAuditLog();
+  const gate = runtime.createSigningPreflightGate({ auditLog: log });
+  const r = gate.evaluate({ ...VALID_PREFLIGHT }); // no audit_actor
+  assert.equal(r.preflight_ok, false);
+  assert.ok(r.blockers.includes('audit_actor_required'));
+  assert.equal(r.signed, false);
+  assert.equal(log.length, 0); // nothing appended, not even a "before"
+});
+
+test('E2-D append-only: gate audit log exposes no update/delete', () => {
+  const log = createAuditLog();
+  assert.equal(typeof log.append, 'function');
+  assert.equal(typeof log.update, 'undefined');
+  assert.equal(typeof log.delete, 'undefined');
+  assert.equal(typeof log.clear, 'undefined');
+});
+
+test('E2-D no-audit passthrough still never signs', () => {
+  const gate = runtime.createSigningPreflightGate();
+  const r = gate.evaluate({ ...VALID_PREFLIGHT });
+  assert.equal(r.preflight_ok, true);
+  assert.equal(r.signed, false); assert.equal(r.signature, null); assert.equal(r.can_send, false);
 });
 
 test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {

@@ -33,6 +33,15 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-D audit before/after (evidence only, no signing)
+`createSigningPreflightGate({ auditLog })` records **before + after** the preflight for **every** attempt
+(success and refusal), append-only, **refs only**: `resource_type`/`audit_scope='signer_profile'`,
+`audit_actor`, `audit_reason` (carries the outcome + `intent_id`/`signer_profile_id` as identifier refs),
+and `request_id`/`idempotency_key` when present. Entries use **only `AUDIT_COLUMNS`** — no new audit field —
+and contain **no secrets, no raw payload, no payload digest, no transaction bytes, no signature**. With an
+`auditLog` configured, a missing `audit_actor` is **fail-closed with no append** (no partial entry). This is
+audit evidence around a non-signing preflight — **not** real signing.
+
 ## Allowlist status — activated for THIS path only (B8)
 `ALLOWLIST = ['packages/isolated-signer-runtime/src/']` (one path, no wildcard). Live-mechanism checks are
 exempt **only here**; **key material in source stays HARD-forbidden** (`allowlisted_but_key_material:*`), and

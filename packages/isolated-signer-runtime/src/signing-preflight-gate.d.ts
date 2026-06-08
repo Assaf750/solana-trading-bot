@@ -15,6 +15,7 @@ export interface SigningPreflightInput {
   readonly max_approval_age_slots?: number;
   readonly intent_id?: string;
   readonly idempotency_key?: string;
+  readonly signer_profile_id?: string;
   readonly audit_actor?: string;
   readonly request_id?: string;
 }
