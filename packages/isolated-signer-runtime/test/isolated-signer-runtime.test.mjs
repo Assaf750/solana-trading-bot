@@ -38,16 +38,17 @@ test('package source contains NO live mechanism / no key material (CODE scan)', 
   }
 });
 
-test('only approved internal imports (E2-B wiring); no forbidden SDK/provider imports', () => {
-  // E2-B introduces wiring that consumes the keyless lifecycle + custody provider contract via relative
-  // imports. The skeleton module itself stays import-free; the wiring module may import ONLY the two
-  // approved internal packages (relative paths). No external/SDK/provider import is allowed.
-  const ALLOWED_IMPORT = /^(\.\.\/\.\.\/keyless-custody-lifecycle\/src\/index\.mjs|\.\.\/\.\.\/custody-provider-contract\/src\/index\.mjs|\.\.\/\.\.\/real-live-readiness\/src\/index\.mjs)$/;
+test('only approved internal imports (E2-B/C wiring); no forbidden SDK/provider imports', () => {
+  // Wiring modules may import ONLY: same-package siblings (./*.mjs) or the approved internal packages
+  // (keyless lifecycle, custody provider contract, real-live readiness, signing adapter contract) via
+  // relative paths. No external/SDK/provider/crypto import is allowed.
+  const SAME_PKG = /^\.\/[\w.-]+\.mjs$/;
+  const CROSS_PKG = /^(\.\.\/\.\.\/keyless-custody-lifecycle\/src\/index\.mjs|\.\.\/\.\.\/custody-provider-contract\/src\/index\.mjs|\.\.\/\.\.\/real-live-readiness\/src\/index\.mjs|\.\.\/\.\.\/signing-adapter-contract\/src\/index\.mjs)$/;
   for (const fn of readdirSync(SRC).filter((x) => x.endsWith('.mjs'))) {
     const raw = readFileSync(join(SRC, fn), 'utf8');
     for (const m of raw.matchAll(/\bimport\b[^;]*?\bfrom\s*['"]([^'"]+)['"]/g)) {
       const spec = m[1];
-      assert.equal(spec.startsWith('.') && ALLOWED_IMPORT.test(spec), true, `disallowed import "${spec}" in ${fn}`);
+      assert.equal(spec.startsWith('.') && (SAME_PKG.test(spec) || CROSS_PKG.test(spec)), true, `disallowed import "${spec}" in ${fn}`);
     }
     // bare imports (side-effect) are not allowed anywhere
     assert.equal(/\bimport\s*['"][^'"]+['"]/.test(raw), false, `bare side-effect import in ${fn}`);
@@ -426,6 +427,99 @@ test('E2-E key material refused even with full readiness inputs; capabilities st
   assert.equal(JSON.stringify(r).includes('"no"'), false);
   assert.equal(runtime.capabilities().can_sign, false);
   assert.equal(runtime.capabilities().can_send, false);
+});
+
+// ================= E2-C2: mock signer adapter wiring (mock only, no real signing) =================
+
+test('E2-C2 mock signer descriptor: mock status, no real signature, all execution caps false', () => {
+  const d = runtime.describeMockSigner();
+  assert.equal(d.status, 'mock');
+  assert.equal(d.can_sign, false);
+  assert.equal(d.can_send, false);
+  assert.equal(d.has_key_material, false);
+  assert.equal(d.produces_real_signature, false);
+  assert.equal(d.is_live, false);
+  assert.equal(d.contract.can_sign, false); // embeds the signing-adapter contract descriptor
+});
+
+test('E2-C2 happy path: mock runs after preflight_ok but produces NO real signature', () => {
+  const lc = runtime.createMockSignerAdapter();
+  const r = lc.attemptMockSign({ ...VALID_PREFLIGHT });
+  assert.equal(r.ok, true);
+  assert.equal(r.mock, true);
+  assert.equal(r.adapter_status, 'mock');
+  assert.equal(r.preflight_ok, true);
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(r.can_send, false);
+  assert.equal(r.contract_noop_ok, false); // contract no-op adapter stays fail-closed even on valid preflight
+});
+
+test('E2-C2 mock result carries no bytes/tx/transaction/serialized/raw', () => {
+  const r = runtime.createMockSignerAdapter().attemptMockSign({ ...VALID_PREFLIGHT });
+  for (const k of ['bytes', 'tx', 'transaction', 'serialized', 'raw']) {
+    assert.equal(k in r, false, `mock result must not carry ${k}`);
+  }
+});
+
+test('E2-C2 mock does NOT run on preflight failure (returns blockers, no mock success)', () => {
+  const lc = runtime.createMockSignerAdapter();
+  const r = lc.attemptMockSign({ ...VALID_PREFLIGHT, risk_approved: false });
+  assert.equal(r.preflight_ok, false);
+  assert.notEqual(r.ok, true);
+  assert.ok(r.blockers.includes('risk_not_approved'));
+  assert.equal(r.signed, false); assert.equal(r.signature, null); assert.equal(r.can_send, false);
+  assert.equal(r.mock, true); // marked mock, but never "succeeded"
+});
+
+test('E2-C2 readiness failure blocks the mock signer', () => {
+  const r = runtime.createMockSignerAdapter().attemptMockSign({ ...VALID_PREFLIGHT, provider_degraded: true });
+  assert.equal(r.preflight_ok, false);
+  assert.ok(r.blockers.includes('readiness_not_ready'));
+  assert.notEqual(r.ok, true);
+});
+
+test('E2-C2 custody DEGRADED / unconfigured blocks the mock signer (fail-closed)', () => {
+  const lc = runtime.createMockSignerAdapter();
+  const deg = lc.attemptMockSign({ ...VALID_PREFLIGHT, custody_phase: 'degraded' });
+  assert.equal(deg.preflight_ok, false);
+  assert.ok(deg.blockers.includes('custody_degraded'));
+  assert.equal(deg.recommended_signer_profile_status, 'DEGRADED');
+  const unconf = lc.attemptMockSign({ ...VALID_PREFLIGHT, provider_status: 'unconfigured' });
+  assert.ok(unconf.blockers.includes('custody_unconfigured'));
+});
+
+test('E2-C2 audit before/after continues through the mock signer', () => {
+  const log = createAuditLog();
+  const lc = runtime.createMockSignerAdapter({ auditLog: log });
+  lc.attemptMockSign({ ...VALID_PREFLIGHT, audit_actor: 'op' });
+  assert.equal(log.length, 2); // before + after via the gate
+  assert.match(log.get(0).audit_reason, /signing_preflight_before/);
+  assert.match(log.get(1).audit_reason, /signing_preflight_after_ok_no_signing/);
+  const allowed = new Set(AUDIT_COLUMNS);
+  for (const e of log.list()) for (const k of Object.keys(e)) assert.ok(allowed.has(k), `audit key ${k} in AUDIT_COLUMNS`);
+});
+
+test('E2-C2 key material refused; never stored/returned; the contract no-op stays fail-closed', () => {
+  const lc = runtime.createMockSignerAdapter();
+  const r = lc.attemptMockSign({ ...VALID_PREFLIGHT, secret: 'super-secret' });
+  assert.equal(r.preflight_ok, false);
+  assert.ok(r.blockers.includes('key_material_not_accepted'));
+  assert.equal(JSON.stringify(r).includes('super-secret'), false);
+  // contract no-op adapter: never signs even for a valid preflight
+  const noop = lc.contractNoop.sign({ preflight: { preflight_ok: true, signed: false, signature: null, can_send: false, blockers: [] } });
+  assert.equal(noop.ok, false);
+  assert.equal(noop.signed, false);
+});
+
+test('E2-C2 no module-level signing/sending/execution surface; capabilities all-false', () => {
+  for (const k of ['sign', 'send', 'submit', 'execute', 'serialize', 'buildTransaction', 'loadKey', 'requestSign']) {
+    assert.equal(typeof runtime[k], 'undefined', `runtime must not export ${k}`);
+  }
+  assert.equal(runtime.capabilities().can_sign, false);
+  assert.equal(runtime.capabilities().can_send, false);
+  assert.equal(runtime.capabilities().has_key_material, false);
+  assert.equal(runtime.capabilities().live_mechanisms, false);
 });
 
 test('E2-C0 does not flip capabilities; no signing/sending surface added', () => {

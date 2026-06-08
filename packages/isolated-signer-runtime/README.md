@@ -33,6 +33,15 @@ not `degraded`/`unconfigured`, payload-digest binding (mock), approval freshness
 **Even when `preflight_ok:true`, it never signs or sends** — real signing requires a separate E2-C approval.
 Key-material-shaped input is refused. No crypto, no serialization, no key.
 
+### E2-C2 mock signer adapter wiring (mock only, no real signing)
+`createMockSignerAdapter({ auditLog })` wires the preflight gate (preflight + readiness + audit before/after)
+to the signing-adapter **contract** (`@soltrade/signing-adapter-contract`). `attemptMockSign(input)` runs the
+**mock** branch **only after `preflight_ok===true`**, and even then produces **no real signature**
+(`signed:false`, `signature:null`, `can_send:false`, `mock:true`, `adapter_status:'mock'`). On any preflight
+failure it returns the blockers and never "succeeds". The contract's no-op adapter stays fail-closed
+throughout (`contract_noop_ok:false`). No crypto, no key, no KMS, no send, no serialization; key-material
+input is refused. Real signing requires a separate **E2-C3** approval.
+
 ### E2-E readiness integration + fail-closed `DEGRADED` (gate only, no REAL-LIVE)
 The preflight now consumes the **E0 real-live readiness evaluator** (`@soltrade/real-live-readiness`) as a
 **hard precondition**: if readiness is not ready (any readiness blocker), the preflight adds `readiness_not_ready`
