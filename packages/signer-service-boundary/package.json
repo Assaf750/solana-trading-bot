@@ -1,0 +1,20 @@
+{
+  "name": "@soltrade/signer-service-boundary",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SignerService Isolation Boundary contract (Gate E / E1): request/response schema + payload-binding (mock digest ref) + approval-freshness (mock) + Risk/Intent/State gate checks + audit before/after. Mock/in-memory/deterministic. NEVER signs, NEVER sends; holds no key material; no crypto/signing library; no KeyManager/KMS; no transaction building/serialization; no RPC/provider; no REAL-LIVE; no execution authority. signed:false/signature:null/is_valid_on_chain:false/can_sign:false/can_send:false always.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test",
+    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+  }
+}
