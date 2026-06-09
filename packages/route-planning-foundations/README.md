@@ -86,6 +86,71 @@ order/transaction. NO `order_id` / `transaction_id` / `serialized_tx` /
 - States: `CANDIDATE_ROUTE_UNCONFIGURED` / `CANDIDATE_ROUTE_INVALID` /
   `CANDIDATE_ROUTE_REJECTED` / `CANDIDATE_ROUTE_CANDIDATE`.
 
+### (F) Route Feasibility / Slippage Advisory
+
+An **advisory** feasibility verdict derived from safe input **buckets only**
+(`route_quality_bucket` / `estimated_slippage_bucket` / `liquidity_bucket` /
+`hop_count_bucket`) — **NO live quote**, NO aggregator/Jupiter/RPC route call, NO
+order, NO transaction. A `FEASIBLE_ADVISORY` route opens **NO order / transaction
+/ signing / send** and flips no readiness flag. No quote/order/transaction field
+ever appears in output.
+
+- `describeRouteFeasibilityContract()`
+- `validateRouteFeasibilityInput(input)`
+- `evaluateRouteFeasibility(input)`
+- States: `ROUTE_FEASIBILITY_UNCONFIGURED` / `ROUTE_FEASIBILITY_INVALID` /
+  `ROUTE_FEASIBILITY_DEGRADED` / `ROUTE_FEASIBILITY_REJECTED` /
+  `ROUTE_FEASIBILITY_FEASIBLE_ADVISORY`.
+- Fail-Safe: `poor` quality / `high` slippage / `thin` liquidity -> rejected;
+  any `unknown` / `many` hops / `medium` slippage -> degraded; only clearly
+  good/low/deep/single|few -> feasible advisory.
+
+### (G) Execution Plan Preview
+
+A descriptive preview over a `CANDIDATE_ROUTE_CANDIDATE` plan that passed a
+`ROUTE_FEASIBILITY_FEASIBLE_ADVISORY` verdict — **WITHOUT** any transaction,
+order, signing, or send. **An execution plan preview is NOT a transaction**: even
+`EXECUTION_PLAN_PREVIEW_PREVIEW_VALID` opens **NO** `transaction_ready` /
+`signing_permitted` / `can_serialize` / `can_send`. `requires_next_stage` is a
+**fixed string-literal marker** (`transaction_build_review`) noting a LATER stage
+*may* review a transaction build — it is NOT a readiness flag. NO `order_id` /
+`transaction_id` / `serialized_tx` / `instruction_array` / `message_bytes` /
+`signature` / `signer` / `broadcast_target` / `endpoint` field ever appears.
+
+- `describeExecutionPlanPreviewContract()`
+- `validateExecutionPlanPreviewInput(input)`
+- `evaluateExecutionPlanPreview(input)`
+- States: `EXECUTION_PLAN_PREVIEW_UNCONFIGURED` /
+  `EXECUTION_PLAN_PREVIEW_INVALID` / `EXECUTION_PLAN_PREVIEW_REJECTED` /
+  `EXECUTION_PLAN_PREVIEW_SUPPRESSED` / `EXECUTION_PLAN_PREVIEW_PREVIEW_VALID`.
+
+### (H) Route Suppression / Rejection
+
+Prevents route/plan progression and reports **reasons only** — it creates **NO
+order and NO transaction**. A route is **NEVER** order / transaction / sign /
+send / execution authorized at this layer: `not_order_authorized` +
+`not_transaction_authorized` + `not_sign_authorized` + `not_send_authorized` +
+`not_execution_authorized` are **always present** when emitting, even for an
+advisory-valid feasible route. Suppression opens **NO** `transaction_ready` /
+`signing_permitted` / `can_send`.
+
+- `describeRouteSuppressionContract()`
+- `evaluateRouteSuppression(input)`
+
+### (I) Route Health / Status
+
+Consumes the route input boundary + source boundary + candidate route plan +
+feasibility + execution plan preview + suppression, and derives a **status
+only**. Every state keeps all 21 readiness/execution flags `false`;
+`ROUTE_HEALTH_PREVIEW_READY` does **NOT** open `transaction_ready` / signing /
+`can_serialize` / `can_send`.
+
+- `describeRouteHealthContract()`
+- `evaluateRouteHealth(inputs)`
+- States: `ROUTE_HEALTH_UNCONFIGURED` / `ROUTE_HEALTH_DEGRADED` /
+  `ROUTE_HEALTH_CANDIDATE_REVIEWED` / `ROUTE_HEALTH_PREVIEW_READY` /
+  `ROUTE_HEALTH_SUPPRESSED` / `ROUTE_HEALTH_BLOCKED`.
+
 ## Test
 
 ```

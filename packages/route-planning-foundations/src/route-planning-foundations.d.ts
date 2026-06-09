@@ -159,3 +159,149 @@ export interface CandidateRoutePlanResult extends RouteSafeFlags {
 export function describeCandidateRoutePlanContract(): CandidateRoutePlanContractDescriptor;
 export function validateCandidateRoutePlanInput(input: unknown): RouteValidationResult;
 export function evaluateCandidateRoutePlan(input: unknown): CandidateRoutePlanResult;
+
+// --- (F) Route Feasibility / Slippage Advisory ---
+
+export type RouteFeasibilityState =
+  | 'ROUTE_FEASIBILITY_UNCONFIGURED'
+  | 'ROUTE_FEASIBILITY_INVALID'
+  | 'ROUTE_FEASIBILITY_DEGRADED'
+  | 'ROUTE_FEASIBILITY_REJECTED'
+  | 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY';
+
+export interface RouteFeasibilityContractDescriptor extends RouteSafeFlags {
+  contract: 'route-feasibility-advisory';
+  version: string;
+  test_only: true;
+  supported_states: readonly RouteFeasibilityState[];
+  supported_reason_codes: readonly string[];
+  advisory_only: true;
+  valid: boolean;
+  route_feasibility_state: RouteFeasibilityState;
+  route_feasible_advisory: boolean;
+  route_rejected: boolean;
+  route_reason_codes: readonly string[];
+  status: RouteFeasibilityState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RouteFeasibilityResult extends RouteSafeFlags {
+  valid: boolean;
+  route_feasibility_state: RouteFeasibilityState;
+  route_feasible_advisory: boolean;
+  route_rejected: boolean;
+  route_reason_codes: readonly string[];
+  status: RouteFeasibilityState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRouteFeasibilityContract(): RouteFeasibilityContractDescriptor;
+export function validateRouteFeasibilityInput(input: unknown): RouteValidationResult;
+export function evaluateRouteFeasibility(input: unknown): RouteFeasibilityResult;
+
+// --- (G) Execution Plan Preview ---
+
+export type ExecutionPlanPreviewState =
+  | 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED'
+  | 'EXECUTION_PLAN_PREVIEW_INVALID'
+  | 'EXECUTION_PLAN_PREVIEW_REJECTED'
+  | 'EXECUTION_PLAN_PREVIEW_SUPPRESSED'
+  | 'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID';
+
+export interface ExecutionPlanPreviewContractDescriptor extends RouteSafeFlags {
+  contract: 'execution-plan-preview';
+  version: string;
+  test_only: true;
+  supported_states: readonly ExecutionPlanPreviewState[];
+  supported_reason_codes: readonly string[];
+  advisory_only: true;
+  execution_plan_preview_valid: boolean;
+  execution_plan_preview_state: ExecutionPlanPreviewState;
+  preview_ref: string | null;
+  route_plan_ref: string | null;
+  intent_record_ref: string | null;
+  preview_reason_codes: readonly string[];
+  requires_next_stage: 'transaction_build_review';
+  status: ExecutionPlanPreviewState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface ExecutionPlanPreviewResult extends RouteSafeFlags {
+  execution_plan_preview_valid: boolean;
+  execution_plan_preview_state: ExecutionPlanPreviewState;
+  preview_ref: string | null;
+  route_plan_ref: string | null;
+  intent_record_ref: string | null;
+  preview_reason_codes: readonly string[];
+  requires_next_stage: 'transaction_build_review';
+  status: ExecutionPlanPreviewState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeExecutionPlanPreviewContract(): ExecutionPlanPreviewContractDescriptor;
+export function validateExecutionPlanPreviewInput(input: unknown): RouteValidationResult;
+export function evaluateExecutionPlanPreview(input: unknown): ExecutionPlanPreviewResult;
+
+// --- (H) Route Suppression / Rejection ---
+
+export interface RouteSuppressionContractDescriptor extends RouteSafeFlags {
+  contract: 'route-suppression';
+  version: string;
+  test_only: true;
+  supported_reason_codes: readonly string[];
+  advisory_only: true;
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RouteSuppressionResult extends RouteSafeFlags {
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRouteSuppressionContract(): RouteSuppressionContractDescriptor;
+export function evaluateRouteSuppression(input: unknown): RouteSuppressionResult;
+
+// --- (I) Route Health / Status ---
+
+export type RouteHealthState =
+  | 'ROUTE_HEALTH_UNCONFIGURED'
+  | 'ROUTE_HEALTH_DEGRADED'
+  | 'ROUTE_HEALTH_CANDIDATE_REVIEWED'
+  | 'ROUTE_HEALTH_PREVIEW_READY'
+  | 'ROUTE_HEALTH_SUPPRESSED'
+  | 'ROUTE_HEALTH_BLOCKED';
+
+export interface RouteHealthContractDescriptor extends RouteSafeFlags {
+  contract: 'route-health';
+  version: string;
+  test_only: true;
+  supported_states: readonly RouteHealthState[];
+  advisory_only: true;
+  valid: boolean;
+  route_health_state: RouteHealthState;
+  status: RouteHealthState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RouteHealthResult extends RouteSafeFlags {
+  valid: boolean;
+  route_health_state: RouteHealthState;
+  status: RouteHealthState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRouteHealthContract(): RouteHealthContractDescriptor;
+export function evaluateRouteHealth(inputs: unknown): RouteHealthResult;

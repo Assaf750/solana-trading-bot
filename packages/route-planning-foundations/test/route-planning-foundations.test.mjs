@@ -18,7 +18,17 @@ import {
   evaluateRouteSourceBoundary,
   describeCandidateRoutePlanContract,
   validateCandidateRoutePlanInput,
-  evaluateCandidateRoutePlan
+  evaluateCandidateRoutePlan,
+  describeRouteFeasibilityContract,
+  validateRouteFeasibilityInput,
+  evaluateRouteFeasibility,
+  describeExecutionPlanPreviewContract,
+  validateExecutionPlanPreviewInput,
+  evaluateExecutionPlanPreview,
+  describeRouteSuppressionContract,
+  evaluateRouteSuppression,
+  describeRouteHealthContract,
+  evaluateRouteHealth
 } from '../src/index.mjs';
 
 import {
@@ -64,6 +74,8 @@ import { normalizeIngestionEvent } from '../../data-ingestion-foundations/src/in
 void validateRouteInputBoundary;
 void validateRouteSourceBoundary;
 void validateCandidateRoutePlanInput;
+void validateRouteFeasibilityInput;
+void validateExecutionPlanPreviewInput;
 
 // ---------------------------------------------------------------------------
 // REAL Stage-4 -> 5 -> 6 -> 7 -> 8 builders
@@ -710,6 +722,512 @@ test('(E) hostile input -> frozen, no throw, UNCONFIGURED', () => {
     assertSafe(r);
     assert.equal(r.candidate_route_state, 'CANDIDATE_ROUTE_UNCONFIGURED');
     assertNoExecArtifacts(r);
+  }
+});
+
+// ===========================================================================
+// (F) ROUTE FEASIBILITY / SLIPPAGE ADVISORY
+// ===========================================================================
+
+const feasibleInput = (over = {}) => ({
+  purpose: 'route_feasibility_input',
+  route_quality_bucket: 'good', estimated_slippage_bucket: 'low',
+  liquidity_bucket: 'deep', hop_count_bucket: 'single',
+  ...over
+});
+
+test('(F) descriptor: shape, states, reason codes, safe flags', () => {
+  const d = describeRouteFeasibilityContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'route-feasibility-advisory');
+  assert.equal(d.route_feasible_advisory, false);
+  assertNoExecArtifacts(d);
+  assert.deepEqual([...d.supported_states], [
+    'ROUTE_FEASIBILITY_UNCONFIGURED', 'ROUTE_FEASIBILITY_INVALID',
+    'ROUTE_FEASIBILITY_DEGRADED', 'ROUTE_FEASIBILITY_REJECTED',
+    'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY'
+  ]);
+});
+
+test('(F) missing buckets -> fail-closed UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 42, 'x', { purpose: 'route_feasibility_input' }]) {
+    const r = evaluateRouteFeasibility(inp);
+    assertSafe(r);
+    assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_UNCONFIGURED');
+    assert.equal(r.route_feasible_advisory, false);
+  }
+});
+
+test('(F) invalid enum bucket -> INVALID', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ route_quality_bucket: 'amazing' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_INVALID');
+  assert.equal(r.valid, false);
+});
+
+test('(F) unknown buckets -> degraded', () => {
+  for (const k of ['route_quality_bucket', 'estimated_slippage_bucket', 'liquidity_bucket', 'hop_count_bucket']) {
+    const r = evaluateRouteFeasibility(feasibleInput({ [k]: 'unknown' }));
+    assertSafe(r);
+    assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_DEGRADED');
+    assert.equal(r.route_feasible_advisory, false);
+  }
+});
+
+test('(F) poor quality -> rejected', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ route_quality_bucket: 'poor' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_REJECTED');
+  assert.equal(r.route_rejected, true);
+  assert.equal(r.route_reason_codes.includes('route_quality_poor'), true);
+});
+
+test('(F) high slippage -> rejected', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ estimated_slippage_bucket: 'high' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_REJECTED');
+  assert.equal(r.route_reason_codes.includes('slippage_high'), true);
+});
+
+test('(F) thin liquidity -> rejected', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ liquidity_bucket: 'thin' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_REJECTED');
+  assert.equal(r.route_reason_codes.includes('liquidity_thin'), true);
+});
+
+test('(F) many hops -> degraded', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ hop_count_bucket: 'many' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_DEGRADED');
+  assert.equal(r.route_reason_codes.includes('hop_count_many'), true);
+});
+
+test('(F) medium slippage (no rejection) -> degraded', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({ estimated_slippage_bucket: 'medium' }));
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_DEGRADED');
+  assert.equal(r.route_reason_codes.includes('slippage_medium'), true);
+});
+
+test('(F) good/low/deep/single -> feasible advisory only (no order/tx/sign/send)', () => {
+  const r = evaluateRouteFeasibility(feasibleInput());
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY');
+  assert.equal(r.route_feasible_advisory, true);
+  assert.equal(r.route_reason_codes.includes('route_feasible_advisory'), true);
+  // feasible opens NO order/transaction/sign/send (also asserted by assertSafe)
+  assert.equal(r.order_ready, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.route_ready, false);
+  assertNoExecArtifacts(r);
+  // every reason code from the allowlist
+  const ALLOW = [
+    'route_quality_unknown', 'route_quality_poor', 'slippage_unknown',
+    'slippage_high', 'slippage_medium', 'liquidity_unknown', 'liquidity_thin',
+    'hop_count_unknown', 'hop_count_many', 'route_feasible_advisory'
+  ];
+  for (const c of r.route_reason_codes) assert.equal(ALLOW.includes(c), true, `reason code ${c} not in allowlist`);
+});
+
+test('(F) acceptable/medium/adequate/few -> feasible advisory (passes)', () => {
+  const r = evaluateRouteFeasibility(feasibleInput({
+    route_quality_bucket: 'acceptable', estimated_slippage_bucket: 'medium',
+    liquidity_bucket: 'adequate', hop_count_bucket: 'few'
+  }));
+  // medium slippage triggers DEGRADED before feasible (Fail-Safe), per rules
+  assertSafe(r);
+  assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_DEGRADED');
+});
+
+test('(F) no quote/order/tx field in output; smuggled flag -> INVALID', () => {
+  const r = evaluateRouteFeasibility(feasibleInput());
+  assert.equal(Object.prototype.hasOwnProperty.call(r, 'quote_response'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(r, 'order_id'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(r, 'transaction_id'), false);
+  for (const s of [{ can_send: true }, { route_ready: true }, { execute: true }, { jupiter_route: 'x' }, { api_key: 'sk-LEAK' }, { network: 'mainnet' }]) {
+    const r2 = evaluateRouteFeasibility(feasibleInput(s));
+    assertSafe(r2);
+    assert.equal(r2.route_feasibility_state, 'ROUTE_FEASIBILITY_INVALID');
+    assert.equal(JSON.stringify(r2).includes('LEAK'), false);
+  }
+});
+
+test('(F) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRouteFeasibility(h); });
+    assertSafe(r);
+    assert.equal(r.route_feasibility_state, 'ROUTE_FEASIBILITY_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (G) EXECUTION PLAN PREVIEW
+// ===========================================================================
+
+const validCandidateRoute = evaluateCandidateRoutePlan(goodPlanInput());
+const feasibleVerdict = evaluateRouteFeasibility(feasibleInput());
+
+const goodPreviewInput = (over = {}) => ({
+  purpose: 'execution_plan_preview_input',
+  candidate_route_plan: validCandidateRoute,
+  route_feasibility: feasibleVerdict,
+  preview_ref: 'preview-1',
+  no_transaction_build: true, no_order: true, no_signing: true, no_send: true,
+  ...over
+});
+
+function assertNoPreviewArtifacts(res) {
+  const FORBIDDEN = [
+    'order_id', 'transaction_id', 'serialized_tx', 'instruction_array',
+    'message_bytes', 'signature', 'signer', 'broadcast_target', 'endpoint'
+  ];
+  for (const k of FORBIDDEN) {
+    assert.equal(Object.prototype.hasOwnProperty.call(res, k), false, `output must not contain ${k}`);
+  }
+}
+
+test('(G) descriptor: shape, states, marker, safe flags', () => {
+  const d = describeExecutionPlanPreviewContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'execution-plan-preview');
+  assert.equal(d.execution_plan_preview_valid, false);
+  assert.equal(d.requires_next_stage, 'transaction_build_review');
+  assertNoPreviewArtifacts(d);
+  assert.deepEqual([...d.supported_states], [
+    'EXECUTION_PLAN_PREVIEW_UNCONFIGURED', 'EXECUTION_PLAN_PREVIEW_INVALID',
+    'EXECUTION_PLAN_PREVIEW_REJECTED', 'EXECUTION_PLAN_PREVIEW_SUPPRESSED',
+    'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID'
+  ]);
+});
+
+test('(G) missing candidate route -> fail-closed', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluateExecutionPlanPreview(inp);
+    assertSafe(r);
+    assert.equal(r.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED');
+    assert.equal(r.execution_plan_preview_valid, false);
+  }
+  const r2 = evaluateExecutionPlanPreview({
+    purpose: 'execution_plan_preview_input',
+    route_feasibility: feasibleVerdict, preview_ref: 'p',
+    no_transaction_build: true, no_order: true, no_signing: true, no_send: true
+  });
+  assertSafe(r2);
+  assert.equal(r2.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED');
+});
+
+test('(G) infeasible route -> preview rejected/suppressed', () => {
+  // not a candidate route -> REJECTED
+  const rejectedCandidate = evaluateCandidateRoutePlan(goodPlanInput({ route_metadata: { ...goodMetadata(), route_quality_bucket: 'poor' } }));
+  assert.equal(rejectedCandidate.candidate_route_state, 'CANDIDATE_ROUTE_REJECTED');
+  const r1 = evaluateExecutionPlanPreview(goodPreviewInput({ candidate_route_plan: rejectedCandidate }));
+  assertSafe(r1);
+  assert.equal(r1.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_REJECTED');
+  // candidate valid but feasibility not feasible -> SUPPRESSED
+  const rejFeas = evaluateRouteFeasibility(feasibleInput({ estimated_slippage_bucket: 'high' }));
+  assert.equal(rejFeas.route_feasibility_state, 'ROUTE_FEASIBILITY_REJECTED');
+  const r2 = evaluateExecutionPlanPreview(goodPreviewInput({ route_feasibility: rejFeas }));
+  assertSafe(r2);
+  assert.equal(r2.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_SUPPRESSED');
+});
+
+test('(G) feasible advisory route -> preview valid only (no readiness)', () => {
+  const r = evaluateExecutionPlanPreview(goodPreviewInput());
+  assertSafe(r);
+  assert.equal(r.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID');
+  assert.equal(r.execution_plan_preview_valid, true);
+  assert.equal(r.preview_ref, 'preview-1');
+  assert.equal(r.route_plan_ref, 'plan-1');
+  assert.equal(r.intent_record_ref, 'rec-1');
+  assert.equal(r.requires_next_stage, 'transaction_build_review');
+  // preview opens NO transaction_ready/signing/can_serialize/can_send
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+  assertNoPreviewArtifacts(r);
+});
+
+test('(G) smuggled tx/instruction/sign/send fields -> refused INVALID & not echoed', () => {
+  for (const smuggle of [
+    { no_transaction_build: false }, { no_order: false }, { no_signing: false }, { no_send: false },
+    { order_id: 'o-1' }, { transaction_id: 't-1' }, { serialized_tx: 'BASE64LEAK' },
+    { instruction_array: ['x'] }, { message_bytes: 'LEAK' }, { signature: 'SIGLEAK' },
+    { signer: 'KEYLEAK' }, { broadcast_target: 'LEAK' }, { endpoint: 'https://jup.ag' },
+    { can_send: true }, { swap: true }, { sign: true }
+  ]) {
+    const r = evaluateExecutionPlanPreview(goodPreviewInput(smuggle));
+    assertSafe(r);
+    assert.equal(r.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_INVALID');
+    assertNoPreviewArtifacts(r);
+    const blob = JSON.stringify(r);
+    assert.equal(blob.includes('LEAK'), false);
+    assert.equal(blob.includes('jup.ag'), false);
+  }
+});
+
+test('(G) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateExecutionPlanPreview(h); });
+    assertSafe(r);
+    assert.equal(r.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED');
+    assertNoPreviewArtifacts(r);
+  }
+});
+
+// ===========================================================================
+// (H) ROUTE SUPPRESSION / REJECTION
+// ===========================================================================
+
+const SUPP_ALWAYS = [
+  'not_order_authorized', 'not_transaction_authorized', 'not_sign_authorized',
+  'not_send_authorized', 'not_execution_authorized'
+];
+
+function assertSuppAlways(res) {
+  for (const c of SUPP_ALWAYS) {
+    assert.equal(res.suppression_reasons.includes(c), true, `must always include ${c}`);
+  }
+}
+
+test('(H) descriptor: shape, reason codes, always-not-authorized', () => {
+  const d = describeRouteSuppressionContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'route-suppression');
+  assertSuppAlways(d);
+});
+
+test('(H) missing candidate -> suppressed', () => {
+  const r = evaluateRouteSuppression({ purpose: 'route_suppression_input' });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('route_metadata_missing'), true);
+  assertSuppAlways(r);
+});
+
+test('(H) invalid source -> suppressed', () => {
+  const badSource = evaluateRouteSourceBoundary({ purpose: 'route_source_boundary', route_source: 'jupiter_live' });
+  const r = evaluateRouteSuppression({
+    purpose: 'route_suppression_input',
+    route_input_boundary: validRouteBoundaryResult,
+    route_source_boundary: badSource,
+    candidate_route_plan: validCandidateRoute,
+    route_feasibility: feasibleVerdict
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('route_source_invalid'), true);
+  assertSuppAlways(r);
+});
+
+test('(H) infeasible route (rejected feasibility) -> suppressed with reason', () => {
+  const rejFeas = evaluateRouteFeasibility(feasibleInput({ estimated_slippage_bucket: 'high' }));
+  const r = evaluateRouteSuppression({
+    purpose: 'route_suppression_input',
+    route_input_boundary: validRouteBoundaryResult,
+    route_source_boundary: validSourceResult,
+    candidate_route_plan: validCandidateRoute,
+    route_feasibility: rejFeas
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('route_feasibility_failed'), true);
+  assert.equal(r.suppression_reasons.includes('high_slippage'), true);
+  assertSuppAlways(r);
+});
+
+test('(H) thin liquidity -> suppressed with reason', () => {
+  const thinFeas = evaluateRouteFeasibility(feasibleInput({ liquidity_bucket: 'thin' }));
+  const r = evaluateRouteSuppression({
+    purpose: 'route_suppression_input',
+    route_input_boundary: validRouteBoundaryResult,
+    route_source_boundary: validSourceResult,
+    candidate_route_plan: validCandidateRoute,
+    route_feasibility: thinFeas
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('thin_liquidity'), true);
+  assertSuppAlways(r);
+});
+
+test('(H) high slippage -> suppressed with reason', () => {
+  const highFeas = evaluateRouteFeasibility(feasibleInput({ route_quality_bucket: 'poor' }));
+  const r = evaluateRouteSuppression({
+    purpose: 'route_suppression_input',
+    route_input_boundary: validRouteBoundaryResult,
+    route_source_boundary: validSourceResult,
+    candidate_route_plan: validCandidateRoute,
+    route_feasibility: highFeas
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('route_quality_poor'), true);
+  assertSuppAlways(r);
+});
+
+test('(H) advisory valid route -> not progressed (still not_*_authorized, no order/tx/sign/send)', () => {
+  const r = evaluateRouteSuppression({
+    purpose: 'route_suppression_input',
+    route_input_boundary: validRouteBoundaryResult,
+    route_source_boundary: validSourceResult,
+    candidate_route_plan: validCandidateRoute,
+    route_feasibility: feasibleVerdict
+  });
+  assertSafe(r);
+  // not suppressed for an advisory-valid feasible route, BUT still not authorized
+  assert.equal(r.suppressed, false);
+  assertSuppAlways(r);
+  // suppression opens NO transaction_ready/signing/can_send (also asserted by assertSafe)
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(H) smuggled trading flag/secret -> fail-closed suppressed', () => {
+  for (const s of [{ can_send: true }, { execute: true }, { api_key: 'sk-LEAK' }, { network: 'mainnet' }]) {
+    const r = evaluateRouteSuppression({
+      purpose: 'route_suppression_input',
+      route_input_boundary: validRouteBoundaryResult,
+      route_source_boundary: validSourceResult,
+      candidate_route_plan: validCandidateRoute,
+      route_feasibility: feasibleVerdict,
+      ...s
+    });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(H) hostile input -> frozen, no throw, suppressed', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRouteSuppression(h); });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assertSuppAlways(r);
+  }
+});
+
+// ===========================================================================
+// (I) ROUTE HEALTH / STATUS
+// ===========================================================================
+
+const previewValidResult = evaluateExecutionPlanPreview(goodPreviewInput());
+const notSuppressedResult = evaluateRouteSuppression({
+  purpose: 'route_suppression_input',
+  route_input_boundary: validRouteBoundaryResult,
+  route_source_boundary: validSourceResult,
+  candidate_route_plan: validCandidateRoute,
+  route_feasibility: feasibleVerdict
+});
+
+const goodHealthInputs = (over = {}) => ({
+  route_input_boundary: validRouteBoundaryResult,
+  route_source_boundary: validSourceResult,
+  candidate_route_plan: validCandidateRoute,
+  route_feasibility: feasibleVerdict,
+  execution_plan_preview: previewValidResult,
+  route_suppression: notSuppressedResult,
+  ...over
+});
+
+test('(I) descriptor: shape, states, safe flags', () => {
+  const d = describeRouteHealthContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'route-health');
+  assert.deepEqual([...d.supported_states], [
+    'ROUTE_HEALTH_UNCONFIGURED', 'ROUTE_HEALTH_DEGRADED',
+    'ROUTE_HEALTH_CANDIDATE_REVIEWED', 'ROUTE_HEALTH_PREVIEW_READY',
+    'ROUTE_HEALTH_SUPPRESSED', 'ROUTE_HEALTH_BLOCKED'
+  ]);
+});
+
+test('(I) missing components -> unconfigured', () => {
+  for (const inp of [undefined, null, [], 42, 'x', {}]) {
+    const r = evaluateRouteHealth(inp);
+    assertSafe(r);
+    assert.equal(r.route_health_state, 'ROUTE_HEALTH_UNCONFIGURED');
+  }
+  const r2 = evaluateRouteHealth(goodHealthInputs({ route_suppression: null }));
+  assertSafe(r2);
+  assert.equal(r2.route_health_state, 'ROUTE_HEALTH_UNCONFIGURED');
+});
+
+test('(I) invalid boundary -> blocked', () => {
+  const invalidBoundary = evaluateRouteInputBoundary({ ...goodRouteInput(), intent_state: verdictPass });
+  assert.equal(invalidBoundary.route_input_state, 'ROUTE_INPUT_INVALID');
+  const r = evaluateRouteHealth(goodHealthInputs({ route_input_boundary: invalidBoundary }));
+  assertSafe(r);
+  assert.equal(r.route_health_state, 'ROUTE_HEALTH_BLOCKED');
+  assert.equal(r.valid, false);
+});
+
+test('(I) invalid source -> blocked', () => {
+  const badSource = evaluateRouteSourceBoundary({ purpose: 'route_source_boundary', route_source: 'jupiter_live' });
+  const r = evaluateRouteHealth(goodHealthInputs({ route_source_boundary: badSource }));
+  assertSafe(r);
+  assert.equal(r.route_health_state, 'ROUTE_HEALTH_BLOCKED');
+});
+
+test('(I) suppressed route -> suppressed', () => {
+  const suppressed = evaluateRouteSuppression({ purpose: 'route_suppression_input' });
+  assert.equal(suppressed.suppressed, true);
+  const r = evaluateRouteHealth(goodHealthInputs({ route_suppression: suppressed }));
+  assertSafe(r);
+  assert.equal(r.route_health_state, 'ROUTE_HEALTH_SUPPRESSED');
+});
+
+test('(I) candidate reviewed -> candidate reviewed only', () => {
+  // feed a preview that is NOT valid so candidate-reviewed path is exercised
+  const rejFeasPreview = evaluateExecutionPlanPreview(goodPreviewInput({
+    route_feasibility: evaluateRouteFeasibility(feasibleInput({ estimated_slippage_bucket: 'medium' }))
+  }));
+  assert.notEqual(rejFeasPreview.execution_plan_preview_state, 'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID');
+  const r = evaluateRouteHealth(goodHealthInputs({ execution_plan_preview: rejFeasPreview }));
+  assertSafe(r);
+  assert.equal(r.route_health_state, 'ROUTE_HEALTH_CANDIDATE_REVIEWED');
+});
+
+test('(I) preview ready -> preview ready only with transaction false', () => {
+  const r = evaluateRouteHealth(goodHealthInputs());
+  assertSafe(r);
+  assert.equal(r.route_health_state, 'ROUTE_HEALTH_PREVIEW_READY');
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(I) smuggled order/tx/sign/send flags -> blocked', () => {
+  for (const s of [{ route_ready: true }, { order_ready: true }, { transaction_ready: true }, { signing_permitted: true }, { can_send: true }, { execute: true }]) {
+    const r = evaluateRouteHealth(goodHealthInputs(s));
+    assertSafe(r);
+    assert.equal(r.route_health_state, 'ROUTE_HEALTH_BLOCKED');
+  }
+});
+
+test('(I) secret / mainnet / REAL-LIVE -> blocked & not echoed', () => {
+  for (const s of [{ api_key: 'sk-LEAK' }, { network: 'mainnet' }, { mode: 'prod' }, { real_live: true }]) {
+    const r = evaluateRouteHealth(goodHealthInputs(s));
+    assertSafe(r);
+    assert.equal(r.route_health_state, 'ROUTE_HEALTH_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(I) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRouteHealth(h); });
+    assertSafe(r);
+    assert.equal(r.route_health_state, 'ROUTE_HEALTH_UNCONFIGURED');
   }
 });
 

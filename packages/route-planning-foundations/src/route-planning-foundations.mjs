@@ -830,3 +830,657 @@ export function evaluateCandidateRoutePlan(input) {
     return build('CANDIDATE_ROUTE_UNCONFIGURED', ['input_inspection_error'], null);
   }
 }
+
+// ---------------------------------------------------------------------------
+// (F) ROUTE FEASIBILITY / SLIPPAGE ADVISORY
+//
+// An ADVISORY feasibility verdict derived from safe input BUCKETS ONLY (route
+// quality / estimated slippage / liquidity / hop count) — NO live quote, NO
+// aggregator/Jupiter/RPC route call, NO order, NO transaction. A FEASIBLE
+// advisory route is a READ-ONLY ADVISORY REPRESENTATION ONLY — it opens NO
+// order / transaction / signing / send and flips NO readiness flag. Fail-Safe-
+// Not-Fail-Open: any 'unknown' / 'medium' slippage / 'many' hops -> DEGRADED;
+// 'poor' quality / 'high' slippage / 'thin' liquidity -> REJECTED; only clearly
+// good/low/deep/single|few -> FEASIBLE_ADVISORY.
+// ---------------------------------------------------------------------------
+
+const ROUTE_FEASIBILITY_STATES = Object.freeze([
+  'ROUTE_FEASIBILITY_UNCONFIGURED', 'ROUTE_FEASIBILITY_INVALID',
+  'ROUTE_FEASIBILITY_DEGRADED', 'ROUTE_FEASIBILITY_REJECTED',
+  'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY'
+]);
+
+const ROUTE_FEASIBILITY_REASON_CODES = Object.freeze([
+  'route_quality_unknown', 'route_quality_poor', 'slippage_unknown',
+  'slippage_high', 'slippage_medium', 'liquidity_unknown', 'liquidity_thin',
+  'hop_count_unknown', 'hop_count_many', 'route_feasible_advisory'
+]);
+
+const ROUTE_FEASIBILITY_QUALITY_BUCKETS = Object.freeze(['unknown', 'poor', 'acceptable', 'good']);
+const ROUTE_FEASIBILITY_SLIPPAGE_BUCKETS = Object.freeze(['unknown', 'high', 'medium', 'low']);
+const ROUTE_FEASIBILITY_LIQUIDITY_BUCKETS = Object.freeze(['unknown', 'thin', 'adequate', 'deep']);
+const ROUTE_FEASIBILITY_HOP_BUCKETS = Object.freeze(['unknown', 'single', 'few', 'many']);
+
+const ROUTE_FEASIBILITY_TOP_KEYS = Object.freeze([
+  'purpose', 'route_quality_bucket', 'estimated_slippage_bucket',
+  'liquidity_bucket', 'hop_count_bucket'
+]);
+
+export function describeRouteFeasibilityContract() {
+  return Object.freeze({
+    contract: 'route-feasibility-advisory',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: ROUTE_FEASIBILITY_STATES,
+    supported_reason_codes: ROUTE_FEASIBILITY_REASON_CODES,
+    advisory_only: true,
+    valid: false,
+    route_feasibility_state: 'ROUTE_FEASIBILITY_UNCONFIGURED',
+    route_feasible_advisory: false,
+    route_rejected: false,
+    route_reason_codes: Object.freeze([]),
+    status: 'ROUTE_FEASIBILITY_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...routeSafeFlags(),
+    note: 'Read-only ADVISORY route feasibility / slippage verdict derived from safe input BUCKETS ONLY (route_quality_bucket, estimated_slippage_bucket, liquidity_bucket, hop_count_bucket) — NO live quote, NO aggregator/Jupiter/RPC route call, NO order, NO transaction, NO signing, NO send. A FEASIBLE advisory route is a READ-ONLY ADVISORY REPRESENTATION ONLY: it opens NO order / transaction / signing / send and flips NO readiness flag (route_ready / order_ready / transaction_ready / signing_permitted / can_send / live_quote_enabled STAY false). NO quote/order/transaction/instruction field ever appears in output. Fail-Safe-Not-Fail-Open: invalid enum bucket -> ROUTE_FEASIBILITY_INVALID; missing bucket -> ROUTE_FEASIBILITY_UNCONFIGURED; route_quality poor OR estimated_slippage high OR liquidity thin -> ROUTE_FEASIBILITY_REJECTED; any unknown OR hop_count many OR slippage medium (and no rejection) -> ROUTE_FEASIBILITY_DEGRADED; ROUTE_FEASIBILITY_FEASIBLE_ADVISORY only if route_quality in {acceptable,good} AND estimated_slippage in {low,medium} AND liquidity in {adequate,deep} AND hop_count in {single,few}.'
+  });
+}
+
+export function validateRouteFeasibilityInput(input) {
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (routeUninspectable(obj, [...ROUTE_FEASIBILITY_TOP_KEYS])) {
+      return Object.freeze({
+        valid: false, recognized: false,
+        reasons: Object.freeze(['input_inspection_error']),
+        ...routeSafeFlags()
+      });
+    }
+    const reasons = [];
+    let recognized = false;
+    if (!obj) {
+      reasons.push('no_route_feasibility_input');
+    } else {
+      recognized = true;
+      reasons.push(...routeScreen(obj));
+      if (obj.purpose !== 'route_feasibility_input') reasons.push('purpose_invalid');
+      const q = obj.route_quality_bucket;
+      const s = obj.estimated_slippage_bucket;
+      const l = obj.liquidity_bucket;
+      const h = obj.hop_count_bucket;
+      if (q == null || s == null || l == null || h == null) reasons.push('bucket_missing');
+      if (q != null && !ROUTE_FEASIBILITY_QUALITY_BUCKETS.includes(q)) reasons.push('bucket_invalid');
+      if (s != null && !ROUTE_FEASIBILITY_SLIPPAGE_BUCKETS.includes(s)) reasons.push('bucket_invalid');
+      if (l != null && !ROUTE_FEASIBILITY_LIQUIDITY_BUCKETS.includes(l)) reasons.push('bucket_invalid');
+      if (h != null && !ROUTE_FEASIBILITY_HOP_BUCKETS.includes(h)) reasons.push('bucket_invalid');
+    }
+    const unique = [...new Set(reasons)];
+    const valid = recognized && unique.length === 0;
+    return Object.freeze({
+      valid, recognized,
+      reasons: Object.freeze([...unique]),
+      ...routeSafeFlags()
+    });
+  } catch {
+    return Object.freeze({
+      valid: false, recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...routeSafeFlags()
+    });
+  }
+}
+
+export function evaluateRouteFeasibility(input) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'ROUTE_FEASIBILITY_INVALID'),
+    route_feasibility_state: state,
+    route_feasible_advisory: (state === 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY'),
+    route_rejected: (state === 'ROUTE_FEASIBILITY_REJECTED'),
+    route_reason_codes: Object.freeze(
+      [...new Set((reasons || []).filter((c) => ROUTE_FEASIBILITY_REASON_CODES.includes(c)))]
+    ),
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...routeSafeFlags()
+  });
+  try {
+    const v = validateRouteFeasibilityInput(input);
+    if (!v.recognized || v.reasons.includes('input_inspection_error')) {
+      return build('ROUTE_FEASIBILITY_UNCONFIGURED', v.reasons.length ? v.reasons : ['no_route_feasibility_input']);
+    }
+    // smuggled forbidden flag / exec cmd / secret / endpoint / mainnet / bad purpose
+    // / invalid enum -> INVALID (never echoed)
+    if (v.reasons.includes('forbidden_trading_indicator_blocked') ||
+        v.reasons.includes('execution_command_blocked') ||
+        v.reasons.includes('secret_field_blocked') ||
+        v.reasons.includes('endpoint_or_mainnet_blocked') ||
+        v.reasons.includes('purpose_invalid') ||
+        v.reasons.includes('bucket_invalid')) {
+      return build('ROUTE_FEASIBILITY_INVALID', ['route_feasibility_input_invalid']);
+    }
+    // missing bucket -> UNCONFIGURED
+    if (v.reasons.includes('bucket_missing')) {
+      return build('ROUTE_FEASIBILITY_UNCONFIGURED', ['bucket_missing']);
+    }
+
+    const q = input.route_quality_bucket;
+    const s = input.estimated_slippage_bucket;
+    const l = input.liquidity_bucket;
+    const h = input.hop_count_bucket;
+
+    // Fail-Safe: hard rejection conditions
+    const reject = [];
+    if (q === 'poor') reject.push('route_quality_poor');
+    if (s === 'high') reject.push('slippage_high');
+    if (l === 'thin') reject.push('liquidity_thin');
+    if (reject.length > 0) {
+      return build('ROUTE_FEASIBILITY_REJECTED', reject);
+    }
+
+    // DEGRADED conditions (any unknown OR hop many OR slippage medium)
+    const degraded = [];
+    if (q === 'unknown') degraded.push('route_quality_unknown');
+    if (s === 'unknown') degraded.push('slippage_unknown');
+    if (l === 'unknown') degraded.push('liquidity_unknown');
+    if (h === 'unknown') degraded.push('hop_count_unknown');
+    if (h === 'many') degraded.push('hop_count_many');
+    if (s === 'medium') degraded.push('slippage_medium');
+    if (degraded.length > 0) {
+      return build('ROUTE_FEASIBILITY_DEGRADED', degraded);
+    }
+
+    // FEASIBLE_ADVISORY only when all clearly within safe ranges
+    if ((q === 'acceptable' || q === 'good') &&
+        (s === 'low' || s === 'medium') &&
+        (l === 'adequate' || l === 'deep') &&
+        (h === 'single' || h === 'few')) {
+      return build('ROUTE_FEASIBILITY_FEASIBLE_ADVISORY', ['route_feasible_advisory']);
+    }
+
+    // fall-through (should not happen with the allowlists above) -> DEGRADED
+    return build('ROUTE_FEASIBILITY_DEGRADED', ['route_quality_unknown']);
+  } catch {
+    return build('ROUTE_FEASIBILITY_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
+
+// Recognize a Stage-9 (F) route-feasibility result fed forward.
+function routeRecognizeFeasibilityResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.route_feasibility_state === 'string' && ROUTE_FEASIBILITY_STATES.includes(o.route_feasibility_state)) {
+    return o.route_feasibility_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (G) EXECUTION PLAN PREVIEW
+//
+// A DESCRIPTIVE preview of a candidate route plan that already passed an
+// advisory feasibility verdict — WITHOUT any transaction, order, signing, or
+// send. An execution plan preview is NOT a transaction: even
+// EXECUTION_PLAN_PREVIEW_PREVIEW_VALID opens NO transaction_ready /
+// signing_permitted / can_serialize / can_send. It only marks that a LATER stage
+// (Stage 10) MAY review a transaction build (requires_next_stage is a fixed
+// string-literal marker, NOT a readiness flag). NO order_id / transaction_id /
+// serialized_tx / instruction_array / message_bytes / signature / signer /
+// broadcast_target / endpoint field ever appears in output.
+// ---------------------------------------------------------------------------
+
+const EXECUTION_PLAN_PREVIEW_STATES = Object.freeze([
+  'EXECUTION_PLAN_PREVIEW_UNCONFIGURED', 'EXECUTION_PLAN_PREVIEW_INVALID',
+  'EXECUTION_PLAN_PREVIEW_REJECTED', 'EXECUTION_PLAN_PREVIEW_SUPPRESSED',
+  'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID'
+]);
+
+const EXECUTION_PLAN_PREVIEW_REASON_CODES = Object.freeze([
+  'candidate_route_valid', 'route_feasible_advisory', 'execution_plan_preview_valid',
+  'candidate_route_not_valid', 'route_feasibility_not_feasible',
+  'transaction_build_forbidden_flag_missing', 'forbidden_execution_field_blocked'
+]);
+
+const EXECUTION_PLAN_PREVIEW_COMPONENTS = Object.freeze([
+  'candidate_route_plan', 'route_feasibility'
+]);
+
+// fields that MUST NOT appear in any execution-plan-preview input or output.
+const EXECUTION_PLAN_PREVIEW_FORBIDDEN_KEYS = Object.freeze([
+  'order_id', 'transaction_id', 'serialized_tx', 'instruction_array',
+  'message_bytes', 'signature', 'signer', 'broadcast_target', 'endpoint',
+  'quote_response', 'jupiter_route_object', 'swap_instruction',
+  'compute_budget_instruction', 'private_key'
+]);
+
+const EXECUTION_PLAN_PREVIEW_TOP_KEYS = Object.freeze([
+  'purpose', 'candidate_route_plan', 'route_feasibility', 'preview_ref',
+  'no_transaction_build', 'no_order', 'no_signing', 'no_send'
+]);
+
+function executionPreviewHasForbiddenKey(o) {
+  if (o == null || typeof o !== 'object') return false;
+  for (const k of Object.keys(o)) {
+    if (EXECUTION_PLAN_PREVIEW_FORBIDDEN_KEYS.includes(String(k).toLowerCase())) return true;
+  }
+  return false;
+}
+
+export function describeExecutionPlanPreviewContract() {
+  return Object.freeze({
+    contract: 'execution-plan-preview',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: EXECUTION_PLAN_PREVIEW_STATES,
+    supported_reason_codes: EXECUTION_PLAN_PREVIEW_REASON_CODES,
+    advisory_only: true,
+    execution_plan_preview_valid: false,
+    execution_plan_preview_state: 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED',
+    preview_ref: null,
+    route_plan_ref: null,
+    intent_record_ref: null,
+    preview_reason_codes: Object.freeze([]),
+    requires_next_stage: 'transaction_build_review',
+    status: 'EXECUTION_PLAN_PREVIEW_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...routeSafeFlags(),
+    note: 'Read-only DESCRIPTIVE execution plan preview over a CANDIDATE_ROUTE_CANDIDATE plan that already passed a ROUTE_FEASIBILITY_FEASIBLE_ADVISORY verdict — WITHOUT any transaction, order, signing, or send. An execution plan preview is NOT a transaction: even EXECUTION_PLAN_PREVIEW_PREVIEW_VALID opens NO transaction_ready / signing_permitted / can_serialize / can_send and flips NO readiness flag. requires_next_stage is a FIXED string-literal marker (transaction_build_review) indicating a LATER stage MAY review a transaction build — it is NOT a readiness flag and grants NO permission. NO order_id / transaction_id / serialized_tx / instruction_array / message_bytes / signature / signer / broadcast_target / endpoint / quote_response / jupiter_route_object / swap_instruction / compute_budget_instruction field ever appears in output. Fail-Safe-Not-Fail-Open: missing candidate route -> EXECUTION_PLAN_PREVIEW_UNCONFIGURED; candidate_route_plan not CANDIDATE_ROUTE_CANDIDATE OR route_feasibility not ROUTE_FEASIBILITY_FEASIBLE_ADVISORY -> EXECUTION_PLAN_PREVIEW_REJECTED / EXECUTION_PLAN_PREVIEW_SUPPRESSED (infeasible route -> rejected/suppressed); no_transaction_build / no_order / no_signing / no_send not strictly true OR a smuggled transaction/instruction/sign/send key / forbidden flag / secret / endpoint -> EXECUTION_PLAN_PREVIEW_INVALID (never echoed); a feasible advisory route + valid candidate -> EXECUTION_PLAN_PREVIEW_PREVIEW_VALID.'
+  });
+}
+
+export function validateExecutionPlanPreviewInput(input) {
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (routeUninspectable(obj, [...EXECUTION_PLAN_PREVIEW_TOP_KEYS])) {
+      return Object.freeze({
+        valid: false, recognized: false,
+        reasons: Object.freeze(['input_inspection_error']),
+        ...routeSafeFlags()
+      });
+    }
+    const reasons = [];
+    let recognized = false;
+    if (!obj) {
+      reasons.push('no_execution_plan_preview_input');
+    } else {
+      recognized = true;
+      const shallow = {};
+      for (const [k, val] of Object.entries(obj)) {
+        if (!EXECUTION_PLAN_PREVIEW_COMPONENTS.includes(k)) shallow[k] = val;
+      }
+      reasons.push(...routeScreen(shallow));
+      if (executionPreviewHasForbiddenKey(obj)) reasons.push('forbidden_execution_field_blocked');
+      for (const k of EXECUTION_PLAN_PREVIEW_COMPONENTS) {
+        const c = obj[k];
+        if (c == null || typeof c !== 'object') continue;
+        if (routeHasForbiddenTrueFlag(c)) reasons.push('forbidden_trading_indicator_blocked');
+        if (routeHasExecCmdKey(c)) reasons.push('execution_command_blocked');
+        if (executionPreviewHasForbiddenKey(c)) reasons.push('forbidden_execution_field_blocked');
+        if (routeHasEndpointOrMainnet(c)) reasons.push('endpoint_or_mainnet_blocked');
+      }
+      if (obj.purpose !== 'execution_plan_preview_input') reasons.push('purpose_invalid');
+    }
+    const unique = [...new Set(reasons)];
+    const valid = recognized && unique.length === 0;
+    return Object.freeze({
+      valid, recognized,
+      reasons: Object.freeze([...unique]),
+      ...routeSafeFlags()
+    });
+  } catch {
+    return Object.freeze({
+      valid: false, recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...routeSafeFlags()
+    });
+  }
+}
+
+export function evaluateExecutionPlanPreview(input) {
+  const build = (state, reasons, refs) => Object.freeze({
+    execution_plan_preview_valid: (state === 'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID'),
+    execution_plan_preview_state: state,
+    preview_ref: (refs && typeof refs.preview_ref === 'string') ? refs.preview_ref : null,
+    route_plan_ref: (refs && typeof refs.route_plan_ref === 'string') ? refs.route_plan_ref : null,
+    intent_record_ref: (refs && typeof refs.intent_record_ref === 'string') ? refs.intent_record_ref : null,
+    preview_reason_codes: Object.freeze(
+      [...new Set((reasons || []).filter((c) => EXECUTION_PLAN_PREVIEW_REASON_CODES.includes(c)))]
+    ),
+    requires_next_stage: 'transaction_build_review',
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...routeSafeFlags()
+  });
+  try {
+    const v = validateExecutionPlanPreviewInput(input);
+    if (!v.recognized || v.reasons.includes('input_inspection_error')) {
+      return build('EXECUTION_PLAN_PREVIEW_UNCONFIGURED', v.reasons.length ? v.reasons : ['no_execution_plan_preview_input'], null);
+    }
+
+    const candidate = input.candidate_route_plan;
+    const feasibility = input.route_feasibility;
+
+    // pull only whitelisted opaque refs from candidate route (never input values)
+    const refs = {
+      preview_ref: (typeof input.preview_ref === 'string') ? input.preview_ref : null,
+      route_plan_ref: (candidate != null && typeof candidate === 'object' && typeof candidate.route_plan_ref === 'string') ? candidate.route_plan_ref : null,
+      intent_record_ref: (candidate != null && typeof candidate === 'object' && typeof candidate.intent_record_ref === 'string') ? candidate.intent_record_ref : null
+    };
+
+    // smuggled tx/instruction/sign/send key / forbidden flag / exec cmd / secret /
+    // endpoint / mainnet / bad purpose -> INVALID (never echoed)
+    if (v.reasons.includes('forbidden_trading_indicator_blocked') ||
+        v.reasons.includes('execution_command_blocked') ||
+        v.reasons.includes('forbidden_execution_field_blocked') ||
+        v.reasons.includes('secret_field_blocked') ||
+        v.reasons.includes('endpoint_or_mainnet_blocked') ||
+        v.reasons.includes('purpose_invalid')) {
+      return build('EXECUTION_PLAN_PREVIEW_INVALID', ['execution_plan_preview_input_invalid'], refs);
+    }
+
+    // missing candidate route -> UNCONFIGURED
+    if (candidate == null) {
+      return build('EXECUTION_PLAN_PREVIEW_UNCONFIGURED', ['required_input_missing'], refs);
+    }
+
+    // the no-* guards MUST be strictly true
+    if (input.no_transaction_build !== true || input.no_order !== true ||
+        input.no_signing !== true || input.no_send !== true) {
+      return build('EXECUTION_PLAN_PREVIEW_INVALID', ['transaction_build_forbidden_flag_missing'], refs);
+    }
+
+    const candidateState = routeRecognizeCandidateRouteResult(candidate);
+    const feasibilityState = routeRecognizeFeasibilityResult(feasibility);
+
+    // candidate route not a recognized CANDIDATE -> REJECTED
+    if (candidateState !== 'CANDIDATE_ROUTE_CANDIDATE') {
+      return build('EXECUTION_PLAN_PREVIEW_REJECTED', ['candidate_route_not_valid'], refs);
+    }
+    // feasibility not FEASIBLE_ADVISORY -> SUPPRESSED (infeasible route -> not previewable)
+    if (feasibilityState !== 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY') {
+      return build('EXECUTION_PLAN_PREVIEW_SUPPRESSED', ['route_feasibility_not_feasible'], refs);
+    }
+
+    // feasible advisory route + valid candidate -> PREVIEW_VALID (NOT a transaction)
+    return build('EXECUTION_PLAN_PREVIEW_PREVIEW_VALID', [
+      'candidate_route_valid', 'route_feasible_advisory', 'execution_plan_preview_valid'
+    ], refs);
+  } catch {
+    return build('EXECUTION_PLAN_PREVIEW_UNCONFIGURED', ['input_inspection_error'], null);
+  }
+}
+
+// Recognize a Stage-9 (E) candidate-route-plan result fed forward.
+function routeRecognizeCandidateRouteResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.candidate_route_state === 'string' && CANDIDATE_ROUTE_STATES.includes(o.candidate_route_state)) {
+    return o.candidate_route_state;
+  }
+  return null;
+}
+
+// Recognize a Stage-9 (G) execution-plan-preview result fed forward.
+function routeRecognizeExecutionPreviewResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.execution_plan_preview_state === 'string' && EXECUTION_PLAN_PREVIEW_STATES.includes(o.execution_plan_preview_state)) {
+    return o.execution_plan_preview_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (H) ROUTE SUPPRESSION / REJECTION
+//
+// Prevents route/plan progression and reports REASONS ONLY. It creates NO order
+// and NO transaction. A route is NEVER order / transaction / sign / send /
+// execution authorized at this layer — the not_*_authorized reasons are ALWAYS
+// present when emitting, even for an advisory-valid feasible route. Suppression
+// opens NO transaction_ready / signing_permitted / can_send.
+// ---------------------------------------------------------------------------
+
+const ROUTE_SUPPRESSION_REASON_CODES = Object.freeze([
+  'intent_not_awaiting_route_review', 'route_source_invalid',
+  'route_metadata_missing', 'route_feasibility_failed', 'high_slippage',
+  'thin_liquidity', 'route_quality_poor', 'not_order_authorized',
+  'not_transaction_authorized', 'not_sign_authorized', 'not_send_authorized',
+  'not_execution_authorized'
+]);
+
+const ROUTE_SUPPRESSION_ALWAYS = Object.freeze([
+  'not_order_authorized', 'not_transaction_authorized', 'not_sign_authorized',
+  'not_send_authorized', 'not_execution_authorized'
+]);
+
+const ROUTE_SUPPRESSION_COMPONENTS = Object.freeze([
+  'route_input_boundary', 'candidate_route_plan', 'route_feasibility',
+  'route_source_boundary'
+]);
+
+const ROUTE_SUPPRESSION_TOP_KEYS = Object.freeze(['purpose', ...ROUTE_SUPPRESSION_COMPONENTS]);
+
+export function describeRouteSuppressionContract() {
+  return Object.freeze({
+    contract: 'route-suppression',
+    version: '0.0.0',
+    test_only: true,
+    supported_reason_codes: ROUTE_SUPPRESSION_REASON_CODES,
+    advisory_only: true,
+    suppressed: true,
+    suppression_reasons: ROUTE_SUPPRESSION_ALWAYS,
+    status: 'ROUTE_SUPPRESSED',
+    reasons: Object.freeze([]),
+    ...routeSafeFlags(),
+    note: 'Read-only route SUPPRESSION / REJECTION layer. It prevents route/plan progression and reports REASONS ONLY — it creates NO order and NO transaction. A route is NEVER order / transaction / sign / send / execution authorized at this layer: the reasons not_order_authorized + not_transaction_authorized + not_sign_authorized + not_send_authorized + not_execution_authorized are ALWAYS present when emitting, even for an advisory-valid feasible route (suppressed may be false but the route is still NOT order/transaction/sign/send authorized). Suppression opens NO transaction_ready / signing_permitted / can_send and flips NO readiness flag. Rules: route_input_boundary not ROUTE_INPUT_VALID -> suppressed + intent_not_awaiting_route_review; route_source_boundary not ROUTE_SOURCE_READ_ONLY_OK -> suppressed + route_source_invalid; missing candidate route / route metadata -> suppressed + route_metadata_missing; route_feasibility REJECTED -> suppressed + route_feasibility_failed (+ high_slippage / thin_liquidity / route_quality_poor from its reason codes). Smuggled trading flag / secret / endpoint / mainnet -> fail-closed suppressed.'
+  });
+}
+
+export function evaluateRouteSuppression(input) {
+  const build = (suppressed, reasons) => {
+    const all = [...new Set([...(reasons || []), ...ROUTE_SUPPRESSION_ALWAYS])]
+      .filter((c) => ROUTE_SUPPRESSION_REASON_CODES.includes(c));
+    return Object.freeze({
+      suppressed: suppressed === true,
+      suppression_reasons: Object.freeze(all),
+      status: suppressed === true ? 'ROUTE_SUPPRESSED' : 'ROUTE_NOT_SUPPRESSED',
+      reasons: Object.freeze([...new Set(reasons || [])]),
+      read_only: true,
+      advisory_only: true,
+      ...routeSafeFlags()
+    });
+  };
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (routeUninspectable(obj, [...ROUTE_SUPPRESSION_TOP_KEYS])) {
+      return build(true, ['route_metadata_missing']);
+    }
+    if (!obj) {
+      return build(true, ['route_metadata_missing']);
+    }
+
+    // fail-closed: smuggled trading flag / exec cmd / secret / endpoint / mainnet
+    const shallow = {};
+    for (const [k, val] of Object.entries(obj)) {
+      if (!ROUTE_SUPPRESSION_COMPONENTS.includes(k)) shallow[k] = val;
+    }
+    if (routeScreen(shallow).length > 0) {
+      return build(true, ['route_metadata_missing']);
+    }
+    for (const k of ROUTE_SUPPRESSION_COMPONENTS) {
+      const c = obj[k];
+      if (c == null || typeof c !== 'object') continue;
+      if (routeHasForbiddenTrueFlag(c) || routeHasExecCmdKey(c) || routeHasEndpointOrMainnet(c)) {
+        return build(true, ['route_metadata_missing']);
+      }
+    }
+
+    const boundary = obj.route_input_boundary;
+    const source = obj.route_source_boundary;
+    const candidate = obj.candidate_route_plan;
+    const feasibility = obj.route_feasibility;
+
+    const reasons = [];
+
+    // route_input_boundary not ROUTE_INPUT_VALID -> suppressed
+    if (boundary != null) {
+      const bs = routeRecognizeInputBoundaryResult(boundary);
+      if (bs !== 'ROUTE_INPUT_VALID') reasons.push('intent_not_awaiting_route_review');
+    }
+    // route_source_boundary not ROUTE_SOURCE_READ_ONLY_OK -> suppressed
+    if (source != null) {
+      const ss = routeRecognizeSourceBoundaryResult(source);
+      if (ss !== 'ROUTE_SOURCE_READ_ONLY_OK') reasons.push('route_source_invalid');
+    }
+    // missing candidate route / route metadata -> suppressed
+    const candidateState = routeRecognizeCandidateRouteResult(candidate);
+    if (candidate == null || candidateState === null || candidateState !== 'CANDIDATE_ROUTE_CANDIDATE') {
+      reasons.push('route_metadata_missing');
+    }
+    // route_feasibility REJECTED -> suppressed (+ specific reason codes)
+    if (feasibility != null) {
+      const fs = routeRecognizeFeasibilityResult(feasibility);
+      if (fs === 'ROUTE_FEASIBILITY_REJECTED') {
+        reasons.push('route_feasibility_failed');
+        const fc = Array.isArray(feasibility.route_reason_codes) ? feasibility.route_reason_codes : [];
+        if (fc.includes('slippage_high')) reasons.push('high_slippage');
+        if (fc.includes('liquidity_thin')) reasons.push('thin_liquidity');
+        if (fc.includes('route_quality_poor')) reasons.push('route_quality_poor');
+      } else if (fs !== 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY' && fs !== null) {
+        reasons.push('route_feasibility_failed');
+      }
+    }
+
+    const suppressed = reasons.length > 0;
+    return build(suppressed, reasons);
+  } catch {
+    return build(true, ['route_metadata_missing']);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (I) ROUTE HEALTH / STATUS
+//
+// Consumes the route input boundary + source boundary + candidate route plan +
+// feasibility + execution plan preview + suppression, and derives a STATUS ONLY.
+// Every state keeps all 21 readiness/execution flags false; ROUTE_HEALTH_PREVIEW_
+// READY does NOT open transaction_ready / signing / can_serialize / can_send.
+// ---------------------------------------------------------------------------
+
+const ROUTE_HEALTH_STATES = Object.freeze([
+  'ROUTE_HEALTH_UNCONFIGURED', 'ROUTE_HEALTH_DEGRADED',
+  'ROUTE_HEALTH_CANDIDATE_REVIEWED', 'ROUTE_HEALTH_PREVIEW_READY',
+  'ROUTE_HEALTH_SUPPRESSED', 'ROUTE_HEALTH_BLOCKED'
+]);
+
+const ROUTE_HEALTH_COMPONENTS = Object.freeze([
+  'route_input_boundary', 'route_source_boundary', 'candidate_route_plan',
+  'route_feasibility', 'execution_plan_preview', 'route_suppression'
+]);
+
+const ROUTE_HEALTH_TOP_KEYS = Object.freeze([...ROUTE_HEALTH_COMPONENTS]);
+
+export function describeRouteHealthContract() {
+  return Object.freeze({
+    contract: 'route-health',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: ROUTE_HEALTH_STATES,
+    advisory_only: true,
+    valid: false,
+    route_health_state: 'ROUTE_HEALTH_UNCONFIGURED',
+    status: 'ROUTE_HEALTH_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...routeSafeFlags(),
+    note: 'Read-only route HEALTH / STATUS layer. It consumes the route input boundary, route source boundary, candidate route plan, route feasibility, execution plan preview, and route suppression, and derives a STATUS ONLY — it grants NO execution authority. Every state keeps all 21 readiness/execution flags false; ROUTE_HEALTH_PREVIEW_READY does NOT open transaction_ready / signing_permitted / can_serialize / can_send. Ordering (Fail-Safe-Not-Fail-Open): a smuggled forbidden trading flag (top-level or in any component) / secret / mainnet / REAL-LIVE / invalid route_input_boundary (ROUTE_INPUT_INVALID) / invalid route_source_boundary (ROUTE_SOURCE_INVALID) -> ROUTE_HEALTH_BLOCKED; a missing required component -> ROUTE_HEALTH_UNCONFIGURED; route_suppression.suppressed === true -> ROUTE_HEALTH_SUPPRESSED; execution_plan_preview EXECUTION_PLAN_PREVIEW_PREVIEW_VALID -> ROUTE_HEALTH_PREVIEW_READY; candidate_route_plan CANDIDATE_ROUTE_CANDIDATE + feasibility feasible -> ROUTE_HEALTH_CANDIDATE_REVIEWED; else ROUTE_HEALTH_DEGRADED.'
+  });
+}
+
+export function evaluateRouteHealth(inputs) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'ROUTE_HEALTH_BLOCKED'),
+    route_health_state: state,
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...routeSafeFlags()
+  });
+  try {
+    const obj = (inputs != null && typeof inputs === 'object' && !Array.isArray(inputs)) ? inputs : null;
+    if (routeUninspectable(obj, [...ROUTE_HEALTH_TOP_KEYS])) {
+      return build('ROUTE_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('ROUTE_HEALTH_UNCONFIGURED', ['required_component_missing']);
+    }
+
+    const boundary = obj.route_input_boundary;
+    const source = obj.route_source_boundary;
+    const candidate = obj.candidate_route_plan;
+    const feasibility = obj.route_feasibility;
+    const preview = obj.execution_plan_preview;
+    const suppression = obj.route_suppression;
+
+    // BLOCKED: smuggled forbidden flag / secret / endpoint / mainnet at top level
+    const shallow = {};
+    for (const [k, val] of Object.entries(obj)) {
+      if (!ROUTE_HEALTH_COMPONENTS.includes(k)) shallow[k] = val;
+    }
+    if (routeScreen(shallow).length > 0) {
+      return build('ROUTE_HEALTH_BLOCKED', ['forbidden_indicator_blocked']);
+    }
+    // BLOCKED: forbidden flag / secret-value / endpoint / mainnet in any component
+    for (const k of ROUTE_HEALTH_COMPONENTS) {
+      const c = obj[k];
+      if (c == null || typeof c !== 'object') continue;
+      if (routeHasForbiddenTrueFlag(c) || routeHasExecCmdKey(c) || routeHasEndpointOrMainnet(c)) {
+        return build('ROUTE_HEALTH_BLOCKED', ['forbidden_indicator_blocked']);
+      }
+    }
+
+    // BLOCKED: invalid boundary / invalid source
+    const boundaryState = routeRecognizeInputBoundaryResult(boundary);
+    const sourceState = routeRecognizeSourceBoundaryResult(source);
+    if (boundaryState === 'ROUTE_INPUT_INVALID') {
+      return build('ROUTE_HEALTH_BLOCKED', ['route_input_boundary_invalid']);
+    }
+    if (sourceState === 'ROUTE_SOURCE_INVALID') {
+      return build('ROUTE_HEALTH_BLOCKED', ['route_source_boundary_invalid']);
+    }
+
+    // UNCONFIGURED: a required component missing
+    if (boundary == null || source == null || candidate == null ||
+        feasibility == null || preview == null || suppression == null) {
+      return build('ROUTE_HEALTH_UNCONFIGURED', ['required_component_missing']);
+    }
+
+    // SUPPRESSED: route_suppression.suppressed === true
+    const isSuppressed = (typeof suppression === 'object' && suppression.suppressed === true);
+    if (isSuppressed) {
+      return build('ROUTE_HEALTH_SUPPRESSED', ['route_suppressed']);
+    }
+
+    // PREVIEW_READY: execution plan preview valid (NOT a transaction)
+    const previewState = routeRecognizeExecutionPreviewResult(preview);
+    if (previewState === 'EXECUTION_PLAN_PREVIEW_PREVIEW_VALID') {
+      return build('ROUTE_HEALTH_PREVIEW_READY', ['execution_plan_preview_valid']);
+    }
+
+    // CANDIDATE_REVIEWED: candidate route + feasibility feasible
+    const candidateState = routeRecognizeCandidateRouteResult(candidate);
+    const feasibilityState = routeRecognizeFeasibilityResult(feasibility);
+    if (candidateState === 'CANDIDATE_ROUTE_CANDIDATE' &&
+        feasibilityState === 'ROUTE_FEASIBILITY_FEASIBLE_ADVISORY') {
+      return build('ROUTE_HEALTH_CANDIDATE_REVIEWED', ['candidate_route_reviewed']);
+    }
+
+    // else DEGRADED
+    return build('ROUTE_HEALTH_DEGRADED', ['route_health_degraded']);
+  } catch {
+    return build('ROUTE_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
