@@ -43,3 +43,33 @@ first/last opaque refs. It is NEVER a copy recommendation, leader signal, early-
 signal, risk approval, intent, execution priority, or position open/close command.
 States: `RELATIONSHIP_UNCONFIGURED`, `RELATIONSHIP_INVALID`, `RELATIONSHIP_DEGRADED`,
 `RELATIONSHIP_READ_ONLY_OK`. No network, clock, persistence, or secret.
+
+## Wallet/Token Diagnostics (read-only, advisory)
+
+`evaluateWalletTokenDiagnostics` derives advisory diagnostic tags from prior
+wallet/token/relationship observation results. The output `diagnostics` field is a
+frozen array of FIXED allowlisted tag strings only (`wallet_activity_observed`,
+`token_activity_observed`, `relationship_observed`, `mixed_event_types_observed`,
+`insufficient_observations`, `diagnostic_only`). A diagnostic is ADVISORY/READ-ONLY
+ONLY — it is NEVER a gate, recommendation, signal, risk approval, intent, or
+auto-config, and it NEVER opens signal/trading/risk/intent/routing readiness. Every
+result keeps `read_only: true` and all signal/trading/risk/intent/routing flags
+false. Forbidden trading indicators, execution commands, secret fields, endpoints,
+or an invalid purpose drive `DIAGNOSTICS_INVALID`; hostile/uninspectable input
+returns a frozen refusal with `input_inspection_error`. States:
+`DIAGNOSTICS_UNCONFIGURED`, `DIAGNOSTICS_INVALID`, `DIAGNOSTICS_READ_ONLY_OK`. No
+network, clock, persistence, or secret.
+
+## Intelligence Health / Status (read-only aggregator)
+
+`evaluateIntelligenceHealth` consumes wallet/token/relationship/diagnostics results
+and derives a single operational state: `INTELLIGENCE_UNCONFIGURED`,
+`INTELLIGENCE_DEGRADED`, `INTELLIGENCE_READY_READ_ONLY`, or `INTELLIGENCE_BLOCKED`.
+Any forbidden trading flag smuggled onto the top level or any component, or any
+component in an `*_INVALID` state, drives `INTELLIGENCE_BLOCKED`. The aggregator is
+advisory/read-only ONLY — it is NEVER a gate, recommendation, signal, risk approval,
+or intent. Even `INTELLIGENCE_READY_READ_ONLY` is NOT signal/trading/risk/intent/
+routing readiness: every result keeps `read_only: true` and all signal/trading/risk/
+intent/routing flags false, and never echoes any input value. Hostile/uninspectable
+input returns a frozen refusal with `input_inspection_error`. No network, clock,
+persistence, or secret.

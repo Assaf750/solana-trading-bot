@@ -396,3 +396,269 @@ test('S4 no real endpoint URL host in src', () => {
   assert.ok(!/['"`]https?:\/\/[a-z0-9.-]+/i.test(src), 'no literal http(s) URL host');
   assert.ok(!/['"`]wss?:\/\/[a-z0-9.-]+/i.test(src), 'no literal ws(s) URL host');
 });
+
+// ===========================================================================
+// PR-S5-B: DIAGNOSTICS + INTELLIGENCE HEALTH
+// ===========================================================================
+
+import {
+  describeWalletTokenDiagnosticsContract,
+  evaluateWalletTokenDiagnostics,
+  describeIntelligenceHealthContract,
+  evaluateIntelligenceHealth
+} from '../src/index.mjs';
+
+// REAL component-result builders (independent from the PR-S5-A fixtures above)
+const mk = (type, ref, w, t) => normalizeIngestionEvent({
+  event_type: type,
+  event_ref: ref,
+  source_ref: 'mock_replay',
+  observed_at_ref: 'ts',
+  wallet_ref: w,
+  token_ref: t,
+  signature_ref: 'sig',
+  slot_ref: 1
+}).normalized_event;
+
+const wOk = evaluateWalletObservationIntelligence({
+  purpose: 'wallet_observation_input',
+  wallet_ref: 'w-1',
+  events: [mk('swap_observed', 'e1', 'w-1', 't-1'), mk('mint_observed', 'e2', 'w-1', 't-2')],
+  read_only: true
+});
+const tOk = evaluateTokenObservationIntelligence({
+  purpose: 'token_observation_input',
+  token_ref: 't-1',
+  events: [mk('mint_observed', 'e1', 'w-1', 't-1'), mk('pool_observed', 'e2', 'w-2', 't-1')],
+  read_only: true
+});
+const rOk = evaluateWalletTokenRelationship({
+  purpose: 'wallet_token_relationship_input',
+  wallet_ref: 'w-1',
+  token_ref: 't-1',
+  events: [mk('swap_observed', 'e1', 'w-1', 't-1'), mk('mint_observed', 'e2', 'w-1', 't-1')],
+  read_only: true
+});
+const dOk = evaluateWalletTokenDiagnostics({
+  purpose: 'wallet_token_diagnostics_input',
+  wallet_observation: wOk,
+  token_observation: tOk,
+  relationship: rOk
+});
+const allGood = { wallet_observation: wOk, token_observation: tOk, relationship: rOk, diagnostics: dOk };
+const diagInputGood = { purpose: 'wallet_token_diagnostics_input', wallet_observation: wOk, token_observation: tOk, relationship: rOk };
+
+const wEmpty = evaluateWalletObservationIntelligence({ purpose: 'wallet_observation_input', wallet_ref: 'w-1', events: [], read_only: true });
+const tEmpty = evaluateTokenObservationIntelligence({ purpose: 'token_observation_input', token_ref: 't-1', events: [], read_only: true });
+const rEmpty = evaluateWalletTokenRelationship({ purpose: 'wallet_token_relationship_input', wallet_ref: 'w-1', token_ref: 't-1', events: [], read_only: true });
+
+const DIAG_ALLOWLIST = new Set([
+  'insufficient_observations', 'mixed_event_types_observed', 'token_activity_observed',
+  'wallet_activity_observed', 'relationship_observed', 'diagnostic_only'
+]);
+
+// --- DIAGNOSTICS (D1..D12) ---
+
+test('D1 undefined -> DIAGNOSTICS_UNCONFIGURED', () => {
+  assert.equal(evaluateWalletTokenDiagnostics(undefined).diagnostics_state, 'DIAGNOSTICS_UNCONFIGURED');
+});
+
+test('D2 read-only-ok with diagnostic_only tag', () => {
+  assert.equal(dOk.diagnostics_state, 'DIAGNOSTICS_READ_ONLY_OK');
+  assert.ok(Array.isArray(dOk.diagnostics));
+  assert.ok(dOk.diagnostics.includes('diagnostic_only'));
+});
+
+test('D3 activity tags present', () => {
+  assert.ok(dOk.diagnostics.includes('wallet_activity_observed'));
+  assert.ok(dOk.diagnostics.includes('token_activity_observed'));
+  assert.ok(dOk.diagnostics.includes('relationship_observed'));
+});
+
+test('D4 insufficient observations tag', () => {
+  const r = evaluateWalletTokenDiagnostics({
+    purpose: 'wallet_token_diagnostics_input',
+    wallet_observation: wEmpty,
+    token_observation: tEmpty,
+    relationship: rEmpty
+  });
+  assert.ok(r.diagnostics.includes('insufficient_observations'));
+});
+
+test('D5 every tag in allowlist', () => {
+  for (const tag of dOk.diagnostics) {
+    assert.ok(DIAG_ALLOWLIST.has(tag), `tag ${tag} must be allowlisted`);
+  }
+});
+
+test('D6 diagnostic does NOT open signal_ready', () => {
+  assert.equal(dOk.signal_ready, false);
+});
+
+test('D7 diagnostic does NOT open trading_ready', () => {
+  assert.equal(dOk.trading_ready, false);
+});
+
+test('D8 diagnostic does NOT open can_send', () => {
+  assert.equal(dOk.can_send, false);
+});
+
+test('D9 smuggled forbidden flag on input -> INVALID', () => {
+  const r = evaluateWalletTokenDiagnostics({ ...diagInputGood, signal_ready: true });
+  assert.equal(r.diagnostics_state, 'DIAGNOSTICS_INVALID');
+  assert.equal(r.signal_ready, false);
+});
+
+test('D10 smuggled forbidden flag inside component -> INVALID', () => {
+  const r = evaluateWalletTokenDiagnostics({
+    purpose: 'wallet_token_diagnostics_input',
+    wallet_observation: { ...wOk, trading_ready: true },
+    token_observation: tOk,
+    relationship: rOk
+  });
+  assert.equal(r.diagnostics_state, 'DIAGNOSTICS_INVALID');
+});
+
+test('D11 hostile Proxy -> frozen UNCONFIGURED, no throw', () => {
+  for (const p of [hostileThrowProxy(), hostileFnProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateWalletTokenDiagnostics(p); });
+    assert.equal(r.diagnostics_state, 'DIAGNOSTICS_UNCONFIGURED');
+    assert.ok(Object.isFrozen(r));
+    assertAllTradingFlagsFalse(r);
+  }
+});
+
+test('D12 result frozen + diagnostic_only true', () => {
+  assert.ok(Object.isFrozen(dOk));
+  assert.equal(dOk.diagnostic_only, true);
+});
+
+// --- HEALTH (H1..H12) ---
+
+const HEALTH_TRADING_FLAGS = [
+  'signal_ready', 'trading_ready', 'risk_ready', 'intent_ready', 'routing_ready',
+  'can_send', 'can_broadcast', 'can_serialize', 'signing_permitted',
+  'broadcast_permitted', 'is_live', 'mainnet_enabled', 'real_live'
+];
+
+test('H1 undefined -> INTELLIGENCE_UNCONFIGURED', () => {
+  assert.equal(evaluateIntelligenceHealth(undefined).intelligence_state, 'INTELLIGENCE_UNCONFIGURED');
+});
+
+test('H2 missing a component -> INTELLIGENCE_UNCONFIGURED', () => {
+  const { diagnostics, ...noDiag } = allGood;
+  void diagnostics;
+  assert.equal(evaluateIntelligenceHealth(noDiag).intelligence_state, 'INTELLIGENCE_UNCONFIGURED');
+});
+
+test('H3 allGood -> INTELLIGENCE_READY_READ_ONLY', () => {
+  const r = evaluateIntelligenceHealth(allGood);
+  assert.equal(r.intelligence_state, 'INTELLIGENCE_READY_READ_ONLY');
+  assert.equal(r.intelligence_ready_read_only, true);
+});
+
+test('H4 INVALID component -> INTELLIGENCE_BLOCKED', () => {
+  const wInvalid = evaluateWalletObservationIntelligence({
+    purpose: 'wallet_observation_input',
+    wallet_ref: 'w-1',
+    events: [mk('swap_observed', 'e1', 'w-1', 't-1')],
+    read_only: true,
+    buy_opportunity: true
+  });
+  assert.equal(wInvalid.wallet_observation_state, 'WALLET_OBS_INVALID');
+  const r = evaluateIntelligenceHealth({ ...allGood, wallet_observation: wInvalid });
+  assert.equal(r.intelligence_state, 'INTELLIGENCE_BLOCKED');
+});
+
+test('H5 DEGRADED component -> INTELLIGENCE_DEGRADED', () => {
+  assert.equal(wEmpty.wallet_observation_state, 'WALLET_OBS_DEGRADED');
+  const r = evaluateIntelligenceHealth({ ...allGood, wallet_observation: wEmpty });
+  assert.equal(r.intelligence_state, 'INTELLIGENCE_DEGRADED');
+});
+
+test('H6 smuggled top-level forbidden flag -> INTELLIGENCE_BLOCKED', () => {
+  const r = evaluateIntelligenceHealth({ ...allGood, can_send: true });
+  assert.equal(r.intelligence_state, 'INTELLIGENCE_BLOCKED');
+});
+
+test('H7 smuggled forbidden flag inside component -> INTELLIGENCE_BLOCKED', () => {
+  const r = evaluateIntelligenceHealth({ ...allGood, token_observation: { ...tOk, signal_ready: true } });
+  assert.equal(r.intelligence_state, 'INTELLIGENCE_BLOCKED');
+});
+
+test('H8 all trading flags false + read_only across all states', () => {
+  const noDiag = { wallet_observation: wOk, token_observation: tOk, relationship: rOk };
+  const results = [
+    evaluateIntelligenceHealth(undefined),                                   // UNCONFIGURED
+    evaluateIntelligenceHealth({ ...allGood, wallet_observation: wEmpty }),   // DEGRADED
+    evaluateIntelligenceHealth(allGood),                                     // READY_READ_ONLY
+    evaluateIntelligenceHealth({ ...allGood, can_send: true })               // BLOCKED
+  ];
+  void noDiag;
+  const seen = new Set(results.map((r) => r.intelligence_state));
+  assert.ok(seen.has('INTELLIGENCE_UNCONFIGURED'));
+  assert.ok(seen.has('INTELLIGENCE_DEGRADED'));
+  assert.ok(seen.has('INTELLIGENCE_READY_READ_ONLY'));
+  assert.ok(seen.has('INTELLIGENCE_BLOCKED'));
+  for (const r of results) {
+    for (const f of HEALTH_TRADING_FLAGS) assert.equal(r[f], false, `flag ${f} must be false`);
+    assert.equal(r.read_only, true, 'read_only must be true');
+  }
+});
+
+test('H9 NO-ECHO: leaked field not in result JSON', () => {
+  const r = evaluateIntelligenceHealth({ ...allGood, leaked_marker_field: 'LEAK_TOKEN_XYZ' });
+  assert.ok(!JSON.stringify(r).includes('LEAK_TOKEN_XYZ'), 'leaked field must not be echoed');
+  assert.ok(!JSON.stringify(r).includes('leaked_marker_field'));
+});
+
+test('H10 hostile Proxy -> frozen UNCONFIGURED, no throw', () => {
+  for (const p of [hostileThrowProxy(), hostileFnProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateIntelligenceHealth(p); });
+    assert.equal(r.intelligence_state, 'INTELLIGENCE_UNCONFIGURED');
+    assert.ok(Object.isFrozen(r));
+  }
+});
+
+test('H11 health descriptor frozen, no signal/trading', () => {
+  const d = describeIntelligenceHealthContract();
+  assert.ok(Object.isFrozen(d));
+  assert.equal(d.signal_ready, false);
+  assert.equal(d.trading_ready, false);
+});
+
+test('H12 diagnostics descriptor frozen, diagnostic_only + advisory_only', () => {
+  const d = describeWalletTokenDiagnosticsContract();
+  assert.ok(Object.isFrozen(d));
+  assert.equal(d.diagnostic_only, true);
+  assert.equal(d.advisory_only, true);
+});
+
+// --- STATIC (S5..S7) ---
+
+test('S5 src still import-free (incl appended region)', () => {
+  const src = readFileSync(SRC, 'utf8');
+  assert.ok(!/^\s*import\s/m.test(src), 'no import statements');
+  assert.ok(!/\bimport\s*\(/.test(src), 'no dynamic import()');
+  assert.ok(!/\brequire\s*\(/.test(src), 'no require()');
+});
+
+test('S6 appended region has no network/clock/persistence primitives', () => {
+  const src = readFileSync(SRC, 'utf8');
+  assert.ok(!/\bfetch\s*\(/.test(src), 'no fetch(');
+  assert.ok(!/new\s+WebSocket/.test(src), 'no new WebSocket');
+  assert.ok(!/new\s+Connection/.test(src), 'no new Connection');
+  assert.ok(!/sendTransaction/.test(src), 'no sendTransaction');
+  assert.ok(!/process\.env/.test(src), 'no process.env');
+  assert.ok(!/readFileSync/.test(src), 'no readFileSync');
+  assert.ok(!/node:fs/.test(src), 'no node:fs');
+  assert.ok(!/Date\.now/.test(src), 'no Date.now');
+  assert.ok(!/new\s+Date/.test(src), 'no new Date');
+});
+
+test('S7 no "can_send: true" anywhere in src', () => {
+  const src = readFileSync(SRC, 'utf8');
+  assert.ok(!/can_send\s*:\s*true/.test(src), 'no can_send: true literal');
+});

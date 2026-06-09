@@ -511,3 +511,160 @@ export function evaluateWalletTokenRelationship(input) {
     return build('RELATIONSHIP_UNCONFIGURED', ['input_inspection_error'], {});
   }
 }
+
+// ---------------------------------------------------------------------------
+// (F) WALLET/TOKEN DIAGNOSTICS (read-only, advisory)
+//
+// Derives advisory diagnostic tags from observation/relationship results.
+// A diagnostic is ADVISORY/READ-ONLY ONLY — never a gate, recommendation,
+// signal, risk approval, intent, or auto-config. A diagnostic NEVER opens
+// signal/trading/risk/intent/routing readiness. Diagnostics are a frozen array
+// of FIXED allowlisted tag strings only. No network/clock/persistence/secret.
+// ---------------------------------------------------------------------------
+
+const INTEL_DIAGNOSTIC_TAGS = Object.freeze([
+  'insufficient_observations', 'mixed_event_types_observed',
+  'token_activity_observed', 'wallet_activity_observed',
+  'relationship_observed', 'diagnostic_only'
+]);
+
+const DIAGNOSTICS_STATES = Object.freeze([
+  'DIAGNOSTICS_UNCONFIGURED', 'DIAGNOSTICS_INVALID', 'DIAGNOSTICS_READ_ONLY_OK'
+]);
+
+export function describeWalletTokenDiagnosticsContract() {
+  return Object.freeze({
+    contract: 'wallet-token-diagnostics',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: DIAGNOSTICS_STATES,
+    supported_diagnostic_tags: INTEL_DIAGNOSTIC_TAGS,
+    advisory_only: true,
+    diagnostic_only: true,
+    diagnostics_state: 'DIAGNOSTICS_UNCONFIGURED',
+    diagnostics: Object.freeze([]),
+    status: 'DIAGNOSTICS_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...intelSafeFlags(),
+    note: 'Read-only ADVISORY wallet/token diagnostics derived from observation/relationship results. Diagnostics are advisory tags ONLY — never a gate, recommendation, signal, risk approval, intent, or auto-config. A diagnostic NEVER opens signal_ready/trading_ready/can_send. No network/clock/persistence/secret.'
+  });
+}
+
+export function evaluateWalletTokenDiagnostics(input) {
+  const build = (state, reasons, tags) => Object.freeze({
+    valid: (state !== 'DIAGNOSTICS_INVALID'),
+    diagnostics_state: state,
+    diagnostics: Object.freeze([...tags]),
+    diagnostic_only: true,
+    advisory_only: true,
+    status: state,
+    reasons: Object.freeze([...reasons]),
+    ...intelSafeFlags()
+  });
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (intelUninspectable(obj, ['purpose', 'wallet_observation', 'token_observation', 'relationship'])) {
+      return build('DIAGNOSTICS_UNCONFIGURED', ['input_inspection_error'], []);
+    }
+    if (!obj) return build('DIAGNOSTICS_UNCONFIGURED', ['no_diagnostics_input'], []);
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (k !== 'wallet_observation' && k !== 'token_observation' && k !== 'relationship') shallow[k] = v;
+    }
+    const reasons = intelScreen(shallow);
+    for (const comp of [obj.wallet_observation, obj.token_observation, obj.relationship]) {
+      if (comp && typeof comp === 'object' && intelHasForbiddenTrueFlag(comp)) reasons.push('forbidden_trading_indicator_blocked');
+    }
+    if (obj.purpose !== 'wallet_token_diagnostics_input') reasons.push('purpose_invalid');
+    const uniq = [...new Set(reasons)];
+    if (uniq.includes('forbidden_trading_indicator_blocked') ||
+        uniq.includes('execution_command_blocked') ||
+        uniq.includes('secret_field_blocked') ||
+        uniq.includes('endpoint_or_mainnet_blocked') ||
+        uniq.includes('purpose_invalid')) {
+      return build('DIAGNOSTICS_INVALID', uniq, []);
+    }
+    const w = obj.wallet_observation, t = obj.token_observation, r = obj.relationship;
+    const tags = [];
+    const wOk = w && w.wallet_observation_state === 'WALLET_OBS_READ_ONLY_OK';
+    const tOk = t && t.token_observation_state === 'TOKEN_OBS_READ_ONLY_OK';
+    const rOk = r && r.relationship_state === 'RELATIONSHIP_READ_ONLY_OK';
+    const wCount = (w && typeof w.observed_event_count === 'number') ? w.observed_event_count : 0;
+    const tCount = (t && typeof t.observed_event_count === 'number') ? t.observed_event_count : 0;
+    const rCount = (r && typeof r.relationship_event_count === 'number') ? r.relationship_event_count : 0;
+    if (wOk && wCount > 0) tags.push('wallet_activity_observed');
+    if (tOk && tCount > 0) tags.push('token_activity_observed');
+    if (rOk && rCount > 0) tags.push('relationship_observed');
+    const distinctTypes = Array.isArray(r && r.observed_interaction_types) ? r.observed_interaction_types.length : 0;
+    if (distinctTypes > 1) tags.push('mixed_event_types_observed');
+    if (tags.length === 0) tags.push('insufficient_observations');
+    tags.push('diagnostic_only');
+    const finalTags = [...new Set(tags)].filter((x) => INTEL_DIAGNOSTIC_TAGS.includes(x));
+    return build('DIAGNOSTICS_READ_ONLY_OK', [], finalTags);
+  } catch {
+    return build('DIAGNOSTICS_UNCONFIGURED', ['input_inspection_error'], []);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (G) INTELLIGENCE HEALTH / STATUS (read-only aggregator)
+//
+// Consumes wallet/token/relationship/diagnostics results and derives an
+// operational state (UNCONFIGURED/DEGRADED/READY_READ_ONLY/BLOCKED). Even
+// INTELLIGENCE_READY_READ_ONLY opens NO signal/trading/risk/intent/routing
+// readiness. No network/clock/persistence; never echoes secret/endpoint.
+// ---------------------------------------------------------------------------
+
+const INTELLIGENCE_STATES = Object.freeze([
+  'INTELLIGENCE_UNCONFIGURED', 'INTELLIGENCE_DEGRADED',
+  'INTELLIGENCE_READY_READ_ONLY', 'INTELLIGENCE_BLOCKED'
+]);
+
+export function describeIntelligenceHealthContract() {
+  return Object.freeze({
+    contract: 'intelligence-health',
+    version: '0.0.0',
+    test_only: true,
+    consumes: Object.freeze(['wallet_observation', 'token_observation', 'relationship', 'diagnostics']),
+    supported_states: INTELLIGENCE_STATES,
+    intelligence_state: 'INTELLIGENCE_UNCONFIGURED',
+    intelligence_ready_read_only: false,
+    status: 'INTELLIGENCE_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...intelSafeFlags(),
+    note: 'Read-only intelligence health/status aggregator. Consumes wallet/token/relationship/diagnostics results and derives an operational state (UNCONFIGURED/DEGRADED/READY_READ_ONLY/BLOCKED). Even INTELLIGENCE_READY_READ_ONLY opens NO signal/trading/risk/intent/routing readiness. No network/clock/persistence; never echoes secret/endpoint.'
+  });
+}
+
+export function evaluateIntelligenceHealth(inputs) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'INTELLIGENCE_BLOCKED'),
+    intelligence_state: state,
+    intelligence_ready_read_only: state === 'INTELLIGENCE_READY_READ_ONLY',
+    status: state,
+    reasons: Object.freeze([...reasons]),
+    ...intelSafeFlags()
+  });
+  try {
+    const obj = (inputs != null && typeof inputs === 'object' && !Array.isArray(inputs)) ? inputs : null;
+    if (!obj) return build('INTELLIGENCE_UNCONFIGURED', ['no_inputs']);
+    const w = obj.wallet_observation, t = obj.token_observation, r = obj.relationship, d = obj.diagnostics;
+    for (const c of [obj, w, t, r, d]) {
+      if (c && typeof c === 'object' && intelHasForbiddenTrueFlag(c)) return build('INTELLIGENCE_BLOCKED', ['forbidden_trading_indicator_blocked']);
+    }
+    const st = (o, f) => (o != null && typeof o === 'object' && typeof o[f] === 'string') ? o[f] : null;
+    const wS = st(w, 'wallet_observation_state'), tS = st(t, 'token_observation_state'), rS = st(r, 'relationship_state'), dS = st(d, 'diagnostics_state');
+    if (wS === 'WALLET_OBS_INVALID' || tS === 'TOKEN_OBS_INVALID' || rS === 'RELATIONSHIP_INVALID' || dS === 'DIAGNOSTICS_INVALID') return build('INTELLIGENCE_BLOCKED', ['component_invalid']);
+    if (wS === null || tS === null || rS === null || dS === null) return build('INTELLIGENCE_UNCONFIGURED', ['component_input_missing']);
+    if (wS === 'WALLET_OBS_UNCONFIGURED' || tS === 'TOKEN_OBS_UNCONFIGURED' || rS === 'RELATIONSHIP_UNCONFIGURED' || dS === 'DIAGNOSTICS_UNCONFIGURED') return build('INTELLIGENCE_UNCONFIGURED', ['component_unconfigured']);
+    if (wS === 'WALLET_OBS_READ_ONLY_OK' && tS === 'TOKEN_OBS_READ_ONLY_OK' && rS === 'RELATIONSHIP_READ_ONLY_OK' && dS === 'DIAGNOSTICS_READ_ONLY_OK') return build('INTELLIGENCE_READY_READ_ONLY', []);
+    const reasons = [];
+    if (wS === 'WALLET_OBS_DEGRADED') reasons.push('wallet_observation_degraded');
+    if (tS === 'TOKEN_OBS_DEGRADED') reasons.push('token_observation_degraded');
+    if (rS === 'RELATIONSHIP_DEGRADED') reasons.push('relationship_degraded');
+    if (reasons.length === 0) reasons.push('not_all_components_ready');
+    return build('INTELLIGENCE_DEGRADED', reasons);
+  } catch {
+    return build('INTELLIGENCE_UNCONFIGURED', ['input_inspection_error']);
+  }
+}

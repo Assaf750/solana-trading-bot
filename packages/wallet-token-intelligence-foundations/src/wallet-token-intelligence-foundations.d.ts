@@ -156,3 +156,70 @@ export interface WalletTokenRelationshipResult extends IntelSafeFlags {
 export function describeWalletTokenRelationshipContract(): WalletTokenRelationshipContractDescriptor;
 export function validateWalletTokenRelationshipInput(input: unknown): WalletTokenRelationshipValidationResult;
 export function evaluateWalletTokenRelationship(input: unknown): WalletTokenRelationshipResult;
+
+// --- Wallet/Token Diagnostics (read-only, advisory) ---
+
+export type WalletTokenDiagnosticsState =
+  | 'DIAGNOSTICS_UNCONFIGURED'
+  | 'DIAGNOSTICS_INVALID'
+  | 'DIAGNOSTICS_READ_ONLY_OK';
+
+export interface WalletTokenDiagnosticsContractDescriptor extends IntelSafeFlags {
+  contract: 'wallet-token-diagnostics';
+  version: string;
+  test_only: true;
+  supported_states: readonly WalletTokenDiagnosticsState[];
+  supported_diagnostic_tags: readonly string[];
+  advisory_only: true;
+  diagnostic_only: true;
+  diagnostics_state: WalletTokenDiagnosticsState;
+  diagnostics: readonly string[];
+  status: WalletTokenDiagnosticsState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface WalletTokenDiagnosticsResult extends IntelSafeFlags {
+  valid: boolean;
+  diagnostics_state: WalletTokenDiagnosticsState;
+  diagnostics: readonly string[];
+  diagnostic_only: true;
+  advisory_only: true;
+  status: WalletTokenDiagnosticsState;
+  reasons: readonly string[];
+}
+
+export function describeWalletTokenDiagnosticsContract(): WalletTokenDiagnosticsContractDescriptor;
+export function evaluateWalletTokenDiagnostics(input: unknown): WalletTokenDiagnosticsResult;
+
+// --- Intelligence Health / Status (read-only aggregator) ---
+
+export type IntelligenceHealthState =
+  | 'INTELLIGENCE_UNCONFIGURED'
+  | 'INTELLIGENCE_DEGRADED'
+  | 'INTELLIGENCE_READY_READ_ONLY'
+  | 'INTELLIGENCE_BLOCKED';
+
+export interface IntelligenceHealthContractDescriptor extends IntelSafeFlags {
+  contract: 'intelligence-health';
+  version: string;
+  test_only: true;
+  consumes: readonly string[];
+  supported_states: readonly IntelligenceHealthState[];
+  intelligence_state: IntelligenceHealthState;
+  intelligence_ready_read_only: boolean;
+  status: IntelligenceHealthState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface IntelligenceHealthResult extends IntelSafeFlags {
+  valid: boolean;
+  intelligence_state: IntelligenceHealthState;
+  intelligence_ready_read_only: boolean;
+  status: IntelligenceHealthState;
+  reasons: readonly string[];
+}
+
+export function describeIntelligenceHealthContract(): IntelligenceHealthContractDescriptor;
+export function evaluateIntelligenceHealth(inputs: unknown): IntelligenceHealthResult;
