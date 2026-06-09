@@ -14,6 +14,12 @@ import {
   describeReplayIngestionHarnessContract,
   validateReplayIngestionBatch,
   evaluateReplayIngestionBatch,
+  describeIngestionDedupeContract,
+  evaluateIngestionDedupe,
+  describeIngestionCursorContract,
+  evaluateIngestionCursor,
+  describeIngestionHealthContract,
+  evaluateIngestionHealth,
 } from '../src/index.mjs';
 
 const SRC_FILE = join(
@@ -444,4 +450,395 @@ test('S4 src contains no real endpoint URL host', () => {
   // No concrete http(s)/ws(s) host literal (the regexes use scheme patterns, not hosts).
   assert.equal(/https?:\/\/[a-z0-9]/i.test(src), false, 'no concrete http host');
   assert.equal(/wss?:\/\/[a-z0-9]/i.test(src), false, 'no concrete ws host');
+});
+
+// ==========================================================================
+// PR-S4-B: DEDUPE / CURSOR / HEALTH
+// ==========================================================================
+
+// --------------------------------------------------------------------------
+// DEDUPE (F-D1..F-D8)
+// --------------------------------------------------------------------------
+test('F-D1 undefined -> DEDUPE_UNCONFIGURED', () => {
+  assert.equal(evaluateIngestionDedupe(undefined).dedupe_state, 'DEDUPE_UNCONFIGURED');
+});
+
+test('F-D2 clean refs -> DEDUPE_OK, accepted 3 duplicate 0', () => {
+  const r = evaluateIngestionDedupe({
+    purpose: 'ingestion_dedupe',
+    event_refs: ['a', 'b', 'c'],
+  });
+  assert.equal(r.dedupe_state, 'DEDUPE_OK');
+  assert.equal(r.accepted_count, 3);
+  assert.equal(r.duplicate_count, 0);
+});
+
+test('F-D3 in-batch duplicate -> duplicate 1 accepted 2', () => {
+  const r = evaluateIngestionDedupe({
+    purpose: 'ingestion_dedupe',
+    event_refs: ['a', 'a', 'b'],
+  });
+  assert.equal(r.duplicate_count, 1);
+  assert.equal(r.accepted_count, 2);
+});
+
+test('F-D4 prior_seen duplicate -> duplicate 1 accepted 1', () => {
+  const r = evaluateIngestionDedupe({
+    purpose: 'ingestion_dedupe',
+    event_refs: ['a', 'x'],
+    prior_seen_refs: ['a'],
+  });
+  assert.equal(r.duplicate_count, 1);
+  assert.equal(r.accepted_count, 1);
+});
+
+test('F-D5 empty/non-string refs -> quarantined>=2 and DEDUPE_DEGRADED', () => {
+  const r = evaluateIngestionDedupe({
+    purpose: 'ingestion_dedupe',
+    event_refs: ['', 5, 'a'],
+  });
+  assert.ok(r.quarantined_count >= 2, `quarantined_count=${r.quarantined_count}`);
+  assert.equal(r.dedupe_state, 'DEDUPE_DEGRADED');
+});
+
+test('F-D6 deterministic: same input twice -> identical counts', () => {
+  const input = {
+    purpose: 'ingestion_dedupe',
+    event_refs: ['a', 'a', 'b', '', 7],
+    prior_seen_refs: ['b'],
+  };
+  const r1 = evaluateIngestionDedupe(input);
+  const r2 = evaluateIngestionDedupe(input);
+  assert.equal(r1.accepted_count, r2.accepted_count);
+  assert.equal(r1.duplicate_count, r2.duplicate_count);
+  assert.equal(r1.quarantined_count, r2.quarantined_count);
+  assert.equal(r1.dedupe_state, r2.dedupe_state);
+});
+
+test('F-D7 smuggled/invalid shape -> DEDUPE_INVALID', () => {
+  assert.equal(
+    evaluateIngestionDedupe({
+      purpose: 'ingestion_dedupe',
+      event_refs: ['a'],
+      can_send: true,
+    }).dedupe_state,
+    'DEDUPE_INVALID',
+  );
+  assert.equal(
+    evaluateIngestionDedupe({ purpose: 'wrong', event_refs: ['a'] }).dedupe_state,
+    'DEDUPE_INVALID',
+  );
+  assert.equal(
+    evaluateIngestionDedupe({ purpose: 'ingestion_dedupe', event_refs: 'a' }).dedupe_state,
+    'DEDUPE_INVALID',
+  );
+});
+
+test('F-D8 every dedupe result safe; hostile proxy frozen UNCONFIGURED', () => {
+  const results = [
+    evaluateIngestionDedupe(undefined),
+    evaluateIngestionDedupe({ purpose: 'ingestion_dedupe', event_refs: ['a', 'b', 'c'] }),
+    evaluateIngestionDedupe({ purpose: 'ingestion_dedupe', event_refs: ['', 5, 'a'] }),
+    evaluateIngestionDedupe({ purpose: 'ingestion_dedupe', event_refs: ['a'], can_send: true }),
+  ];
+  for (const r of results) {
+    assert.equal(r.persistence_performed, false);
+    assertSafeFlags(r);
+  }
+  let hr;
+  assert.doesNotThrow(() => {
+    hr = evaluateIngestionDedupe(hostileProxy());
+  });
+  assert.equal(hr.dedupe_state, 'DEDUPE_UNCONFIGURED');
+  assert.equal(Object.isFrozen(hr), true);
+});
+
+// --------------------------------------------------------------------------
+// CURSOR (F-C1..F-C8)
+// --------------------------------------------------------------------------
+test('F-C1 undefined -> CURSOR_UNCONFIGURED', () => {
+  assert.equal(evaluateIngestionCursor(undefined).cursor_state, 'CURSOR_UNCONFIGURED');
+});
+
+test('F-C2 valid cursor -> CURSOR_VALID, checkpoint, next_cursor_ref, no persistence', () => {
+  const r = evaluateIngestionCursor({ purpose: 'ingestion_cursor', current_cursor_ref: 'cur-1' });
+  assert.equal(r.cursor_state, 'CURSOR_VALID');
+  assert.equal(r.checkpoint_valid, true);
+  assert.equal(r.next_cursor_ref, 'cur-1');
+  assert.equal(r.persistence_performed, false);
+});
+
+test('F-C3 last_processed_ref drives next_cursor_ref', () => {
+  const r = evaluateIngestionCursor({
+    purpose: 'ingestion_cursor',
+    current_cursor_ref: 'cur-1',
+    last_processed_ref: 'lp-9',
+  });
+  assert.equal(r.next_cursor_ref, 'lp-9');
+});
+
+test('F-C4 is_stale -> CURSOR_STALE, checkpoint invalid', () => {
+  const r = evaluateIngestionCursor({
+    purpose: 'ingestion_cursor',
+    current_cursor_ref: 'cur-1',
+    is_stale: true,
+  });
+  assert.equal(r.cursor_state, 'CURSOR_STALE');
+  assert.equal(r.checkpoint_valid, false);
+});
+
+test('F-C5 age vs max_age decides stale/valid', () => {
+  assert.equal(
+    evaluateIngestionCursor({
+      purpose: 'ingestion_cursor',
+      current_cursor_ref: 'cur-1',
+      age_ms: 100,
+      max_age_ms: 10,
+    }).cursor_state,
+    'CURSOR_STALE',
+  );
+  assert.equal(
+    evaluateIngestionCursor({
+      purpose: 'ingestion_cursor',
+      current_cursor_ref: 'cur-1',
+      age_ms: 5,
+      max_age_ms: 10,
+    }).cursor_state,
+    'CURSOR_VALID',
+  );
+});
+
+test('F-C6 missing current_cursor_ref -> CURSOR_UNCONFIGURED', () => {
+  assert.equal(
+    evaluateIngestionCursor({ purpose: 'ingestion_cursor' }).cursor_state,
+    'CURSOR_UNCONFIGURED',
+  );
+});
+
+test('F-C7 smuggled flags -> CURSOR_INVALID, not echoed, never live', () => {
+  const r1 = evaluateIngestionCursor({
+    purpose: 'ingestion_cursor',
+    current_cursor_ref: 'cur-1',
+    can_send: true,
+  });
+  assert.equal(r1.cursor_state, 'CURSOR_INVALID');
+  const r2 = evaluateIngestionCursor({
+    purpose: 'ingestion_cursor',
+    current_cursor_ref: 'cur-1',
+    endpoint_url: 'https://x',
+  });
+  assert.equal(r2.cursor_state, 'CURSOR_INVALID');
+  assert.equal(JSON.stringify(r2).includes('https://x'), false);
+  for (const r of [r1, r2]) assert.equal(r.live_stream_enabled, false);
+});
+
+test('F-C8 checkpoint_valid does not set persistence; hostile proxy frozen UNCONFIGURED', () => {
+  const r = evaluateIngestionCursor({ purpose: 'ingestion_cursor', current_cursor_ref: 'cur-1' });
+  assert.equal(r.checkpoint_valid, true);
+  assert.equal(r.persistence_performed, false);
+  let hr;
+  assert.doesNotThrow(() => {
+    hr = evaluateIngestionCursor(hostileProxy());
+  });
+  assert.equal(hr.cursor_state, 'CURSOR_UNCONFIGURED');
+  assert.equal(Object.isFrozen(hr), true);
+});
+
+// --------------------------------------------------------------------------
+// HEALTH (F-H1..F-H12) — built from REAL Part C/D results
+// --------------------------------------------------------------------------
+const sbOk = evaluateIngestionSourceBoundary({
+  purpose: 'ingestion_source_descriptor',
+  source_ref: 'mock_replay',
+});
+const rbOk = evaluateReplayIngestionBatch({
+  purpose: 'replay_ingestion_batch',
+  source_ref: 'mock_replay',
+  batch_ref: 'b-1',
+  events: [goodEvent, { ...goodEvent, event_ref: 'ev-2', event_type: 'swap_observed' }],
+  read_only: true,
+  no_network: true,
+  no_live_stream: true,
+  no_send: true,
+  no_broadcast: true,
+  no_sign: true,
+  no_mainnet: true,
+  no_real_live: true,
+});
+const ddOk = evaluateIngestionDedupe({
+  purpose: 'ingestion_dedupe',
+  event_refs: ['ev-1', 'ev-2'],
+});
+const cuOk = evaluateIngestionCursor({
+  purpose: 'ingestion_cursor',
+  current_cursor_ref: 'cur-1',
+});
+const allGood = { source_boundary: sbOk, replay_batch: rbOk, dedupe: ddOk, cursor: cuOk };
+
+test('F-H1 undefined -> INGESTION_UNCONFIGURED', () => {
+  assert.equal(evaluateIngestionHealth(undefined).ingestion_state, 'INGESTION_UNCONFIGURED');
+});
+
+test('F-H2 missing component -> INGESTION_UNCONFIGURED', () => {
+  const { cursor, ...noCursor } = allGood;
+  assert.equal(evaluateIngestionHealth(noCursor).ingestion_state, 'INGESTION_UNCONFIGURED');
+});
+
+test('F-H3 allGood -> INGESTION_REPLAY_READY, replay_ready true', () => {
+  const r = evaluateIngestionHealth(allGood);
+  assert.equal(r.ingestion_state, 'INGESTION_REPLAY_READY');
+  assert.equal(r.ingestion_replay_ready, true);
+});
+
+test('F-H4 invalid source -> INGESTION_BLOCKED', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    source_boundary: evaluateIngestionSourceBoundary({ source_ref: 'live_helius' }),
+  });
+  assert.equal(r.ingestion_state, 'INGESTION_BLOCKED');
+});
+
+test('F-H5 invalid batch -> INGESTION_BLOCKED', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    replay_batch: evaluateReplayIngestionBatch({
+      purpose: 'replay_ingestion_batch',
+      source_ref: 'mock_replay',
+      batch_ref: 'b-1',
+      events: [goodEvent],
+      can_send: true,
+    }),
+  });
+  assert.equal(r.ingestion_state, 'INGESTION_BLOCKED');
+});
+
+test('F-H6 degraded batch (empty events) -> INGESTION_DEGRADED', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    replay_batch: evaluateReplayIngestionBatch({ ...goodBatch, events: [] }),
+  });
+  assert.equal(r.ingestion_state, 'INGESTION_DEGRADED');
+});
+
+test('F-H7 stale cursor -> INGESTION_STALE', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    cursor: evaluateIngestionCursor({
+      purpose: 'ingestion_cursor',
+      current_cursor_ref: 'cur-1',
+      is_stale: true,
+    }),
+  });
+  assert.equal(r.ingestion_state, 'INGESTION_STALE');
+});
+
+test('F-H8 smuggled forbidden flag top-level -> INGESTION_BLOCKED', () => {
+  const r = evaluateIngestionHealth({ ...allGood, can_send: true });
+  assert.equal(r.ingestion_state, 'INGESTION_BLOCKED');
+});
+
+test('F-H9 smuggled live_stream_enabled:true in component -> INGESTION_BLOCKED', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    dedupe: { ...ddOk, live_stream_enabled: true },
+  });
+  assert.equal(r.ingestion_state, 'INGESTION_BLOCKED');
+});
+
+test('F-H10 every health state result keeps capability flags false, read_only true', () => {
+  const { cursor, ...noCursor } = allGood;
+  const results = [
+    evaluateIngestionHealth(undefined), // UNCONFIGURED
+    evaluateIngestionHealth(noCursor), // UNCONFIGURED
+    evaluateIngestionHealth({
+      ...allGood,
+      replay_batch: evaluateReplayIngestionBatch({ ...goodBatch, events: [] }),
+    }), // DEGRADED
+    evaluateIngestionHealth(allGood), // REPLAY_READY
+    evaluateIngestionHealth({ ...allGood, can_send: true }), // BLOCKED
+    evaluateIngestionHealth({
+      ...allGood,
+      cursor: evaluateIngestionCursor({
+        purpose: 'ingestion_cursor',
+        current_cursor_ref: 'cur-1',
+        is_stale: true,
+      }),
+    }), // STALE
+  ];
+  const states = results.map((r) => r.ingestion_state);
+  assert.ok(states.includes('INGESTION_REPLAY_READY'), 'REPLAY_READY covered');
+  assert.ok(states.includes('INGESTION_BLOCKED'), 'BLOCKED covered');
+  assert.ok(states.includes('INGESTION_STALE'), 'STALE covered');
+  assert.ok(states.includes('INGESTION_DEGRADED'), 'DEGRADED covered');
+  assert.ok(states.includes('INGESTION_UNCONFIGURED'), 'UNCONFIGURED covered');
+  for (const r of results) assertSafeFlags(r);
+});
+
+test('F-H11 NO-ECHO: leaked field on inputs is not in result JSON', () => {
+  const r = evaluateIngestionHealth({
+    ...allGood,
+    leaked_marker_field: 'LEAK_TOKEN_XYZ',
+  });
+  assert.equal(JSON.stringify(r).includes('LEAK_TOKEN_XYZ'), false);
+  assert.equal(JSON.stringify(r).includes('leaked_marker_field'), false);
+});
+
+test('F-H12 hostile proxy -> frozen INGESTION_UNCONFIGURED; describe frozen', () => {
+  let hr;
+  assert.doesNotThrow(() => {
+    hr = evaluateIngestionHealth(hostileProxy());
+  });
+  assert.equal(hr.ingestion_state, 'INGESTION_UNCONFIGURED');
+  assert.equal(Object.isFrozen(hr), true);
+  assert.equal(Object.isFrozen(describeIngestionHealthContract()), true);
+});
+
+// --------------------------------------------------------------------------
+// DESCRIPTORS (G4..G6) for the new contracts
+// --------------------------------------------------------------------------
+test('G4..G6 new describe* contracts frozen and safe', () => {
+  const descriptors = [
+    describeIngestionDedupeContract(),
+    describeIngestionCursorContract(),
+    describeIngestionHealthContract(),
+  ];
+  for (const d of descriptors) {
+    assert.equal(Object.isFrozen(d), true);
+    assert.equal(d.read_only, true);
+    assert.equal(d.can_send, false);
+    assert.equal(d.trading_ready, false);
+  }
+});
+
+// --------------------------------------------------------------------------
+// STATIC GUARDS (S5..S7) for the appended region
+// --------------------------------------------------------------------------
+test('S5 src still import-free after append', () => {
+  const src = readFileSync(SRC_FILE, 'utf8');
+  assert.equal(/^\s*import\b/m.test(src), false, 'no import statements');
+  assert.equal(/\brequire\s*\(/.test(src), false, 'no require()');
+  assert.equal(/\bfrom\s+['"]/.test(src), false, 'no from-specifiers');
+});
+
+test('S6 src has no network/clock/persistence primitives (incl. appended region)', () => {
+  const src = readFileSync(SRC_FILE, 'utf8');
+  const forbidden = [
+    /\bfetch\s*\(/,
+    /new\s+WebSocket\b/,
+    /new\s+Connection\b/,
+    /\bsendTransaction\b/,
+    /process\.env\b/,
+    /\breadFileSync\b/,
+    /node:fs\b/,
+    /\bDate\.now\b/,
+    /new\s+Date\b/,
+  ];
+  for (const re of forbidden) {
+    assert.equal(re.test(src), false, `forbidden primitive matched: ${re}`);
+  }
+});
+
+test("S7 src never literally sets can_send: true", () => {
+  const src = readFileSync(SRC_FILE, 'utf8');
+  assert.equal(/can_send\s*:\s*true/.test(src), false, 'no literal can_send: true');
 });

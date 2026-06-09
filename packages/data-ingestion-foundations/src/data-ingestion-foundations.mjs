@@ -502,3 +502,325 @@ export function evaluateReplayIngestionBatch(input) {
     return build('REPLAY_BATCH_UNCONFIGURED', ['input_inspection_error'], {});
   }
 }
+
+// ---------------------------------------------------------------------------
+// (F1) DEDUPE / IDEMPOTENCY
+// ---------------------------------------------------------------------------
+
+const ING_DEDUPE_STATES = Object.freeze([
+  'DEDUPE_UNCONFIGURED',
+  'DEDUPE_INVALID',
+  'DEDUPE_DEGRADED',
+  'DEDUPE_OK',
+]);
+
+export function describeIngestionDedupeContract() {
+  return Object.freeze({
+    contract: 'ingestion-dedupe',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: ING_DEDUPE_STATES,
+    dedupe_state: 'DEDUPE_UNCONFIGURED',
+    accepted_count: 0,
+    duplicate_count: 0,
+    quarantined_count: 0,
+    persistence_performed: false,
+    status: 'DEDUPE_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...ingSafeFlags(),
+    note:
+      'Read-only deterministic ingestion dedupe/idempotency. Pure function over a list of opaque event_refs (+ optional prior_seen_refs); no DB/Redis/ClickHouse/PostgreSQL/filesystem/network/persistence. Returns counts only (accepted/duplicate/quarantined); persistence_performed is always false. Opens no trading readiness.',
+  });
+}
+
+export function evaluateIngestionDedupe(input) {
+  const build = (state, reasons, counts) =>
+    Object.freeze({
+      valid: state !== 'DEDUPE_INVALID',
+      dedupe_state: state,
+      accepted_count: counts.accepted || 0,
+      duplicate_count: counts.duplicate || 0,
+      quarantined_count: counts.quarantined || 0,
+      persistence_performed: false,
+      status: state,
+      reasons: Object.freeze([...reasons]),
+      ...ingSafeFlags(),
+    });
+  try {
+    const obj =
+      input != null && typeof input === 'object' && !Array.isArray(input) ? input : null;
+    // Uninspectable / anomalous input (e.g. a Proxy whose accessors return functions
+    // instead of plain data) cannot be safely validated -> fail closed to UNCONFIGURED,
+    // consistent with the throwing-accessor catch path and the health aggregator.
+    if (obj && (typeof obj.purpose === 'function'
+      || typeof obj.event_refs === 'function'
+      || typeof obj.prior_seen_refs === 'function')) {
+      return build('DEDUPE_UNCONFIGURED', ['input_inspection_error'], {});
+    }
+    const reasons = [];
+    if (!obj) {
+      reasons.push('no_dedupe_input');
+    } else {
+      const shallow = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (k !== 'event_refs' && k !== 'prior_seen_refs') shallow[k] = v;
+      }
+      reasons.push(...ingScreenInput(shallow));
+      if (obj.purpose !== 'ingestion_dedupe') reasons.push('purpose_invalid');
+      if (!Array.isArray(obj.event_refs)) reasons.push('event_refs_not_array');
+    }
+    const unique = [...new Set(reasons)];
+    if (!obj || unique.includes('input_inspection_error'))
+      return build(
+        'DEDUPE_UNCONFIGURED',
+        unique.length ? unique : ['no_dedupe_input'],
+        {},
+      );
+    if (
+      unique.includes('forbidden_trading_indicator_blocked') ||
+      unique.includes('execution_command_blocked') ||
+      unique.includes('secret_field_blocked') ||
+      unique.includes('endpoint_or_mainnet_blocked') ||
+      unique.includes('purpose_invalid') ||
+      unique.includes('event_refs_not_array')
+    )
+      return build('DEDUPE_INVALID', unique, {});
+    const prior = new Set(
+      Array.isArray(obj.prior_seen_refs)
+        ? obj.prior_seen_refs.filter((r) => typeof r === 'string')
+        : [],
+    );
+    const seen = new Set();
+    let accepted = 0;
+    let duplicate = 0;
+    let quarantined = 0;
+    for (const ref of obj.event_refs) {
+      if (typeof ref !== 'string' || ref.length === 0) {
+        quarantined++;
+        continue;
+      }
+      if (prior.has(ref) || seen.has(ref)) {
+        duplicate++;
+        continue;
+      }
+      seen.add(ref);
+      accepted++;
+    }
+    const counts = { accepted, duplicate, quarantined };
+    if (quarantined > 0) return build('DEDUPE_DEGRADED', ['quarantined_refs_present'], counts);
+    return build('DEDUPE_OK', [], counts);
+  } catch {
+    return build('DEDUPE_UNCONFIGURED', ['input_inspection_error'], {});
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (F2) CURSOR / CHECKPOINT
+// ---------------------------------------------------------------------------
+
+const ING_CURSOR_STATES = Object.freeze([
+  'CURSOR_UNCONFIGURED',
+  'CURSOR_INVALID',
+  'CURSOR_VALID',
+  'CURSOR_STALE',
+]);
+
+// Module-internal staleness helper. NO system clock: staleness/age is an
+// explicit deterministic parameter supplied by the caller.
+function ingCursorStale(obj) {
+  if (obj == null || typeof obj !== 'object') return false;
+  if (obj.is_stale === true) return true;
+  const a = obj.age_ms;
+  const m = obj.max_age_ms;
+  return typeof a === 'number' && typeof m === 'number' && a > m;
+}
+
+export function describeIngestionCursorContract() {
+  return Object.freeze({
+    contract: 'ingestion-cursor',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: ING_CURSOR_STATES,
+    cursor_state: 'CURSOR_UNCONFIGURED',
+    next_cursor_ref: undefined,
+    checkpoint_valid: false,
+    persistence_performed: false,
+    status: 'CURSOR_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...ingSafeFlags(),
+    note:
+      'Read-only deterministic ingestion cursor/checkpoint. Pure function over opaque cursor refs + an explicit deterministic age/staleness parameter (NO system clock); no DB/filesystem/network/persistence. A cursor NEVER authorizes a live stream (live_stream_enabled:false); a valid checkpoint NEVER implies persistence (persistence_performed:false). Opens no trading readiness.',
+  });
+}
+
+export function evaluateIngestionCursor(input) {
+  const build = (state, reasons, nextRef, checkpointValid) =>
+    Object.freeze({
+      valid: state !== 'CURSOR_INVALID',
+      cursor_state: state,
+      next_cursor_ref:
+        state === 'CURSOR_VALID' || state === 'CURSOR_STALE' ? nextRef : undefined,
+      checkpoint_valid: checkpointValid === true,
+      persistence_performed: false,
+      status: state,
+      reasons: Object.freeze([...reasons]),
+      ...ingSafeFlags(),
+    });
+  try {
+    const obj =
+      input != null && typeof input === 'object' && !Array.isArray(input) ? input : null;
+    // Uninspectable / anomalous input (e.g. a Proxy whose accessors return functions
+    // instead of plain data) cannot be safely validated -> fail closed to UNCONFIGURED,
+    // consistent with the throwing-accessor catch path and the health aggregator.
+    if (obj && (typeof obj.purpose === 'function'
+      || typeof obj.current_cursor_ref === 'function'
+      || typeof obj.last_processed_ref === 'function')) {
+      return build('CURSOR_UNCONFIGURED', ['input_inspection_error'], undefined, false);
+    }
+    const reasons = [];
+    if (!obj) {
+      reasons.push('no_cursor_input');
+    } else {
+      reasons.push(...ingScreenInput(obj));
+      if (obj.purpose !== 'ingestion_cursor') reasons.push('purpose_invalid');
+      if (typeof obj.current_cursor_ref !== 'string' || obj.current_cursor_ref.length === 0)
+        reasons.push('current_cursor_ref_missing');
+    }
+    const unique = [...new Set(reasons)];
+    if (!obj || unique.includes('input_inspection_error'))
+      return build(
+        'CURSOR_UNCONFIGURED',
+        unique.length ? unique : ['no_cursor_input'],
+        undefined,
+        false,
+      );
+    if (
+      unique.includes('forbidden_trading_indicator_blocked') ||
+      unique.includes('execution_command_blocked') ||
+      unique.includes('secret_field_blocked') ||
+      unique.includes('endpoint_or_mainnet_blocked') ||
+      unique.includes('purpose_invalid')
+    )
+      return build('CURSOR_INVALID', unique, undefined, false);
+    if (unique.includes('current_cursor_ref_missing'))
+      return build('CURSOR_UNCONFIGURED', unique, undefined, false);
+    const nextRef =
+      typeof obj.last_processed_ref === 'string' && obj.last_processed_ref.length > 0
+        ? obj.last_processed_ref
+        : obj.current_cursor_ref;
+    if (ingCursorStale(obj)) return build('CURSOR_STALE', ['cursor_stale'], nextRef, false);
+    return build('CURSOR_VALID', [], nextRef, true);
+  } catch {
+    return build('CURSOR_UNCONFIGURED', ['input_inspection_error'], undefined, false);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (G) INGESTION HEALTH / STATUS
+// ---------------------------------------------------------------------------
+
+const ING_HEALTH_STATES = Object.freeze([
+  'INGESTION_UNCONFIGURED',
+  'INGESTION_DEGRADED',
+  'INGESTION_REPLAY_READY',
+  'INGESTION_BLOCKED',
+  'INGESTION_STALE',
+]);
+
+export function describeIngestionHealthContract() {
+  return Object.freeze({
+    contract: 'ingestion-health',
+    version: '0.0.0',
+    test_only: true,
+    consumes: Object.freeze(['source_boundary', 'replay_batch', 'dedupe', 'cursor']),
+    supported_states: ING_HEALTH_STATES,
+    ingestion_state: 'INGESTION_UNCONFIGURED',
+    ingestion_replay_ready: false,
+    status: 'INGESTION_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...ingSafeFlags(),
+    note:
+      'Read-only ingestion health/status aggregator. Consumes the source-descriptor boundary result + replay-batch result + dedupe result + cursor result and derives an ingestion operational state (UNCONFIGURED/DEGRADED/REPLAY_READY/BLOCKED/STALE). Even INGESTION_REPLAY_READY opens NO trading/signal/risk/routing readiness. No network/clock/persistence; never echoes endpoint/secret.',
+  });
+}
+
+export function evaluateIngestionHealth(inputs) {
+  const build = (state, reasons) =>
+    Object.freeze({
+      valid: state !== 'INGESTION_BLOCKED',
+      ingestion_state: state,
+      ingestion_replay_ready: state === 'INGESTION_REPLAY_READY',
+      status: state,
+      reasons: Object.freeze([...reasons]),
+      ...ingSafeFlags(),
+    });
+  try {
+    const obj =
+      inputs != null && typeof inputs === 'object' && !Array.isArray(inputs) ? inputs : null;
+    if (!obj) return build('INGESTION_UNCONFIGURED', ['no_inputs']);
+    const sb = obj.source_boundary;
+    const rb = obj.replay_batch;
+    const dd = obj.dedupe;
+    const cu = obj.cursor;
+    // (1) forbidden trading flag smuggled on top-level OR any component => BLOCKED
+    for (const c of [obj, sb, rb, dd, cu]) {
+      if (c && typeof c === 'object' && ingHasForbiddenTrueFlag(c))
+        return build('INGESTION_BLOCKED', ['forbidden_trading_indicator_blocked']);
+    }
+    // also block any live-stream/network indicator smuggled as true on a component
+    for (const c of [sb, rb, dd, cu]) {
+      if (
+        c &&
+        typeof c === 'object' &&
+        (c.live_stream_enabled === true ||
+          c.network_call_made === true ||
+          c.endpoint_resolved === true ||
+          c.mainnet_enabled === true ||
+          c.real_live === true)
+      )
+        return build('INGESTION_BLOCKED', ['live_or_mainnet_indicator_blocked']);
+    }
+    const st = (o, field) =>
+      o != null && typeof o === 'object' && typeof o[field] === 'string' ? o[field] : null;
+    const sbS = st(sb, 'source_state');
+    const rbS = st(rb, 'batch_state');
+    const ddS = st(dd, 'dedupe_state');
+    const cuS = st(cu, 'cursor_state');
+    // (2) known-invalid => BLOCKED
+    if (
+      sbS === 'INGESTION_SOURCE_INVALID' ||
+      rbS === 'REPLAY_BATCH_INVALID' ||
+      ddS === 'DEDUPE_INVALID' ||
+      cuS === 'CURSOR_INVALID'
+    )
+      return build('INGESTION_BLOCKED', ['component_invalid']);
+    // (3) any missing/unconfigured => UNCONFIGURED
+    if (sbS === null || rbS === null || ddS === null || cuS === null)
+      return build('INGESTION_UNCONFIGURED', ['component_input_missing']);
+    if (
+      sbS === 'INGESTION_SOURCE_UNCONFIGURED' ||
+      rbS === 'REPLAY_BATCH_UNCONFIGURED' ||
+      ddS === 'DEDUPE_UNCONFIGURED' ||
+      cuS === 'CURSOR_UNCONFIGURED'
+    )
+      return build('INGESTION_UNCONFIGURED', ['component_unconfigured']);
+    // (4) stale cursor => STALE
+    if (cuS === 'CURSOR_STALE') return build('INGESTION_STALE', ['cursor_stale']);
+    // (5) all-green => REPLAY_READY
+    if (
+      sbS === 'INGESTION_SOURCE_READ_ONLY_OK' &&
+      rbS === 'REPLAY_BATCH_READ_ONLY_OK' &&
+      ddS === 'DEDUPE_OK' &&
+      cuS === 'CURSOR_VALID'
+    )
+      return build('INGESTION_REPLAY_READY', []);
+    // (6) else => DEGRADED with component reason tokens
+    const reasons = [];
+    if (rbS === 'REPLAY_BATCH_DEGRADED') reasons.push('replay_batch_degraded');
+    if (ddS === 'DEDUPE_DEGRADED') reasons.push('dedupe_degraded');
+    if (reasons.length === 0) reasons.push('not_all_components_ready');
+    return build('INGESTION_DEGRADED', reasons);
+  } catch {
+    return build('INGESTION_UNCONFIGURED', ['input_inspection_error']);
+  }
+}

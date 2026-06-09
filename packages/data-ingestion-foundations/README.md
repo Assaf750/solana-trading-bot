@@ -58,3 +58,48 @@ readiness. States: `REPLAY_BATCH_UNCONFIGURED` / `REPLAY_BATCH_INVALID` / `REPLA
 - `describeReplayIngestionHarnessContract()`
 - `validateReplayIngestionBatch(input)`
 - `evaluateReplayIngestionBatch(input)`
+
+## Ingestion Dedupe / Idempotency (read-only, deterministic)
+
+A **pure, deterministic** function over a list of opaque `event_refs` (plus optional
+`prior_seen_refs`). It performs **no DB/Redis/ClickHouse/PostgreSQL/filesystem/network/persistence**
+and reads **no system clock**. The input envelope must attest `purpose: 'ingestion_dedupe'` and
+carry an `event_refs` array; forbidden trading flags, execution commands, secret-named fields, and
+endpoint/mainnet values all fail closed with fixed reason tokens. The result reports **counts only**
+(`accepted_count` / `duplicate_count` / `quarantined_count`) — ref *values* are never echoed, only
+counts, the state, and fixed tokens. `persistence_performed` is **always false**: dedupe never
+persists anything. A dedupe result opens **no** trading readiness and keeps `read_only:true` with all
+trading/signal/risk/routing flags false. States: `DEDUPE_UNCONFIGURED` / `DEDUPE_INVALID` /
+`DEDUPE_DEGRADED` / `DEDUPE_OK`.
+
+- `describeIngestionDedupeContract()`
+- `evaluateIngestionDedupe(input)`
+
+## Ingestion Cursor / Checkpoint (read-only, no persistence)
+
+A **pure, deterministic** function over opaque cursor refs plus an **explicit deterministic
+age/staleness parameter** (`is_stale`, or `age_ms`/`max_age_ms`) — there is **no system clock read**.
+It performs **no DB/filesystem/network/persistence**. The input must attest `purpose:
+'ingestion_cursor'` and carry a non-empty `current_cursor_ref`; forbidden trading flags, execution
+commands, secret-named fields, and endpoint/mainnet values fail closed. `next_cursor_ref` echoes
+**only** an opaque cursor ref already validated free of URL/secret/mainnet. A cursor **never
+authorizes a live stream** (`live_stream_enabled:false`), and a valid **checkpoint never implies
+persistence** (`persistence_performed:false` always). A cursor result opens **no** trading readiness.
+States: `CURSOR_UNCONFIGURED` / `CURSOR_INVALID` / `CURSOR_VALID` / `CURSOR_STALE`.
+
+- `describeIngestionCursorContract()`
+- `evaluateIngestionCursor(input)`
+
+## Ingestion Health / Status (read-only aggregator)
+
+A read-only aggregator that **consumes** the source-descriptor boundary result, the replay-batch
+result, the dedupe result, and the cursor result, then derives an ingestion operational state. It
+performs **no network/clock/persistence** and never echoes any endpoint/secret or input value. Any
+forbidden trading flag, or any live-stream/network/mainnet indicator smuggled as `true` on a
+component, forces `INGESTION_BLOCKED`. Even `INGESTION_REPLAY_READY` opens **no**
+trading/signal/risk/routing readiness — replay-ready is not trading/signal/risk/routing readiness.
+States: `INGESTION_UNCONFIGURED` / `INGESTION_DEGRADED` / `INGESTION_REPLAY_READY` /
+`INGESTION_BLOCKED` / `INGESTION_STALE`.
+
+- `describeIngestionHealthContract()`
+- `evaluateIngestionHealth(inputs)`
