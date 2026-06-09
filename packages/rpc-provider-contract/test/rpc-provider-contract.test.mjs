@@ -2799,3 +2799,319 @@ test('(S45) NO `can_send: true` anywhere in packages/*/src (approval gate did no
   }
   assert.deepEqual(offenders, [], `can_send: true must not appear in any package src: ${offenders.join(', ')}`);
 });
+
+// ============================================================================================================
+// PR-E2-F-15 — RPC Client / SDK SUPPLY-CHAIN REVIEW GATE proofs (G1..G40), contract-only / no-network.
+// Imports the REAL exports from ../src/index.mjs (re-exported via `export *`). No duplicate imports above.
+// ============================================================================================================
+import {
+  describeRpcClientSupplyChainGateContract,
+  validateRpcClientSupplyChainReview,
+  evaluateRpcClientSupplyChainGate,
+} from '../src/index.mjs';
+
+// Canonical valid supply-chain review record.
+function makeValidSupplyChainReview() {
+  return {
+    purpose: 'rpc_client_supply_chain_review',
+    client_ref: 'rpc-client-pkg',
+    client_version: '1.2.3',
+    no_network: true,
+    no_send: true,
+    no_broadcast: true,
+    no_serialize: true,
+    no_mainnet: true,
+    no_real_live: true,
+    requires_lockfile_review: true,
+    requires_supply_chain_review: true,
+    requires_separate_integration_pr: true,
+    requires_pinned_version: true,
+  };
+}
+
+// Assert every capability/live flag on a result is the FIXED LITERAL false.
+function assertAllLiveFlagsFalse(r) {
+  assert.equal(r.live_rpc_authorized, false, 'live_rpc_authorized false');
+  assert.equal(r.network_capability, false, 'network_capability false');
+  assert.equal(r.configured, false, 'configured false');
+  assert.equal(r.has_rpc, false, 'has_rpc false');
+  assert.equal(r.ready, false, 'ready false');
+  assert.equal(r.can_send, false, 'can_send false');
+  assert.equal(r.can_broadcast, false, 'can_broadcast false');
+  assert.equal(r.can_serialize, false, 'can_serialize false');
+  assert.equal(r.is_live, false, 'is_live false');
+  assert.equal(r.real_live, false, 'real_live false');
+  assert.equal(r.network_call_made, false, 'network_call_made false');
+  assert.equal(r.live_rpc_call_made, false, 'live_rpc_call_made false');
+}
+
+test('(G1) valid review record -> gate passes with fixed status, no network', () => {
+  const r = evaluateRpcClientSupplyChainGate(makeValidSupplyChainReview());
+  assert.equal(r.review_record_valid, true, 'review_record_valid true');
+  assert.equal(r.supply_chain_gate_passed, true, 'supply_chain_gate_passed true');
+  assert.equal(r.status, 'rpc_client_supply_chain_review_valid_no_network', 'fixed valid status');
+});
+
+test('(G2..G13) valid review keeps every capability/live flag === false', () => {
+  const r = evaluateRpcClientSupplyChainGate(makeValidSupplyChainReview());
+  // G2 live_rpc_authorized, G3 network_capability, G4 configured, G5 has_rpc, G6 ready,
+  // G7 can_send, G8 can_broadcast, G9 can_serialize, G10 is_live, G11 real_live,
+  // G12 network_call_made, G13 live_rpc_call_made.
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G14) valid review keeps requires_separate_integration_pr === true (fixed-literal invariant)', () => {
+  const r = evaluateRpcClientSupplyChainGate(makeValidSupplyChainReview());
+  assert.equal(r.requires_separate_integration_pr, true, 'separate integration PR still required');
+});
+
+// G15..G24 — drop each of the 10 required-true attestations in turn -> gate must NOT pass.
+const SUPPLY_CHAIN_ATTESTATIONS = [
+  'no_network', 'no_send', 'no_broadcast', 'no_serialize', 'no_mainnet', 'no_real_live',
+  'requires_lockfile_review', 'requires_supply_chain_review', 'requires_separate_integration_pr',
+  'requires_pinned_version',
+];
+SUPPLY_CHAIN_ATTESTATIONS.forEach((attestation, i) => {
+  test(`(G${15 + i}) dropping attestation '${attestation}' -> supply_chain_gate_passed === false`, () => {
+    const rec = makeValidSupplyChainReview();
+    delete rec[attestation];
+    const r = evaluateRpcClientSupplyChainGate(rec);
+    assert.equal(r.supply_chain_gate_passed, false, `missing ${attestation} must fail the gate`);
+    assert.equal(r.review_record_valid, false, `missing ${attestation} -> record invalid`);
+    assertAllLiveFlagsFalse(r);
+    assert.equal(r.requires_separate_integration_pr, true, 'separate PR invariant holds even on failure');
+  });
+});
+
+test('(G25) missing client_ref -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  delete rec.client_ref;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'missing client_ref fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G26) missing client_version -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  delete rec.client_version;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'missing client_version fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G27) missing purpose / wrong purpose -> false', () => {
+  const missing = makeValidSupplyChainReview();
+  delete missing.purpose;
+  const rMissing = evaluateRpcClientSupplyChainGate(missing);
+  assert.equal(rMissing.supply_chain_gate_passed, false, 'missing purpose fails');
+
+  const wrong = makeValidSupplyChainReview();
+  wrong.purpose = 'something_else';
+  const rWrong = evaluateRpcClientSupplyChainGate(wrong);
+  assert.equal(rWrong.supply_chain_gate_passed, false, 'wrong purpose fails');
+  assertAllLiveFlagsFalse(rWrong);
+});
+
+test('(G28) endpoint/URL in client_ref -> false AND not echoed', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.client_ref = 'https://rpc.example';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'endpoint URL in client_ref fails');
+  assert.equal(JSON.stringify(r).includes('https://rpc.example'), false, 'endpoint URL NOT echoed');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G29) descriptive rpc/sdk/endpoint package names are ALLOWED; only a real endpoint URL scheme is blocked', () => {
+  // A supply-chain review of an RPC client legitimately names a package containing the descriptive words
+  // 'rpc'/'sdk'/'client'/'endpoint' — these must NOT be false-blocked (the gate would otherwise never pass its
+  // own subject). Only a genuine endpoint URL surface (a scheme) is refused.
+  for (const name of ['rpc-client-pkg', 'helius-rpc-sdk', 'some-endpoint-helper', '@scope/solana-rpc-client']) {
+    const rec = makeValidSupplyChainReview();
+    rec.client_ref = name;
+    const r = evaluateRpcClientSupplyChainGate(rec);
+    assert.equal(r.supply_chain_gate_passed, true, `descriptive client name must be allowed: ${name}`);
+    assert.equal(r.status, 'rpc_client_supply_chain_review_valid_no_network', `valid status for ${name}`);
+    assertAllLiveFlagsFalse(r);
+  }
+  // ...but a real endpoint URL scheme in client_ref IS refused, and never echoed.
+  for (const url of ['ws://rpc.example', 'wss://node.example/path']) {
+    const rec = makeValidSupplyChainReview();
+    rec.client_ref = url;
+    const r = evaluateRpcClientSupplyChainGate(rec);
+    assert.equal(r.supply_chain_gate_passed, false, `endpoint URL scheme in client_ref must fail: ${url}`);
+    assert.ok(r.reasons.includes('endpoint_or_rpc_indicator_blocked'), `endpoint_or_rpc_indicator_blocked for ${url}`);
+    assert.equal(JSON.stringify(r).includes(url), false, `URL ${url} NOT echoed`);
+    assertAllLiveFlagsFalse(r);
+  }
+});
+
+test('(G30) secret/api_key indicator in client_ref -> false AND not echoed', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.client_ref = 'my-secret-token';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'secret indicator fails');
+  assert.equal(JSON.stringify(r).includes('my-secret-token'), false, 'secret value NOT echoed');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G31) mainnet in client_version -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.client_version = '1.0.0-mainnet';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'mainnet in version fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G32) extra broadcast:true field -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.broadcast = true;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'broadcast field fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G33) extra send:true field -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.send = true;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'send field fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G34) extra serialize:true field -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.serialize = true;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'serialize field fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G35) api_key field -> false AND not echoed', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.api_key = 'AKIA-DEADBEEF-SECRET';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'api_key field fails');
+  assert.equal(JSON.stringify(r).includes('AKIA-DEADBEEF-SECRET'), false, 'api_key value NOT echoed');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G36) secret field -> false AND not echoed', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.secret = 'top-secret-value-xyz';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'secret field fails');
+  assert.equal(JSON.stringify(r).includes('top-secret-value-xyz'), false, 'secret value NOT echoed');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G37) key-material-shaped client_ref (70 base58 chars) -> false AND not echoed', () => {
+  const rec = makeValidSupplyChainReview();
+  const keyish = '5'.repeat(70); // 70-char base58-shaped string.
+  rec.client_ref = keyish;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'key-material-shaped client_ref fails');
+  assert.equal(JSON.stringify(r).includes(keyish), false, 'key-material value NOT echoed');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G38) unknown field -> false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.totally_unknown_field = 'whatever';
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'unknown field fails');
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G39) faked has_rpc/can_send/is_live/real_live/network_call_made extra fields -> refused, flags stay false', () => {
+  const rec = makeValidSupplyChainReview();
+  rec.has_rpc = true;
+  rec.can_send = true;
+  rec.is_live = true;
+  rec.real_live = true;
+  rec.network_call_made = true;
+  const r = evaluateRpcClientSupplyChainGate(rec);
+  assert.equal(r.supply_chain_gate_passed, false, 'smuggled live flags rejected as unknown fields');
+  // The RESULT flags are fixed literals and must remain false regardless of smuggled input.
+  assertAllLiveFlagsFalse(r);
+});
+
+test('(G40) hostile throwing input -> evaluate AND validate return frozen refusal, no throw', () => {
+  const hostile = new Proxy({}, { get() { throw new Error('x'); } });
+
+  let evalResult;
+  assert.doesNotThrow(() => { evalResult = evaluateRpcClientSupplyChainGate(hostile); }, 'evaluate must not throw');
+  assert.equal(evalResult.valid, false, 'evaluate valid false');
+  assert.equal(evalResult.supply_chain_gate_passed, false, 'evaluate gate not passed');
+  assert.equal(Object.isFrozen(evalResult), true, 'evaluate result frozen');
+  assert.deepEqual(evalResult.reasons, ['input_inspection_error'], 'evaluate refusal reason');
+  assertAllLiveFlagsFalse(evalResult);
+
+  let valResult;
+  assert.doesNotThrow(() => { valResult = validateRpcClientSupplyChainReview(hostile); }, 'validate must not throw');
+  assert.equal(valResult.review_record_valid, false, 'validate review_record_valid false');
+  assert.equal(valResult.valid, false, 'validate valid false');
+  assert.equal(Object.isFrozen(valResult), true, 'validate result frozen');
+  assert.deepEqual(valResult.reasons, ['input_inspection_error'], 'validate refusal reason');
+  assertAllLiveFlagsFalse(valResult);
+});
+
+// ---- (G-static-A) rpc-provider-contract.mjs is import-free (no top-level import / require) ----
+
+test('(G-static-A) rpc-provider-contract.mjs has NO import / require (import-free module)', () => {
+  const code = stripCommentsAndStrings(readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8'));
+  for (const line of code.split('\n')) {
+    assert.equal(/^import\s/.test(line), false, `no top-level import line: ${line}`);
+  }
+  assert.equal(/\brequire\s*\(/.test(code), false, 'no require( in module');
+});
+
+// ---- (G-static-B) package.json declares NO dependencies of any kind (F-15 added none) ----
+
+test('(G-static-B) package.json declares NO dependencies/devDependencies (F-15 added none)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false, 'no dependencies');
+  assert.equal('devDependencies' in pkg, false, 'no devDependencies');
+  assert.equal('peerDependencies' in pkg, false, 'no peerDependencies');
+  assert.equal('optionalDependencies' in pkg, false, 'no optionalDependencies');
+});
+
+// ---- (G-static-C) F-15 code region carries NO network / fs / env mechanism ----
+
+test('(G-static-C) F-15 supply-chain gate region has NO env/fs/network mechanism', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const idx = full.indexOf('PR-E2-F-15');
+  assert.ok(idx !== -1, 'F-15 region marker present');
+  const region = stripCommentsAndStrings(full.slice(idx));
+  assert.equal(/process\.env/.test(region), false, 'no process.env');
+  assert.equal(/readFileSync|readFile\s*\(/.test(region), false, 'no readFileSync');
+  assert.equal(/node:fs/.test(region), false, 'no node:fs');
+  assert.equal(/\bfetch\s*\(/.test(region), false, 'no fetch(');
+  assert.equal(/new\s+WebSocket|WebSocket\s*\(/.test(region), false, 'no WebSocket');
+  assert.equal(/new\s+Connection\s*\(/.test(region), false, 'no new Connection(');
+});
+
+// ---- (G-static-D) no `can_send: true` anywhere in packages/*/src (F-15 introduced none) ----
+
+test('(G-static-D) NO `can_send: true` anywhere in packages/*/src (F-15 introduced none)', () => {
+  const PKGS = join(HERE, '..', '..');
+  const CAN_SEND_TRUE = /can_send\s*:\s*true/;
+  const offenders = [];
+  function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'test') continue;
+        walk(full);
+      } else if (entry.name.endsWith('.mjs')) {
+        if (CAN_SEND_TRUE.test(readFileSync(full, 'utf8'))) offenders.push(full);
+      }
+    }
+  }
+  for (const pkg of readdirSync(PKGS, { withFileTypes: true })) {
+    if (!pkg.isDirectory()) continue;
+    let srcDir;
+    try { srcDir = join(PKGS, pkg.name, 'src'); readdirSync(srcDir); } catch { continue; }
+    walk(srcDir);
+  }
+  assert.deepEqual(offenders, [], `can_send: true must not appear in any package src: ${offenders.join(', ')}`);
+});

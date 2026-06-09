@@ -370,3 +370,93 @@ export interface LiveRpcSpikeApprovalGateResult {
 export function describeLiveRpcSpikeApprovalGateContract(): LiveRpcSpikeApprovalGateDescriptor;
 export function validateLiveRpcSpikeApprovalGate(input?: unknown): LiveRpcSpikeApprovalGateRecordResult;
 export function evaluateLiveRpcSpikeApprovalGate(input?: unknown): LiveRpcSpikeApprovalGateResult;
+
+// ---- PR-E2-F-15 — RPC Client / SDK Supply-Chain Review Gate (contract-only, no-network) ----
+// Validates the SHAPE of a supply-chain review RECORD for a FUTURE RPC client/SDK dependency. An approved
+// review authorizes NOTHING live and adds NO dependency/network — a separate integration PR + lockfile +
+// supply-chain review are still required. No network / fetch / endpoint resolution / SDK import / dependency.
+
+export type RpcClientSupplyChainGateStatus =
+  | 'rpc_client_supply_chain_review_valid_no_network'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface RpcClientSupplyChainGateDescriptor {
+  readonly contract: 'rpc-client-supply-chain-gate';
+  readonly version: string;
+  readonly test_only: true;
+  readonly purpose: 'rpc_client_supply_chain_review';
+  readonly requires_lockfile_review: true;
+  readonly requires_supply_chain_review: true;
+  readonly requires_separate_integration_pr: true;
+  readonly requires_pinned_version: true;
+  readonly requires_no_network: true;
+  readonly requires_no_send: true;
+  readonly requires_no_broadcast: true;
+  readonly requires_no_serialize: true;
+  readonly requires_no_mainnet: true;
+  readonly requires_no_real_live: true;
+  readonly review_record_valid: false;
+  readonly supply_chain_gate_passed: false;
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export interface RpcClientSupplyChainReviewResult {
+  readonly valid: boolean;
+  readonly review_record_valid: boolean;
+  readonly status: RpcClientSupplyChainGateStatus;
+  readonly reasons: readonly string[];
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export interface RpcClientSupplyChainGateResult {
+  readonly valid: boolean;
+  readonly review_record_valid: boolean;
+  readonly supply_chain_gate_passed: boolean;
+  readonly status: RpcClientSupplyChainGateStatus;
+  readonly reasons: readonly string[];
+  readonly requires_separate_integration_pr: true;
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export function describeRpcClientSupplyChainGateContract(): RpcClientSupplyChainGateDescriptor;
+export function validateRpcClientSupplyChainReview(input?: unknown): RpcClientSupplyChainReviewResult;
+export function evaluateRpcClientSupplyChainGate(input?: unknown): RpcClientSupplyChainGateResult;

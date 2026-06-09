@@ -397,3 +397,25 @@ indicator blocking, and that no send/broadcast/RPC method is ever exposed.
 A real RPC provider integration — testnet-first, with its own endpoint/provider decision, behind this fail-closed
 boundary — is a separate PR and is **not started** by this package. **Mainnet / REAL-LIVE activation is a
 distinct later decision and is not started here.**
+
+## RPC Client / SDK Supply-Chain Review Gate (test-only, no-network)
+`describeRpcClientSupplyChainGateContract()` / `validateRpcClientSupplyChainReview(input)` /
+`evaluateRpcClientSupplyChainGate(input)` validate the **SHAPE** of a *supply-chain review RECORD* for a
+**FUTURE** RPC client/SDK dependency. The record carries only **opaque client metadata** (`client_ref` name +
+`client_version`) plus boolean attestations (`no_network` / `no_send` / `no_broadcast` / `no_serialize` /
+`no_mainnet` / `no_real_live`, and `requires_lockfile_review` / `requires_supply_chain_review` /
+`requires_separate_integration_pr` / `requires_pinned_version`).
+
+An accepted record yields `review_record_valid: true` / `supply_chain_gate_passed: true` — but
+`live_rpc_authorized: false`, `network_capability: false`, and **every** capability/live flag
+(`configured` / `has_rpc` / `ready` / `can_send` / `can_broadcast` / `can_serialize` / `is_live` / `real_live` /
+`network_call_made` / `live_rpc_call_made` / `broadcast_permitted`) stays `false`, plus
+`requires_separate_integration_pr: true`. In other words, an approved review **authorizes NOTHING live and adds
+NO dependency/network** — a separate integration PR + lockfile + supply-chain review are **still required**.
+
+This gate performs **no network / fetch / endpoint resolution / SDK import / dependency**, and reads **no
+env/secret**. A real endpoint **URL surface** (an `http(s)://` / `ws(s)://` scheme) / secret / key-material /
+mainnet indicator in any field is **refused and never echoed** (no freeform input is reflected back) — while a
+descriptive RPC/SDK package name (containing words like `rpc`/`sdk`/`client`/`endpoint`) is **allowed**, since the
+gate stores/resolves nothing. A hostile/throwing input returns a frozen refusal with reason
+`input_inspection_error` and never throws.

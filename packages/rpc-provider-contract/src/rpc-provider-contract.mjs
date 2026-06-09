@@ -1441,3 +1441,294 @@ export function evaluateLiveRpcSpikeApprovalGate(input) {
     });
   }
 }
+
+// ============================================================================================================
+// PR-E2-F-15 — RPC Client / SDK SUPPLY-CHAIN REVIEW GATE (contract-only, no-network)
+// ------------------------------------------------------------------------------------------------------------
+// A CONTRACT-ONLY gate that validates the SHAPE of a SUPPLY-CHAIN REVIEW RECORD for a FUTURE RPC client/SDK
+// dependency. It proves such a dependency can NEVER become a live capability through this gate: it introduces
+// NO dependency, NO SDK import, NO network. The record carries only OPAQUE client metadata (name/version) +
+// boolean attestations. An approved review authorizes NOTHING live and adds NO dependency/network — a separate
+// integration PR + lockfile + supply-chain review are ALWAYS still required.
+// ============================================================================================================
+
+// Required-true attestations: each [field, reason] pair must be boolean `true` on the record, else the listed
+// fixed reason token is pushed. The record asserts the future client adds no network/send/broadcast/serialize/
+// mainnet/real-live surface and that lockfile/supply-chain review + a separate integration PR + a pinned version
+// are required. String literal VALUES (lexer-blanked) — never executed, only used as fixed tokens.
+const SUPPLY_CHAIN_REQUIRED_TRUE = Object.freeze([
+  ['no_network', 'no_network_required'],
+  ['no_send', 'no_send_required'],
+  ['no_broadcast', 'no_broadcast_required'],
+  ['no_serialize', 'no_serialize_required'],
+  ['no_mainnet', 'no_mainnet_required'],
+  ['no_real_live', 'no_real_live_required'],
+  ['requires_lockfile_review', 'lockfile_review_required'],
+  ['requires_supply_chain_review', 'supply_chain_review_required'],
+  ['requires_separate_integration_pr', 'separate_integration_pr_required'],
+  ['requires_pinned_version', 'pinned_version_required'],
+]);
+
+// The only fields permitted on a supply-chain review RECORD — anything else is an unknown field and is rejected
+// (no surprise fields, incl. smuggled has_rpc/ready/can_send/is_live/configured/broadcast/network flags). All
+// permitted fields are opaque references / fixed enums / boolean attestations; none is a key, secret, endpoint,
+// or live SDK handle.
+const SUPPLY_CHAIN_KNOWN_FIELDS = Object.freeze([
+  'purpose', 'client_ref', 'client_version',
+  'no_network', 'no_send', 'no_broadcast', 'no_serialize', 'no_mainnet', 'no_real_live',
+  'requires_lockfile_review', 'requires_supply_chain_review', 'requires_separate_integration_pr',
+  'requires_pinned_version',
+]);
+
+// Endpoint indicators to refuse INSIDE opaque client metadata (client_ref/client_version). Deliberately NARROWER
+// than ENDPOINT_RPC_TOKENS: a supply-chain review of an RPC client legitimately names a package like
+// 'rpc-client-pkg' / 'helius-rpc-sdk', so the bare descriptive words 'rpc'/'endpoint'/'cluster'/'url' must NOT be
+// refused here. What we refuse is an actual endpoint URL surface — a scheme — smuggled into the metadata. (Secrets,
+// mainnet markers, and key-material are screened separately and remain refused.) String literals: lexer-blanked,
+// guard-safe; never executed, only used as fixed match tokens.
+const CLIENT_METADATA_ENDPOINT_TOKENS = Object.freeze(['http://', 'https://', 'ws://', 'wss://']);
+
+// Describe the RPC client / SDK supply-chain review gate: review-record-shape only, fail-closed, NO network /
+// fetch / endpoint resolution / SDK import / dependency; reads no env/secret. Read-only; describes intent,
+// performs nothing. Every capability/live flag is a FIXED LITERAL false — an approved review authorizes NOTHING
+// live and adds NO dependency/network.
+export function describeRpcClientSupplyChainGateContract() {
+  return Object.freeze({
+    contract: 'rpc-client-supply-chain-gate',
+    version: '0.0.0',
+    test_only: true,
+    purpose: 'rpc_client_supply_chain_review',
+    requires_lockfile_review: true,
+    requires_supply_chain_review: true,
+    requires_separate_integration_pr: true,
+    requires_pinned_version: true,
+    requires_no_network: true,
+    requires_no_send: true,
+    requires_no_broadcast: true,
+    requires_no_serialize: true,
+    requires_no_mainnet: true,
+    requires_no_real_live: true,
+    review_record_valid: false,
+    supply_chain_gate_passed: false,
+    live_rpc_authorized: false,
+    network_capability: false,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    network_call_made: false,
+    live_rpc_call_made: false,
+    broadcast_permitted: false,
+    status: UNCONFIGURED,
+    note: 'Test-only supply-chain review gate; an approved review authorizes NOTHING live and adds NO dependency/network — a separate integration PR + lockfile + supply-chain review are still required; performs NO network / fetch / endpoint resolution; reads no env/secret.',
+  });
+}
+
+// Validate the SHAPE of a supply-chain review RECORD only. It does NOT import an SDK, add a dependency, resolve
+// an endpoint, make a network/fetch call, read env/secret, or authorize anything. The record carries only opaque
+// client metadata (client_ref/client_version) + boolean attestations; an endpoint/url/rpc/secret/key-material/
+// mainnet indicator in ANY field is refused and NEVER echoed. All result flags are FIXED LITERALS (all false).
+// Never throws — a hostile/throwing accessor RETURNS a frozen invalid refusal with reason 'input_inspection_error'.
+export function validateRpcClientSupplyChainReview(input) {
+  try {
+    const reasons = [];
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+
+    // 1) purpose must be the exact fixed enum value.
+    const purpose = obj ? obj.purpose : undefined;
+    if (purpose !== 'rpc_client_supply_chain_review') reasons.push('purpose_invalid');
+
+    // 2) client_ref — opaque client/package name reference; must be a non-empty string carrying NO endpoint-URL
+    //    (scheme) / secret / mainnet indicator. Descriptive words ('rpc'/'sdk'/'client') are allowed in a package
+    //    name; only a real endpoint URL scheme is refused. The value itself is NEVER echoed.
+    const cr = obj ? obj.client_ref : undefined;
+    if (typeof cr !== 'string' || cr.length === 0) {
+      reasons.push('client_ref_missing');
+    } else {
+      const lc = cr.toLowerCase();
+      if (CLIENT_METADATA_ENDPOINT_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('endpoint_or_rpc_indicator_blocked');
+      if (SECRET_INDICATOR_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('client_secret_indicator_blocked');
+      if (MAINNET_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('mainnet_indicator_blocked');
+    }
+
+    // 3) client_version — opaque pinned-version reference; same scheme/secret/mainnet scans (de-duplicated later).
+    const cv = obj ? obj.client_version : undefined;
+    if (typeof cv !== 'string' || cv.length === 0) {
+      reasons.push('client_version_missing');
+    } else {
+      const lc = cv.toLowerCase();
+      if (CLIENT_METADATA_ENDPOINT_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('endpoint_or_rpc_indicator_blocked');
+      if (SECRET_INDICATOR_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('client_secret_indicator_blocked');
+      if (MAINNET_TOKENS.some((t) => lc.indexOf(t) !== -1)) reasons.push('mainnet_indicator_blocked');
+    }
+
+    // 4) required-true attestations — each must be boolean `true`, else its fixed reason token is pushed.
+    for (const [key, reason] of SUPPLY_CHAIN_REQUIRED_TRUE) {
+      if (!obj || obj[key] !== true) reasons.push(reason);
+    }
+
+    // 5) broadcast/send/serialize indicator scan over any field NAME or string VALUE (the no_send/no_broadcast/
+    //    no_serialize attestation keys are exempt — those are the attestations themselves, not a live surface).
+    if (obj) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'no_send' || k === 'no_broadcast' || k === 'no_serialize') continue;
+        const lk = String(k).toLowerCase();
+        if (BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => lk.indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+        if (k === 'purpose') continue;
+        if (typeof v === 'string' && BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => v.toLowerCase().indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+      }
+    }
+
+    // 6) extra conservative key-material guard — refuse a secret/key-material-shaped input outright.
+    if (looksLikeKeyMaterial(input) && !reasons.includes('key_material_not_accepted')) {
+      reasons.push('key_material_not_accepted');
+    }
+
+    // 7) unknown / surprise field — only the supply-chain review known fields are permitted.
+    if (obj && Object.keys(obj).some((k) => !SUPPLY_CHAIN_KNOWN_FIELDS.includes(k))) {
+      if (!reasons.includes('unknown_field_rejected')) reasons.push('unknown_field_rejected');
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    let status;
+    if (valid) {
+      status = 'rpc_client_supply_chain_review_valid_no_network';
+    } else if ((uniqueReasons.includes('client_ref_missing')
+        || uniqueReasons.includes('client_version_missing')
+        || uniqueReasons.includes('purpose_invalid'))
+      && !uniqueReasons.includes('unknown_field_rejected')
+      && !uniqueReasons.includes('broadcast_or_send_indicator_blocked')) {
+      status = UNCONFIGURED;
+    } else {
+      status = 'invalid';
+    }
+
+    return Object.freeze({
+      // `valid`/`review_record_valid` mean the RECORD SHAPE is acceptable as opaque references / fixed enums /
+      // boolean attestations — it does NOT import an SDK, add a dependency, bind, send, broadcast, serialize,
+      // authorize, or activate anything. Every flag below is a FIXED LITERAL (all false), NOT live.
+      valid,
+      review_record_valid: valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      live_rpc_authorized: false,
+      network_capability: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      review_record_valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      live_rpc_authorized: false,
+      network_capability: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
+
+// The RPC client / SDK supply-chain review gate CORE: prove the SHAPE of a SUPPLY-CHAIN REVIEW RECORD for a
+// FUTURE RPC client/SDK dependency is well-formed, while staying fully fail-closed and NEVER live. It does NOT
+// import an SDK, add a dependency, resolve an endpoint, make a network/fetch call, contact a provider, read
+// env/secret, send/broadcast/serialize, or authorize anything. Even an approved review authorizes NOTHING live
+// and adds NO dependency/network: requires_separate_integration_pr is a FIXED-LITERAL invariant (true on every
+// result, never echoed) — a separate integration PR + lockfile + supply-chain review are ALWAYS still required.
+// Logic: (1) validate the record shape; (2) supply_chain_gate_passed iff the shape is valid. The result flags
+// are FIXED LITERALS (all false); NO freeform input (client_ref/client_version) is ever echoed. Never throws —
+// a hostile/throwing accessor RETURNS a frozen invalid refusal with reason 'input_inspection_error'.
+export function evaluateRpcClientSupplyChainGate(input) {
+  try {
+    // 1) Validate the supply-chain review RECORD SHAPE (reuses validateRpcClientSupplyChainReview). Never throws.
+    const recv = validateRpcClientSupplyChainReview(input);
+
+    // 2) The gate passes iff the record shape is valid.
+    const supplyChainGatePassed = recv.valid;
+    const valid = supplyChainGatePassed;
+
+    return Object.freeze({
+      // `valid`/`supply_chain_gate_passed` mean the REVIEW RECORD is well-formed — it does NOT import an SDK,
+      // add a dependency, resolve an endpoint, call RPC, send, broadcast, serialize, go live, or AUTHORIZE
+      // integration. An approved review authorizes NOTHING live: requires_separate_integration_pr is a FIXED
+      // LITERAL true (NOT echoed input), and every capability/live flag below is a FIXED LITERAL false. NO
+      // freeform input (client_ref/client_version) is echoed.
+      valid,
+      review_record_valid: recv.review_record_valid,
+      supply_chain_gate_passed: supplyChainGatePassed,
+      status: recv.status,
+      reasons: recv.reasons,
+      requires_separate_integration_pr: true,
+      live_rpc_authorized: false,
+      network_capability: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      review_record_valid: false,
+      supply_chain_gate_passed: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      requires_separate_integration_pr: true,
+      live_rpc_authorized: false,
+      network_capability: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
