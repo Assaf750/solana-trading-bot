@@ -752,3 +752,101 @@ export interface RpcHealthResult {
 export function describeRpcHealthMonitorContract(): RpcHealthMonitorDescriptor;
 export function validateRpcHealthSpikeResult(spikeResult?: unknown): RpcHealthSpikeResultValidation;
 export function evaluateRpcHealthFromSpike(spikeResult?: unknown, staleness?: RpcHealthStaleness): RpcHealthResult;
+
+// E2-F-19 — PROTOCOL CONSTANT MONITOR (read-only constant state). Consumes a protocol-constants observation
+// RESULT + an EXPECTED baseline; derives a constant STATE. Constants are NOT trading readiness/routing/send/
+// broadcast/signing; observation failure => DEGRADED/UNCONFIGURED fail-closed; no network/endpoint-resolution;
+// no echo (mismatch as count only); deterministic staleness (no system clock).
+
+export type ProtocolConstantState =
+  | 'UNCONFIGURED'
+  | 'DEGRADED'
+  | 'READ_ONLY_CONSTANTS_OK'
+  | 'READ_ONLY_CONSTANTS_STALE'
+  | 'READ_ONLY_CONSTANTS_MISMATCH';
+
+export interface ProtocolConstantStaleness {
+  readonly age_ms?: number;
+  readonly max_age_ms?: number;
+  readonly is_stale?: boolean;
+}
+
+export interface ProtocolConstantMonitorDescriptor {
+  readonly contract: 'protocol-constant-monitor';
+  readonly version: string;
+  readonly test_only: true;
+  readonly consumes: 'protocol_constants_observation_result';
+  readonly supported_states: readonly ProtocolConstantState[];
+  readonly read_only: true;
+  readonly constants_are_not_trading_readiness: true;
+  readonly constants_state: ProtocolConstantState;
+  readonly read_only_constants_ok: false;
+  readonly constants_match: false;
+  readonly stale: false;
+  readonly mismatch_count: number;
+  readonly status: string;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+  readonly note: string;
+}
+
+export interface ProtocolConstantsResultValidation {
+  readonly valid: boolean;
+  readonly recognized: boolean;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+}
+
+export interface ProtocolConstantHealthResult {
+  readonly valid: boolean;
+  readonly constants_state: ProtocolConstantState;
+  readonly read_only_constants_ok: boolean;
+  readonly constants_match: boolean;
+  readonly stale: boolean;
+  readonly mismatch_count: number;
+  readonly status: ProtocolConstantState;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+}
+
+export function describeProtocolConstantMonitorContract(): ProtocolConstantMonitorDescriptor;
+export function validateProtocolConstantsResult(constantsResult?: unknown): ProtocolConstantsResultValidation;
+export function evaluateProtocolConstantHealth(constantsResult?: unknown, expected?: unknown, staleness?: ProtocolConstantStaleness): ProtocolConstantHealthResult;

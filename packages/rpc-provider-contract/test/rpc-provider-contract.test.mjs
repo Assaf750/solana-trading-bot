@@ -33,6 +33,10 @@ import {
   describeOutOfRepoEndpointBindingAdapterContract,
   validateOutOfRepoEndpointBindingDescriptor,
   evaluateOutOfRepoEndpointBindingBoundary,
+  // PR-E2-F-19 — protocol constant monitor (read-only constant state, test-only, fail-closed, no-live/no-clock/no-echo).
+  describeProtocolConstantMonitorContract,
+  validateProtocolConstantsResult,
+  evaluateProtocolConstantHealth,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -3943,4 +3947,199 @@ test('F-18 (static) NO real endpoint host in src AND NO "can_send: true" anywher
     scan(srcDir);
   }
   assert.deepEqual(offenders, [], `no 'can_send: true' allowed under packages/*/src: ${offenders.join(' | ')}`);
+});
+
+// ===========================================================================================================
+// PR-E2-F-19 — PROTOCOL CONSTANT MONITOR (read-only constant state). Pure-function I/O proofs P1..P34 + static guards.
+// Fixtures are plain objects (no network). The monitor CONSUMES an observation result + EXPECTED baseline and
+// DERIVES a constant state only — never trading-ready, never echoes input, no system clock, fail-closed.
+// ===========================================================================================================
+
+const F19_EXPECTED = { graduation_threshold_sol: 85, program_id_marker: 'pump-fun-marker', fee_bps: 100 };
+const F19_OBS_OK = {
+  environment: 'devnet', source_read_only: true, observed_ok: true,
+  observed: { graduation_threshold_sol: 85, program_id_marker: 'pump-fun-marker', fee_bps: 100 },
+};
+const F19_OBS_MISMATCH = {
+  environment: 'devnet', source_read_only: true, observed_ok: true,
+  observed: { graduation_threshold_sol: 69, program_id_marker: 'pump-fun-marker', fee_bps: 100 },
+};
+const F19_OBS_UNAVAILABLE = { environment: 'devnet', source_read_only: true, observed_ok: false };
+const F19_OBS_NO_OBSERVED = { environment: 'devnet', source_read_only: true, observed_ok: true }; // observed missing
+
+// Asserts every trading/exec/network flag is fixed-false on an F-19 result (shared by P13..P24).
+function f19AssertFixedFalse(r, label) {
+  for (const flag of [
+    'can_send', 'trading_ready', 'broadcast_permitted', 'signing_permitted', 'has_rpc',
+    'is_live', 'real_live', 'routing_ready', 'can_broadcast', 'can_serialize', 'network_call_made',
+  ]) {
+    assert.equal(r[flag], false, `${label}: ${flag} must be false`);
+  }
+}
+
+test('F-19 protocol constant monitor — P1..P34 read-only constant-state proofs', () => {
+  // P1/P2 — missing input => UNCONFIGURED fail-closed.
+  assert.equal(evaluateProtocolConstantHealth(undefined).constants_state, 'UNCONFIGURED', 'P1');
+  assert.equal(evaluateProtocolConstantHealth(null).constants_state, 'UNCONFIGURED', 'P2');
+
+  // P3 — {} is a recognized object with observed missing => DEGRADED (constants_not_observed).
+  const p3 = evaluateProtocolConstantHealth({});
+  assert.equal(p3.constants_state, 'DEGRADED', 'P3 {} => DEGRADED');
+  assert.ok(p3.reasons.includes('constants_not_observed'), 'P3 reason constants_not_observed');
+
+  // P4 — observed_ok:false => DEGRADED.
+  const p4 = evaluateProtocolConstantHealth(F19_OBS_UNAVAILABLE);
+  assert.equal(p4.constants_state, 'DEGRADED', 'P4');
+  assert.ok(p4.reasons.includes('constants_not_observed'), 'P4 reason');
+
+  // P5 — observed missing but observed_ok:true => DEGRADED.
+  assert.equal(evaluateProtocolConstantHealth(F19_OBS_NO_OBSERVED).constants_state, 'DEGRADED', 'P5');
+
+  // P6 — OK path.
+  const p6 = evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED);
+  assert.equal(p6.constants_state, 'READ_ONLY_CONSTANTS_OK', 'P6 state');
+  assert.equal(p6.read_only_constants_ok, true, 'P6 read_only_constants_ok');
+  assert.equal(p6.constants_match, true, 'P6 constants_match');
+  assert.equal(p6.mismatch_count, 0, 'P6 mismatch_count');
+
+  // P7 — mismatch path.
+  const p7 = evaluateProtocolConstantHealth(F19_OBS_MISMATCH, F19_EXPECTED);
+  assert.equal(p7.constants_state, 'READ_ONLY_CONSTANTS_MISMATCH', 'P7 state');
+  assert.equal(p7.constants_match, false, 'P7 constants_match');
+  assert.equal(p7.mismatch_count, 1, 'P7 mismatch_count');
+  assert.equal(p7.read_only_constants_ok, false, 'P7 read_only_constants_ok');
+
+  // P8 — explicit is_stale => STALE.
+  const p8 = evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { is_stale: true });
+  assert.equal(p8.constants_state, 'READ_ONLY_CONSTANTS_STALE', 'P8 state');
+  assert.equal(p8.stale, true, 'P8 stale');
+  assert.equal(p8.read_only_constants_ok, false, 'P8 read_only_constants_ok');
+
+  // P9 — age_ms>max_age_ms => STALE.
+  assert.equal(
+    evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { age_ms: 100, max_age_ms: 10 }).constants_state,
+    'READ_ONLY_CONSTANTS_STALE', 'P9');
+
+  // P10 — age_ms<max_age_ms => OK.
+  assert.equal(
+    evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { age_ms: 5, max_age_ms: 10 }).constants_state,
+    'READ_ONLY_CONSTANTS_OK', 'P10');
+
+  // P11 — mismatch takes precedence over stale.
+  assert.equal(
+    evaluateProtocolConstantHealth(F19_OBS_MISMATCH, F19_EXPECTED, { is_stale: true }).constants_state,
+    'READ_ONLY_CONSTANTS_MISMATCH', 'P11');
+
+  // P12 — no expected baseline => OK (no mismatch detectable).
+  assert.equal(evaluateProtocolConstantHealth(F19_OBS_OK).constants_state, 'READ_ONLY_CONSTANTS_OK', 'P12');
+
+  // P13..P24 — every derived result keeps all trading/exec/network flags fixed-false.
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(undefined), 'P13 UNCONFIGURED');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_UNAVAILABLE), 'P14 DEGRADED');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED), 'P15 OK');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { is_stale: true }), 'P16 STALE');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_MISMATCH, F19_EXPECTED), 'P17 MISMATCH');
+  // P18..P24 re-assert the same fixed-false invariant explicitly across the five states (defense-in-depth).
+  f19AssertFixedFalse(evaluateProtocolConstantHealth({}), 'P18');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(null), 'P19');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_NO_OBSERVED), 'P20');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_OK), 'P21');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { age_ms: 100, max_age_ms: 10 }), 'P22');
+  f19AssertFixedFalse(evaluateProtocolConstantHealth(F19_OBS_MISMATCH, F19_EXPECTED, { is_stale: true }), 'P23');
+  f19AssertFixedFalse(describeProtocolConstantMonitorContract(), 'P24');
+
+  // P25 — smuggled can_send:true => UNCONFIGURED.
+  assert.equal(
+    evaluateProtocolConstantHealth({ ...F19_OBS_OK, can_send: true }, F19_EXPECTED).constants_state,
+    'UNCONFIGURED', 'P25');
+
+  // P26 — each smuggled trading/exec indicator => UNCONFIGURED.
+  for (const flag of ['is_live', 'has_rpc', 'broadcast_permitted', 'real_live']) {
+    assert.equal(
+      evaluateProtocolConstantHealth({ ...F19_OBS_OK, [flag]: true }, F19_EXPECTED).constants_state,
+      'UNCONFIGURED', `P26 ${flag}`);
+  }
+
+  // P27/P28 — non-testnet environment => UNCONFIGURED.
+  assert.equal(
+    evaluateProtocolConstantHealth({ ...F19_OBS_OK, environment: 'mainnet' }, F19_EXPECTED).constants_state,
+    'UNCONFIGURED', 'P27 mainnet');
+  assert.equal(
+    evaluateProtocolConstantHealth({ ...F19_OBS_OK, environment: 'prod' }, F19_EXPECTED).constants_state,
+    'UNCONFIGURED', 'P28 prod');
+
+  // P29 — NO-ECHO: leaked endpoint/secret/observed values never appear in serialized result.
+  const p29 = evaluateProtocolConstantHealth({
+    ...F19_OBS_OK,
+    leaked_endpoint: 'https://secret-rpc.internal',
+    leaked_key: 'SECRET123',
+    observed: { ...F19_OBS_OK.observed, sneaky: 'https://secret-rpc.internal' },
+  }, F19_EXPECTED);
+  const p29s = JSON.stringify(p29);
+  assert.equal(p29s.includes('secret-rpc.internal'), false, 'P29 no endpoint echo');
+  assert.equal(p29s.includes('SECRET123'), false, 'P29 no secret echo');
+
+  // P30 — hostile Proxy (throws on get) => frozen UNCONFIGURED, no throw.
+  const hostile = new Proxy({}, { get() { throw new Error('hostile'); }, has() { throw new Error('hostile'); } });
+  let p30;
+  assert.doesNotThrow(() => { p30 = evaluateProtocolConstantHealth(hostile, F19_EXPECTED); }, 'P30 no throw');
+  assert.equal(p30.constants_state, 'UNCONFIGURED', 'P30 UNCONFIGURED');
+  assert.equal(Object.isFrozen(p30), true, 'P30 frozen');
+
+  // P31 — validate recognizes a well-formed OK observation result.
+  const p31 = validateProtocolConstantsResult(F19_OBS_OK);
+  assert.equal(p31.recognized, true, 'P31 recognized');
+  assert.equal(p31.valid, true, 'P31 valid');
+
+  // P32 — validate of undefined => not recognized, reason no_constants_result.
+  const p32 = validateProtocolConstantsResult(undefined);
+  assert.equal(p32.recognized, false, 'P32 recognized');
+  assert.ok(p32.reasons.includes('no_constants_result'), 'P32 reason');
+
+  // P33 — descriptor invariants.
+  const p33 = describeProtocolConstantMonitorContract();
+  assert.equal(p33.constants_state, 'UNCONFIGURED', 'P33 constants_state');
+  assert.equal(p33.can_send, false, 'P33 can_send');
+  assert.equal(p33.trading_ready, false, 'P33 trading_ready');
+  assert.equal(p33.read_only, true, 'P33 read_only');
+  assert.equal(Object.isFrozen(p33), true, 'P33 frozen');
+
+  // P34 — every evaluate result is frozen.
+  for (const r of [
+    evaluateProtocolConstantHealth(undefined),
+    evaluateProtocolConstantHealth({}),
+    evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED),
+    evaluateProtocolConstantHealth(F19_OBS_OK, F19_EXPECTED, { is_stale: true }),
+    evaluateProtocolConstantHealth(F19_OBS_MISMATCH, F19_EXPECTED),
+  ]) {
+    assert.equal(Object.isFrozen(r), true, 'P34 frozen');
+  }
+});
+
+test('F-19 (static) src is import-free, no network/clock/fs in the F-19 region, no deps, no real endpoint host', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+
+  // Import-free: no top-level import / require( anywhere in the source.
+  assert.equal(/^import /m.test(full), false, 'src must be import-free (no import)');
+  assert.equal(/require\(/.test(full), false, 'src must be import-free (no require)');
+
+  // Locate the F-19 region and assert it is free of network/clock/fs/env usage.
+  const marker = 'E2-F-19 — PROTOCOL CONSTANT MONITOR';
+  const start = full.indexOf(marker);
+  assert.notEqual(start, -1, 'F-19 region marker present');
+  const region = full.slice(start);
+  for (const bad of ['fetch(', 'new WebSocket', 'new Connection', 'sendTransaction', 'process.env', 'readFileSync', 'node:fs']) {
+    assert.equal(region.includes(bad), false, `F-19 region must not contain ${bad}`);
+  }
+  // No system-clock usage in the F-19 region.
+  assert.equal(/Date\.now|new\s+Date/.test(region), false, 'F-19 region must not use the system clock');
+
+  // package.json has no dependencies.
+  const pkg = JSON.parse(readFileSync(join(SRC, '..', 'package.json'), 'utf8'));
+  assert.equal(pkg.dependencies == null || Object.keys(pkg.dependencies).length === 0, true, 'no dependencies');
+
+  // No real provider endpoint host literal in the source.
+  for (const host of ['helius-rpc.com', 'mainnet.helius', 'api.mainnet-beta.solana.com', 'rpc.ankr.com', 'quiknode', 'alchemy.com']) {
+    assert.equal(full.includes(host), false, `no real endpoint host ${host}`);
+  }
 });

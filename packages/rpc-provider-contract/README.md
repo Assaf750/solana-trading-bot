@@ -479,3 +479,25 @@ non-read-only method on the consumed spike result is **fail-closed `UNCONFIGURED
 (never for `READ_ONLY_STALE`). **Staleness is an explicit deterministic parameter** (`age_ms`/`max_age_ms`/
 `is_stale`) — **no system clock** is read. A hostile/throwing input returns a frozen refusal with reason
 `input_inspection_error` and **never throws**.
+
+## Protocol Constant Monitor — read-only constant state (test-only)
+
+`describeProtocolConstantMonitorContract()`, `validateProtocolConstantsResult(constantsResult)`, and
+`evaluateProtocolConstantHealth(constantsResult, expected, staleness)` add a **pure, read-only** protocol-constant
+monitor. It **CONSUMES a protocol-constants observation RESULT** + an **EXPECTED baseline** and derives a constant
+**STATE** — `UNCONFIGURED` / `DEGRADED` / `READ_ONLY_CONSTANTS_OK` / `READ_ONLY_CONSTANTS_STALE` /
+`READ_ONLY_CONSTANTS_MISMATCH`. The monitor makes **NO network call**, performs **NO endpoint resolution**, uses
+**no system clock**, and **NEVER echoes** observed values / endpoint / secret.
+
+**Mapping:** no/invalid/unrecognized result => `UNCONFIGURED`; a smuggled trading/exec flag or a non-testnet
+environment => `UNCONFIGURED` **fail-closed**; observation unavailable (`observed` missing / `observed_ok !== true`)
+=> `DEGRADED` (**never ready-to-trade**); observed != expected => `READ_ONLY_CONSTANTS_MISMATCH` (reported as a
+**count**, values never echoed); matched + stale (explicit deterministic age) => `READ_ONLY_CONSTANTS_STALE`;
+matched + fresh => `READ_ONLY_CONSTANTS_OK`.
+
+**Protocol constants are NOT trading readiness / routing / send / broadcast / signing:** `trading_ready`,
+`can_send`, `broadcast_permitted`, `signing_permitted`, `has_rpc`, `is_live`, `real_live`, `routing_ready`,
+`network_call_made` stay `false` on **EVERY** result; `read_only_constants_ok` is `true` only for
+`READ_ONLY_CONSTANTS_OK`. **Staleness is an explicit deterministic parameter** (`age_ms`/`max_age_ms`/`is_stale`)
+— **no system clock** is read; `mismatch_count` is a **count only** (no values/names). A hostile/throwing input
+returns a frozen refusal with reason `input_inspection_error` and **never throws**.

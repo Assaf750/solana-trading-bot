@@ -2555,3 +2555,203 @@ export function evaluateRpcHealthFromSpike(spikeResult, staleness) {
     return buildHealth('UNCONFIGURED', Object.freeze(['input_inspection_error']), false);
   }
 }
+
+// ===========================================================================================================
+// E2-F-19 — PROTOCOL CONSTANT MONITOR (read-only constant state). ADDITIVE, import-free, function-I/O-only.
+//
+// The monitor is a PURE function that CONSUMES an already-produced protocol-constants observation RESULT object
+// and an EXPECTED baseline, and DERIVES a constant STATE only. It makes NO network call, performs NO endpoint
+// resolution, reads NO system clock, and NEVER echoes any input value (endpoint/secret/raw observed values).
+// Staleness is supplied as an explicit deterministic parameter — never read from a clock. The mismatch is
+// reported ONLY as a numeric count — observed/expected values and names are NEVER captured or echoed.
+//
+// Protocol constants are NEVER trading readiness / routing / send / broadcast / signing: every trading/exec flag
+// is fixed false on EVERY result. Observation failure / unavailable constants yields DEGRADED / UNCONFIGURED
+// fail-closed — never ready-to-trade. A smuggled trading/exec indicator or a non-testnet environment on the
+// consumed observation result is refused fail-closed (UNCONFIGURED).
+// ===========================================================================================================
+
+const PROTOCOL_CONSTANT_STATES = Object.freeze([
+  'UNCONFIGURED', 'DEGRADED', 'READ_ONLY_CONSTANTS_OK', 'READ_ONLY_CONSTANTS_STALE', 'READ_ONLY_CONSTANTS_MISMATCH',
+]);
+// Any of these true on the input observation result => smuggled trading/exec indicator => fail-closed.
+const PC_FORBIDDEN_TRUE_FLAGS = Object.freeze([
+  'can_send', 'can_broadcast', 'can_serialize', 'broadcast_permitted', 'signing_permitted',
+  'real_live', 'is_live', 'has_rpc', 'trading_ready', 'network_call_made',
+]);
+const PC_TESTNET_ENVS = Object.freeze(['devnet', 'testnet', 'localnet']);
+
+// Fixed-false invariant flags shared by every F-19 result — constants open NOTHING for trading/send/broadcast/sign.
+function pcInvariantFlags() {
+  return {
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    trading_ready: false,
+    routing_ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    broadcast_permitted: false,
+    signing_permitted: false,
+    network_call_made: false,
+    endpoint_echoed: false,
+  };
+}
+
+// Deterministic staleness — NO system clock. Staleness is an explicit caller-supplied parameter.
+function pcIsStale(staleness) {
+  if (staleness == null || typeof staleness !== 'object') return false;
+  if (staleness.is_stale === true) return true;
+  const a = staleness.age_ms;
+  const m = staleness.max_age_ms;
+  return (typeof a === 'number' && typeof m === 'number' && a > m);
+}
+
+// Counts mismatched EXPECTED keys only; NEVER captures/echoes the observed/expected values or names — count only.
+function pcMismatchCount(observed, expected) {
+  if (expected == null || typeof expected !== 'object' || Array.isArray(expected)) return 0;
+  const keys = Object.keys(expected);
+  if (observed == null || typeof observed !== 'object' || Array.isArray(observed)) return keys.length;
+  let n = 0;
+  for (const k of keys) {
+    if (observed[k] !== expected[k]) n++;
+  }
+  return n;
+}
+
+// describeProtocolConstantMonitorContract — self-description of the monitor.
+// Consumes a protocol-constants observation result only; derives a read-only constant state; constants are NOT
+// trading readiness/routing/send/broadcast/signing; observation failure => DEGRADED/UNCONFIGURED fail-closed; no
+// network/endpoint-resolution; no echo (mismatch as count only); deterministic staleness (no system clock).
+export function describeProtocolConstantMonitorContract() {
+  return Object.freeze({
+    contract: 'protocol-constant-monitor',
+    version: '0.0.0',
+    test_only: true,
+    consumes: 'protocol_constants_observation_result',
+    supported_states: PROTOCOL_CONSTANT_STATES,
+    read_only: true,
+    constants_are_not_trading_readiness: true,
+    constants_state: 'UNCONFIGURED',
+    read_only_constants_ok: false,
+    constants_match: false,
+    stale: false,
+    mismatch_count: 0,
+    status: 'UNCONFIGURED',
+    ...pcInvariantFlags(),
+    note: 'Read-only protocol-constant monitor. Consumes a protocol-constants observation RESULT and an EXPECTED baseline and derives a state (UNCONFIGURED / DEGRADED / READ_ONLY_CONSTANTS_OK / READ_ONLY_CONSTANTS_STALE / READ_ONLY_CONSTANTS_MISMATCH). Protocol constants are NOT trading readiness, routing, send, broadcast, or signing — every trading/exec flag is fixed false on every result. Observation failure / unavailable constants yields DEGRADED/UNCONFIGURED fail-closed, never ready-to-trade. Makes no network call; performs no endpoint resolution; uses no system clock (staleness is an explicit parameter); never echoes observed values / endpoint / secret (mismatch is reported only as a count).',
+  });
+}
+
+// validateProtocolConstantsResult — recognizes the observation-result SHAPE and screens for forbidden indicators.
+// Consumes a protocol-constants observation result only; derives no state here (recognition + screening only);
+// constants are NOT trading readiness/routing/send/broadcast/signing; a smuggled trading/exec indicator or a
+// non-testnet environment is fail-closed; no network/endpoint-resolution; no echo of any input value; hostile/
+// throwing input returns a frozen refusal with reason 'input_inspection_error' and NEVER throws.
+export function validateProtocolConstantsResult(constantsResult) {
+  try {
+    const reasons = [];
+    const obj = (constantsResult != null && typeof constantsResult === 'object' && !Array.isArray(constantsResult))
+      ? constantsResult
+      : null;
+
+    if (!obj) {
+      reasons.push('no_constants_result');
+    } else {
+      // Forbidden trading/exec indicator smuggled true on the consumed observation result.
+      for (const f of PC_FORBIDDEN_TRUE_FLAGS) {
+        if (obj[f] === true) {
+          if (!reasons.includes('forbidden_trading_indicator_blocked')) reasons.push('forbidden_trading_indicator_blocked');
+        }
+      }
+      // Non-testnet environment.
+      if (typeof obj.environment === 'string' && !PC_TESTNET_ENVS.includes(obj.environment)) {
+        const e = obj.environment.toLowerCase();
+        if (e.indexOf('mainnet') !== -1 || e.indexOf('prod') !== -1) reasons.push('mainnet_or_nontestnet_environment_blocked');
+        else reasons.push('nontestnet_environment_blocked');
+      }
+    }
+
+    const uniqueReasons = [...new Set(reasons)];
+    const recognized = obj != null;
+    const valid = recognized && uniqueReasons.length === 0;
+
+    return Object.freeze({
+      valid,
+      recognized,
+      reasons: Object.freeze([...uniqueReasons]),
+      ...pcInvariantFlags(),
+    });
+  } catch {
+    // Fail-safe-not-fail-open: hostile/throwing input is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...pcInvariantFlags(),
+    });
+  }
+}
+
+// evaluateProtocolConstantHealth — the MONITOR CORE; derives the constant state from an observation result.
+// Consumes a protocol-constants observation result only; derives a constant state (UNCONFIGURED / DEGRADED /
+// READ_ONLY_CONSTANTS_OK / READ_ONLY_CONSTANTS_STALE / READ_ONLY_CONSTANTS_MISMATCH); constants are NOT trading
+// readiness/routing/send/broadcast/signing (all such flags fixed false); observation failure (observed missing /
+// observed_ok !== true) => DEGRADED, smuggled indicator / non-testnet / unrecognized => UNCONFIGURED — fail-closed,
+// never ready-to-trade; makes no network call and performs no endpoint resolution; never echoes any input value
+// (endpoint/secret/observed values) — mismatch is reported only as a numeric count; staleness is an explicit
+// deterministic parameter (no system clock). read_only_constants_ok is true ONLY for READ_ONLY_CONSTANTS_OK.
+// Hostile/throwing input returns a frozen UNCONFIGURED refusal, never throws.
+export function evaluateProtocolConstantHealth(constantsResult, expected, staleness) {
+  // Local builder — every result is fixed literals + the derived state + numeric mismatch_count + fixed reason
+  // tokens. NEVER echoes input (no observed/expected values or names; mismatch as count only).
+  const buildPc = (state, reasons, opts) => Object.freeze({
+    valid: (state !== 'UNCONFIGURED') || reasons.includes('constants_not_observed') || reasons.includes('no_constants_result'),
+    constants_state: state,
+    read_only_constants_ok: state === 'READ_ONLY_CONSTANTS_OK',
+    constants_match: opts && opts.match === true,
+    stale: opts && opts.stale === true,
+    mismatch_count: (opts && typeof opts.mismatch_count === 'number') ? opts.mismatch_count : 0,
+    status: state,
+    reasons,
+    ...pcInvariantFlags(),
+  });
+
+  try {
+    const v = validateProtocolConstantsResult(constantsResult);
+
+    if (!v.recognized || v.reasons.includes('input_inspection_error')) {
+      return buildPc('UNCONFIGURED', v.reasons.length ? v.reasons : Object.freeze(['no_constants_result']), { match: false, stale: false, mismatch_count: 0 });
+    }
+
+    if (v.reasons.includes('forbidden_trading_indicator_blocked')
+      || v.reasons.includes('mainnet_or_nontestnet_environment_blocked')
+      || v.reasons.includes('nontestnet_environment_blocked')) {
+      return buildPc('UNCONFIGURED', v.reasons, { match: false, stale: false, mismatch_count: 0 });
+    }
+
+    const obj = constantsResult; // recognized object
+    const observed = obj.observed;
+
+    if (observed == null || typeof observed !== 'object' || Array.isArray(observed) || obj.observed_ok !== true) {
+      return buildPc('DEGRADED', Object.freeze(['constants_not_observed']), { match: false, stale: false, mismatch_count: 0 });
+    }
+
+    const mm = pcMismatchCount(observed, expected);
+    if (expected != null && mm > 0) {
+      return buildPc('READ_ONLY_CONSTANTS_MISMATCH', Object.freeze(['protocol_constants_mismatch']), { match: false, stale: false, mismatch_count: mm });
+    }
+
+    if (pcIsStale(staleness)) {
+      return buildPc('READ_ONLY_CONSTANTS_STALE', Object.freeze(['protocol_constants_stale']), { match: true, stale: true, mismatch_count: 0 });
+    }
+
+    return buildPc('READ_ONLY_CONSTANTS_OK', Object.freeze([]), { match: true, stale: false, mismatch_count: 0 });
+  } catch {
+    // Fail-safe-not-fail-open: hostile/throwing input is refused, never re-thrown, never echoed.
+    return buildPc('UNCONFIGURED', Object.freeze(['input_inspection_error']), { match: false, stale: false, mismatch_count: 0 });
+  }
+}
