@@ -28,6 +28,7 @@ function gateAInvariantFlags() {
 
 const GATE_A_FORBIDDEN_TRUE_FLAGS = Object.freeze([
   'trading_ready',
+  'routing_ready',
   'can_send',
   'can_broadcast',
   'can_serialize',
@@ -314,5 +315,180 @@ export function evaluateGateAAuditPath(envelope) {
     return buildA('AUDIT_PATH_VALID', Object.freeze([]));
   } catch (_e) {
     return buildA('AUDIT_UNCONFIGURED', Object.freeze(['input_inspection_error']));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GATE-A READINESS AGGREGATOR (Part E)
+// ---------------------------------------------------------------------------
+
+const GATE_A_READINESS_STATES = Object.freeze([
+  'GATE_A_UNCONFIGURED',
+  'GATE_A_DEGRADED',
+  'GATE_A_READY_READ_ONLY',
+  'GATE_A_BLOCKED'
+]);
+
+export function describeGateAReadinessAggregatorContract() {
+  return Object.freeze({
+    contract: 'gate-a-readiness-aggregator',
+    version: '0.0.0',
+    test_only: true,
+    consumes: Object.freeze([
+      'rpc_health',
+      'protocol_constants',
+      'config_readiness',
+      'audit_path'
+    ]),
+    supported_states: GATE_A_READINESS_STATES,
+    read_only: true,
+    readiness_is_not_trading_readiness: true,
+    gate_a_state: 'GATE_A_UNCONFIGURED',
+    gate_a_ready_read_only: false,
+    status: 'GATE_A_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...gateAInvariantFlags(),
+    note:
+      'Read-only Gate-A readiness aggregator. Consumes the Stage-2 RPCHealthMonitor result + ProtocolConstantMonitor result + Gate-A config-readiness result + Gate-A audit-path result and derives a Gate-A operational state (GATE_A_UNCONFIGURED / GATE_A_DEGRADED / GATE_A_READY_READ_ONLY / GATE_A_BLOCKED). Even GATE_A_READY_READ_ONLY opens NO trading readiness: every trading/exec flag is fixed false. Provider/observation/config/audit failure fails closed (DEGRADED/BLOCKED/UNCONFIGURED), never ready-to-trade. Makes no network call; reads no env/secret; never echoes endpoint/secret.'
+  });
+}
+
+export function evaluateGateAReadiness(inputs) {
+  const build = (state, reasons) =>
+    Object.freeze({
+      valid: state !== 'GATE_A_BLOCKED',
+      gate_a_state: state,
+      gate_a_ready_read_only: state === 'GATE_A_READY_READ_ONLY',
+      status: state,
+      reasons: Object.freeze([...reasons]),
+      ...gateAInvariantFlags()
+    });
+  try {
+    const obj =
+      inputs != null && typeof inputs === 'object' && !Array.isArray(inputs)
+        ? inputs
+        : null;
+    if (!obj) return build('GATE_A_UNCONFIGURED', ['no_inputs']);
+    const rpc = obj.rpc_health;
+    const pc = obj.protocol_constants;
+    const cfg = obj.config_readiness;
+    const aud = obj.audit_path;
+    const comps = [obj, rpc, pc, cfg, aud];
+    for (const c of comps) {
+      if (c && typeof c === 'object' && gateAHasForbiddenTrueFlag(c))
+        return build('GATE_A_BLOCKED', ['forbidden_trading_indicator_blocked']);
+    }
+    const stOf = (o, field) =>
+      o != null && typeof o === 'object' && typeof o[field] === 'string'
+        ? o[field]
+        : null;
+    const rpcS = stOf(rpc, 'health_state');
+    const pcS = stOf(pc, 'constants_state');
+    const cfgS = stOf(cfg, 'config_state');
+    const audS = stOf(aud, 'audit_state');
+    if (cfgS === 'CONFIG_INVALID' || audS === 'AUDIT_INVALID')
+      return build('GATE_A_BLOCKED', ['config_or_audit_invalid']);
+    if (rpcS === null || pcS === null || cfgS === null || audS === null)
+      return build('GATE_A_UNCONFIGURED', ['component_input_missing']);
+    if (
+      rpcS === 'UNCONFIGURED' ||
+      pcS === 'UNCONFIGURED' ||
+      cfgS === 'CONFIG_UNCONFIGURED' ||
+      audS === 'AUDIT_UNCONFIGURED'
+    )
+      return build('GATE_A_UNCONFIGURED', ['component_unconfigured']);
+    if (
+      rpcS === 'READ_ONLY_HEALTHY' &&
+      pcS === 'READ_ONLY_CONSTANTS_OK' &&
+      cfgS === 'CONFIG_VALID_READ_ONLY' &&
+      audS === 'AUDIT_PATH_VALID'
+    )
+      return build('GATE_A_READY_READ_ONLY', []);
+    const reasons = [];
+    if (rpcS === 'DEGRADED') reasons.push('rpc_health_degraded');
+    if (rpcS === 'READ_ONLY_STALE') reasons.push('rpc_health_stale');
+    if (pcS === 'DEGRADED') reasons.push('protocol_constants_degraded');
+    if (pcS === 'READ_ONLY_CONSTANTS_STALE')
+      reasons.push('protocol_constants_stale');
+    if (pcS === 'READ_ONLY_CONSTANTS_MISMATCH')
+      reasons.push('protocol_constants_mismatch');
+    if (cfgS === 'CONFIG_DEGRADED') reasons.push('config_degraded');
+    if (audS === 'AUDIT_DEGRADED') reasons.push('audit_degraded');
+    if (reasons.length === 0) reasons.push('not_all_components_ready');
+    return build('GATE_A_DEGRADED', reasons);
+  } catch (_e) {
+    return build('GATE_A_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GATE-A STATUS / DASHBOARD SHELL (Part F)
+// ---------------------------------------------------------------------------
+
+const GATE_A_SHELL_STATUSES = Object.freeze([
+  'read_only_ready',
+  'degraded',
+  'blocked',
+  'unconfigured'
+]);
+
+export function describeGateAStatusShellContract() {
+  return Object.freeze({
+    contract: 'gate-a-status-shell',
+    version: '0.0.0',
+    test_only: true,
+    stage: 'gate_a',
+    supported_statuses: GATE_A_SHELL_STATUSES,
+    read_only: true,
+    status_only: true,
+    has_execution_commands: false,
+    can_trade: false,
+    can_send: false,
+    can_broadcast: false,
+    requires_next_stage: 'data_ingestion',
+    status: 'unconfigured',
+    ...gateAInvariantFlags(),
+    note:
+      'Read-only / status-only Gate-A dashboard shell. Maps the Gate-A readiness state to a display status (read_only_ready / degraded / blocked / unconfigured). Contains NO execution command (no buy/sell/execute/submit/send/broadcast/swap/copy_now/trade_now); can_trade/can_send/can_broadcast are fixed false; requires_next_stage is data_ingestion. Never echoes endpoint/secret.'
+  });
+}
+
+export function evaluateGateAStatusShell(gateAReadinessResult) {
+  try {
+    const r =
+      gateAReadinessResult != null && typeof gateAReadinessResult === 'object'
+        ? gateAReadinessResult
+        : null;
+    const gs = r && typeof r.gate_a_state === 'string' ? r.gate_a_state : null;
+    let status;
+    if (gs === 'GATE_A_READY_READ_ONLY') status = 'read_only_ready';
+    else if (gs === 'GATE_A_DEGRADED') status = 'degraded';
+    else if (gs === 'GATE_A_BLOCKED') status = 'blocked';
+    else status = 'unconfigured';
+    return Object.freeze({
+      stage: 'gate_a',
+      status,
+      can_trade: false,
+      can_send: false,
+      can_broadcast: false,
+      requires_next_stage: 'data_ingestion',
+      read_only: true,
+      status_only: true,
+      has_execution_commands: false,
+      ...gateAInvariantFlags()
+    });
+  } catch (_e) {
+    return Object.freeze({
+      stage: 'gate_a',
+      status: 'unconfigured',
+      can_trade: false,
+      can_send: false,
+      can_broadcast: false,
+      requires_next_stage: 'data_ingestion',
+      read_only: true,
+      status_only: true,
+      has_execution_commands: false,
+      ...gateAInvariantFlags()
+    });
   }
 }

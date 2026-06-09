@@ -98,3 +98,77 @@ export interface GateAAuditPathResult extends GateAInvariantFlags {
 export function describeGateAAuditPathContract(): GateAAuditPathContract;
 export function validateGateAAuditEnvelope(envelope: unknown): GateAAuditEnvelopeResult;
 export function evaluateGateAAuditPath(envelope: unknown): GateAAuditPathResult;
+
+// --- Readiness Aggregator ---
+
+export type GateAReadinessState =
+  | 'GATE_A_UNCONFIGURED'
+  | 'GATE_A_DEGRADED'
+  | 'GATE_A_READY_READ_ONLY'
+  | 'GATE_A_BLOCKED';
+
+export type GateAShellStatus =
+  | 'read_only_ready'
+  | 'degraded'
+  | 'blocked'
+  | 'unconfigured';
+
+export interface GateAReadinessAggregatorContract extends GateAInvariantFlags {
+  readonly contract: 'gate-a-readiness-aggregator';
+  readonly version: '0.0.0';
+  readonly test_only: true;
+  readonly consumes: readonly string[];
+  readonly supported_states: readonly GateAReadinessState[];
+  readonly read_only: true;
+  readonly readiness_is_not_trading_readiness: true;
+  readonly gate_a_state: 'GATE_A_UNCONFIGURED';
+  readonly gate_a_ready_read_only: false;
+  readonly status: 'GATE_A_UNCONFIGURED';
+  readonly reasons: readonly string[];
+  readonly note: string;
+}
+
+export interface GateAReadinessResult extends GateAInvariantFlags {
+  readonly valid: boolean;
+  readonly gate_a_state: GateAReadinessState;
+  readonly gate_a_ready_read_only: boolean;
+  readonly status: GateAReadinessState;
+  readonly reasons: readonly string[];
+}
+
+export function describeGateAReadinessAggregatorContract(): GateAReadinessAggregatorContract;
+export function evaluateGateAReadiness(inputs?: unknown): GateAReadinessResult;
+
+// --- Status / Dashboard Shell ---
+
+export interface GateAStatusShellContract extends GateAInvariantFlags {
+  readonly contract: 'gate-a-status-shell';
+  readonly version: '0.0.0';
+  readonly test_only: true;
+  readonly stage: 'gate_a';
+  readonly supported_statuses: readonly GateAShellStatus[];
+  readonly read_only: true;
+  readonly status_only: true;
+  readonly has_execution_commands: false;
+  readonly can_trade: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly requires_next_stage: 'data_ingestion';
+  readonly status: 'unconfigured';
+  readonly note: string;
+}
+
+export interface GateAStatusShellResult extends GateAInvariantFlags {
+  readonly stage: 'gate_a';
+  readonly status: GateAShellStatus;
+  readonly can_trade: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly requires_next_stage: 'data_ingestion';
+  readonly read_only: true;
+  readonly status_only: true;
+  readonly has_execution_commands: false;
+}
+
+export function describeGateAStatusShellContract(): GateAStatusShellContract;
+export function evaluateGateAStatusShell(gateAReadinessResult?: unknown): GateAStatusShellResult;
