@@ -460,3 +460,97 @@ export interface RpcClientSupplyChainGateResult {
 export function describeRpcClientSupplyChainGateContract(): RpcClientSupplyChainGateDescriptor;
 export function validateRpcClientSupplyChainReview(input?: unknown): RpcClientSupplyChainReviewResult;
 export function evaluateRpcClientSupplyChainGate(input?: unknown): RpcClientSupplyChainGateResult;
+
+export type OutOfRepoEndpointBindingStatus =
+  | 'out_of_repo_endpoint_binding_valid_no_live'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export interface OutOfRepoEndpointBindingAdapterDescriptor {
+  readonly contract: 'out-of-repo-endpoint-binding-adapter';
+  readonly version: string;
+  readonly test_only: true;
+  readonly purpose: 'out_of_repo_endpoint_binding_adapter';
+  readonly provider_ref: 'helius';
+  readonly supported_environments: readonly string[];
+  readonly supported_binding_source_kinds: readonly string[];
+  readonly requires_out_of_repo_secret_source: true;
+  readonly requires_separate_live_binding_pr: true;
+  readonly requires_no_network: true;
+  readonly requires_no_send: true;
+  readonly requires_no_broadcast: true;
+  readonly requires_no_serialize: true;
+  readonly requires_no_mainnet: true;
+  readonly requires_no_real_live: true;
+  readonly secret_in_repo: false;
+  readonly endpoint_in_repo: false;
+  readonly binding_descriptor_valid: false;
+  readonly boundary_passed: false;
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly resolved: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export interface OutOfRepoEndpointBindingDescriptorResult {
+  readonly valid: boolean;
+  readonly binding_descriptor_valid: boolean;
+  readonly status: OutOfRepoEndpointBindingStatus;
+  readonly reasons: readonly string[];
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly resolved: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export interface OutOfRepoEndpointBindingBoundaryResult {
+  readonly valid: boolean;
+  readonly binding_descriptor_valid: boolean;
+  readonly boundary_passed: boolean;
+  readonly status: OutOfRepoEndpointBindingStatus;
+  readonly provider_ref?: 'helius';
+  readonly environment?: string;
+  readonly binding_source_kind?: string;
+  readonly reasons: readonly string[];
+  readonly requires_separate_live_binding_pr: true;
+  readonly live_rpc_authorized: false;
+  readonly network_capability: false;
+  readonly resolved: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly broadcast_permitted: false;
+}
+
+export function describeOutOfRepoEndpointBindingAdapterContract(): OutOfRepoEndpointBindingAdapterDescriptor;
+export function validateOutOfRepoEndpointBindingDescriptor(input?: unknown): OutOfRepoEndpointBindingDescriptorResult;
+export function evaluateOutOfRepoEndpointBindingBoundary(input?: unknown): OutOfRepoEndpointBindingBoundaryResult;

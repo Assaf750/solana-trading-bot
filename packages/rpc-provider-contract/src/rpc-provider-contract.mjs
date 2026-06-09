@@ -1732,3 +1732,306 @@ export function evaluateRpcClientSupplyChainGate(input) {
     });
   }
 }
+
+// =============================================================================================================
+// F-16: OUT-OF-REPO ENDPOINT BINDING ADAPTER BOUNDARY (contract-only, no-secret-in-repo).
+// Validates the SHAPE of a BINDING DESCRIPTOR describing how an opaque endpoint_ref will LATER be bound to an
+// OUT-OF-REPO source (env / secret manager / operator-provided). It proves (a) no endpoint/API-key/secret enters
+// code/tests/docs, and (b) binding metadata ALONE never opens has_rpc/can_send/live_rpc_authorized. It performs
+// NO endpoint resolution / network / fetch / SDK import / dependency, and reads NO env/secret; the REAL binding
+// to an out-of-repo source is a SEPARATE PR; no endpoint/secret is ever stored in the repo.
+// =============================================================================================================
+
+// The three allowed OUT-OF-REPO source kinds — a TAG classifying WHERE the real endpoint/secret will live, never
+// the endpoint/secret itself. Note 'secret_manager_out_of_repo' legitimately contains the substring 'secret', so
+// binding_source_kind is validated by EXACT enum match (never a broad secret-indicator scan). String literals:
+// lexer-blanked, guard-safe; never executed, only used as fixed match tokens.
+const BINDING_SOURCE_KINDS = Object.freeze(['env_out_of_repo', 'secret_manager_out_of_repo', 'operator_provided_out_of_repo']);
+
+// Required-true attestations: each [field, reason] pair must be boolean `true` on the descriptor, else the listed
+// fixed reason token is pushed. The descriptor asserts the future binding adds no network/send/broadcast/serialize/
+// mainnet/real-live surface, that the secret source is out-of-repo, and that a separate live-binding PR is required.
+const OOR_BINDING_REQUIRED_TRUE = Object.freeze([
+  ['no_network', 'no_network_required'],
+  ['no_send', 'no_send_required'],
+  ['no_broadcast', 'no_broadcast_required'],
+  ['no_serialize', 'no_serialize_required'],
+  ['no_mainnet', 'no_mainnet_required'],
+  ['no_real_live', 'no_real_live_required'],
+  ['requires_out_of_repo_secret_source', 'out_of_repo_secret_source_required'],
+  ['requires_separate_live_binding_pr', 'separate_live_binding_pr_required'],
+]);
+
+// Required-false attestations: each [field, reason] pair must be boolean `false` on the descriptor (an explicit
+// promise that NO secret and NO endpoint live in the repo), else the listed fixed reason token is pushed.
+const OOR_BINDING_REQUIRED_FALSE = Object.freeze([
+  ['secret_in_repo', 'secret_in_repo_must_be_false'],
+  ['endpoint_in_repo', 'endpoint_in_repo_must_be_false'],
+]);
+
+// The only fields permitted on a binding DESCRIPTOR — anything else is an unknown field and is rejected. This is
+// what refuses a smuggled api_key/secret/token FIELD (it is not in this set), and the value is NEVER echoed since
+// results are built from fixed literals. All permitted fields are opaque references / fixed enums / boolean
+// attestations; none is a key, secret, endpoint URL, or live SDK handle. (Note: looksLikeKeyMaterial is NOT called
+// over the whole descriptor — the legitimate field name 'secret_in_repo' contains 'secret' and would false-trip;
+// endpoint_ref is screened for url/secret/key-material/mainnet by validateHeliusEndpointProvisioning instead.)
+const OOR_BINDING_KNOWN_FIELDS = Object.freeze([
+  'purpose', 'provider_ref', 'environment', 'endpoint_ref', 'binding_source_kind',
+  'secret_in_repo', 'endpoint_in_repo',
+  'no_network', 'no_send', 'no_broadcast', 'no_serialize', 'no_mainnet', 'no_real_live',
+  'requires_out_of_repo_secret_source', 'requires_separate_live_binding_pr',
+]);
+
+// Describe the out-of-repo endpoint binding adapter boundary: descriptor-shape only, fail-closed, NO endpoint
+// resolution / network / fetch / SDK import / dependency; reads no env/secret. Read-only; describes intent,
+// performs nothing. Every capability/live flag is a FIXED LITERAL false — a valid descriptor authorizes NOTHING
+// live, and the REAL binding to an out-of-repo endpoint/secret source is a SEPARATE PR.
+export function describeOutOfRepoEndpointBindingAdapterContract() {
+  return Object.freeze({
+    contract: 'out-of-repo-endpoint-binding-adapter',
+    version: '0.0.0',
+    test_only: true,
+    purpose: 'out_of_repo_endpoint_binding_adapter',
+    provider_ref: 'helius',
+    supported_environments: Object.freeze(['devnet', 'testnet', 'localnet']),
+    supported_binding_source_kinds: BINDING_SOURCE_KINDS,
+    requires_out_of_repo_secret_source: true,
+    requires_separate_live_binding_pr: true,
+    requires_no_network: true,
+    requires_no_send: true,
+    requires_no_broadcast: true,
+    requires_no_serialize: true,
+    requires_no_mainnet: true,
+    requires_no_real_live: true,
+    secret_in_repo: false,
+    endpoint_in_repo: false,
+    binding_descriptor_valid: false,
+    boundary_passed: false,
+    live_rpc_authorized: false,
+    network_capability: false,
+    resolved: false,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    network_call_made: false,
+    live_rpc_call_made: false,
+    broadcast_permitted: false,
+    status: UNCONFIGURED,
+    note: 'Test-only out-of-repo endpoint binding adapter boundary; the REAL binding to an out-of-repo endpoint/secret source is NOT implemented here and is a separate PR. A valid descriptor authorizes NOTHING live: no endpoint resolution / network / SDK / dependency; reads no env/secret; no endpoint/secret ever stored in the repo.',
+  });
+}
+
+// Validate the SHAPE of a binding DESCRIPTOR only. It does NOT resolve an endpoint, make a network/fetch call,
+// import an SDK, add a dependency, or read env/secret. The descriptor carries an opaque endpoint_ref + a
+// binding_source_kind TAG + boolean attestations; a real URL/secret/key-material/mainnet in any reference field is
+// refused (via validateHeliusEndpointProvisioning) and NEVER echoed; a smuggled api_key/secret/token FIELD is
+// rejected by the unknown-field check and NEVER echoed. All result flags are FIXED LITERALS (all false). Never
+// throws — a hostile/throwing accessor RETURNS a frozen invalid refusal with reason 'input_inspection_error'.
+export function validateOutOfRepoEndpointBindingDescriptor(input) {
+  try {
+    const reasons = [];
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+
+    // 1) Reuse the hardened provisioning validator on the 3 REFERENCE fields ONLY (provider_ref/environment/
+    //    endpoint_ref) so purpose / binding_source_kind substrings don't trip the secret/url scans. It screens
+    //    endpoint_ref for url/secret/key-material/mainnet via validateRpcProviderConfig. Never throws.
+    const prov = validateHeliusEndpointProvisioning(
+      obj ? { provider_ref: obj.provider_ref, environment: obj.environment, endpoint_ref: obj.endpoint_ref } : input,
+    );
+    if (!prov.valid) for (const r of prov.reasons) reasons.push(r);
+
+    // 2) purpose must be the exact fixed enum value.
+    const purpose = obj ? obj.purpose : undefined;
+    if (purpose !== 'out_of_repo_endpoint_binding_adapter') reasons.push('purpose_invalid');
+
+    // 3) binding_source_kind — EXACT enum match (NOT a secret-indicator scan, since the legitimate value
+    //    'secret_manager_out_of_repo' contains 'secret'). A URL/secret here is simply not in the enum -> rejected,
+    //    and the value is NEVER echoed.
+    const bsk = obj ? obj.binding_source_kind : undefined;
+    if (typeof bsk !== 'string' || !BINDING_SOURCE_KINDS.includes(bsk)) reasons.push('binding_source_kind_invalid');
+
+    // 4) required-true attestations — each must be boolean `true`, else its fixed reason token is pushed.
+    for (const [key, reason] of OOR_BINDING_REQUIRED_TRUE) {
+      if (!obj || obj[key] !== true) reasons.push(reason);
+    }
+
+    // 5) required-false attestations — secret_in_repo / endpoint_in_repo MUST be explicitly boolean `false`.
+    for (const [key, reason] of OOR_BINDING_REQUIRED_FALSE) {
+      if (!obj || obj[key] !== false) reasons.push(reason);
+    }
+
+    // 6) broadcast/send/serialize indicator scan over any field NAME or string VALUE (the no_send/no_broadcast/
+    //    no_serialize attestation keys are exempt — those are the attestations themselves; purpose and
+    //    binding_source_kind are fixed enums validated above and exempt from the VALUE scan).
+    if (obj) {
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'no_send' || k === 'no_broadcast' || k === 'no_serialize') continue;
+        const lk = String(k).toLowerCase();
+        if (BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => lk.indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+        if (k === 'purpose' || k === 'binding_source_kind') continue;
+        if (typeof v === 'string' && BROADCAST_SEND_BOUNDARY_TOKENS.some((t) => v.toLowerCase().indexOf(t) !== -1)) {
+          if (!reasons.includes('broadcast_or_send_indicator_blocked')) reasons.push('broadcast_or_send_indicator_blocked');
+          break;
+        }
+      }
+    }
+
+    // 7) unknown / surprise field — only the known binding-descriptor fields are permitted. This rejects a
+    //    smuggled api_key/secret/token FIELD (not in the known set); the value is NEVER echoed.
+    if (obj && Object.keys(obj).some((k) => !OOR_BINDING_KNOWN_FIELDS.includes(k))) {
+      if (!reasons.includes('unknown_field_rejected')) reasons.push('unknown_field_rejected');
+    }
+
+    // de-duplicate reasons while preserving first-seen order.
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    let status;
+    if (valid) {
+      status = 'out_of_repo_endpoint_binding_valid_no_live';
+    } else if ((prov.status === UNCONFIGURED
+        || uniqueReasons.includes('purpose_invalid')
+        || uniqueReasons.includes('binding_source_kind_invalid'))
+      && !uniqueReasons.includes('unknown_field_rejected')
+      && !uniqueReasons.includes('broadcast_or_send_indicator_blocked')) {
+      status = UNCONFIGURED;
+    } else {
+      status = 'invalid';
+    }
+
+    return Object.freeze({
+      // `valid`/`binding_descriptor_valid` mean the DESCRIPTOR SHAPE is acceptable as opaque references / fixed
+      // enums / boolean attestations — it does NOT resolve an endpoint, bind, send, broadcast, serialize, read
+      // env/secret, or authorize/activate anything. Every flag below is a FIXED LITERAL (all false), NOT live.
+      valid,
+      binding_descriptor_valid: valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      live_rpc_authorized: false,
+      network_capability: false,
+      resolved: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      binding_descriptor_valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      live_rpc_authorized: false,
+      network_capability: false,
+      resolved: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}
+
+// The out-of-repo endpoint binding adapter boundary CORE: prove the SHAPE of a BINDING DESCRIPTOR is well-formed,
+// while staying fully fail-closed and NEVER live. It does NOT resolve an endpoint, make a network/fetch call,
+// import an SDK, add a dependency, contact a provider, read env/secret, send/broadcast/serialize, or authorize
+// anything. Even a valid descriptor authorizes NOTHING live and binds NOTHING: requires_separate_live_binding_pr
+// is a FIXED-LITERAL invariant (true on every result, never echoed) — the REAL out-of-repo binding is ALWAYS a
+// separate PR. Logic: (1) validate the descriptor shape; (2) boundary_passed iff the shape is valid. When
+// boundary_passed, ONLY the recognized literal 'helius', the validated testnet-family environment enum, and the
+// validated binding_source_kind enum are echoed (all fixed/validated safe values) — NEVER endpoint_ref or any
+// freeform value. Never throws — a hostile/throwing accessor RETURNS a frozen invalid refusal with reason
+// 'input_inspection_error'.
+export function evaluateOutOfRepoEndpointBindingBoundary(input) {
+  try {
+    // 1) Validate the binding DESCRIPTOR SHAPE (reuses validateOutOfRepoEndpointBindingDescriptor). Never throws.
+    const recv = validateOutOfRepoEndpointBindingDescriptor(input);
+
+    // 2) The boundary passes iff the descriptor shape is valid.
+    const boundaryPassed = recv.valid;
+    const valid = boundaryPassed;
+
+    return Object.freeze({
+      // `valid`/`boundary_passed` mean the DESCRIPTOR is well-formed — it does NOT resolve an endpoint, bind,
+      // call RPC, send, broadcast, serialize, go live, or AUTHORIZE binding. A valid descriptor authorizes
+      // NOTHING live: requires_separate_live_binding_pr is a FIXED LITERAL true (NOT echoed input), and every
+      // capability/live flag below is a FIXED LITERAL false. Only the recognized literal 'helius', the validated
+      // environment enum, and the validated binding_source_kind enum are echoed when boundary_passed — never
+      // endpoint_ref or any freeform value.
+      valid,
+      binding_descriptor_valid: recv.binding_descriptor_valid,
+      boundary_passed: boundaryPassed,
+      status: recv.status,
+      provider_ref: boundaryPassed ? 'helius' : undefined,
+      environment: boundaryPassed ? String(input.environment) : undefined,
+      binding_source_kind: boundaryPassed ? String(input.binding_source_kind) : undefined,
+      reasons: recv.reasons,
+      requires_separate_live_binding_pr: true,
+      live_rpc_authorized: false,
+      network_capability: false,
+      resolved: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      binding_descriptor_valid: false,
+      boundary_passed: false,
+      status: 'invalid',
+      provider_ref: undefined,
+      environment: undefined,
+      binding_source_kind: undefined,
+      reasons: Object.freeze(['input_inspection_error']),
+      requires_separate_live_binding_pr: true,
+      live_rpc_authorized: false,
+      network_capability: false,
+      resolved: false,
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      broadcast_permitted: false,
+    });
+  }
+}

@@ -29,6 +29,10 @@ import {
   describeLiveRpcSpikeBoundaryContract,
   validateLiveRpcSpikeBoundaryRequest,
   evaluateLiveRpcSpikeBoundary,
+  // PR-E2-F-16 — out-of-repo endpoint binding adapter boundary (contract-only, test-only, no-secret-in-repo, no-live).
+  describeOutOfRepoEndpointBindingAdapterContract,
+  validateOutOfRepoEndpointBindingDescriptor,
+  evaluateOutOfRepoEndpointBindingBoundary,
 } from '../src/index.mjs';
 import {
   runMechanismGuard,
@@ -3114,4 +3118,334 @@ test('(G-static-D) NO `can_send: true` anywhere in packages/*/src (F-15 introduc
     walk(srcDir);
   }
   assert.deepEqual(offenders, [], `can_send: true must not appear in any package src: ${offenders.join(', ')}`);
+});
+
+// =============================================================================================================
+// PR-E2-F-16 — OUT-OF-REPO ENDPOINT BINDING ADAPTER BOUNDARY (contract-only, test-only, no-secret-in-repo, no-live).
+// H1..H40 against the REAL exports from '../src/index.mjs'.
+// =============================================================================================================
+
+// Canonical valid binding descriptor (fresh object per call so per-test mutations never leak).
+function makeValidOorBinding() {
+  return {
+    purpose: 'out_of_repo_endpoint_binding_adapter',
+    provider_ref: 'helius',
+    environment: 'devnet',
+    endpoint_ref: 'helius-devnet-binding-ref',
+    binding_source_kind: 'env_out_of_repo',
+    secret_in_repo: false,
+    endpoint_in_repo: false,
+    no_network: true,
+    no_send: true,
+    no_broadcast: true,
+    no_serialize: true,
+    no_mainnet: true,
+    no_real_live: true,
+    requires_out_of_repo_secret_source: true,
+    requires_separate_live_binding_pr: true,
+  };
+}
+
+// Assert the 13 capability/live/resolution flags named in H2..H14 are each the FIXED LITERAL false.
+function assertOorAllFlagsFalse(r) {
+  assert.equal(r.live_rpc_authorized, false, 'live_rpc_authorized false');
+  assert.equal(r.network_capability, false, 'network_capability false');
+  assert.equal(r.resolved, false, 'resolved false');
+  assert.equal(r.configured, false, 'configured false');
+  assert.equal(r.has_rpc, false, 'has_rpc false');
+  assert.equal(r.ready, false, 'ready false');
+  assert.equal(r.can_send, false, 'can_send false');
+  assert.equal(r.can_broadcast, false, 'can_broadcast false');
+  assert.equal(r.can_serialize, false, 'can_serialize false');
+  assert.equal(r.is_live, false, 'is_live false');
+  assert.equal(r.real_live, false, 'real_live false');
+  assert.equal(r.network_call_made, false, 'network_call_made false');
+  assert.equal(r.live_rpc_call_made, false, 'live_rpc_call_made false');
+}
+
+test('(H1) valid binding descriptor -> boundary passes with fixed valid status', () => {
+  const r = evaluateOutOfRepoEndpointBindingBoundary(makeValidOorBinding());
+  assert.equal(r.binding_descriptor_valid, true, 'binding_descriptor_valid true');
+  assert.equal(r.boundary_passed, true, 'boundary_passed true');
+  assert.equal(r.status, 'out_of_repo_endpoint_binding_valid_no_live', 'fixed valid status');
+});
+
+test('(H2..H14) valid binding keeps every capability/live/resolution flag === false', () => {
+  const r = evaluateOutOfRepoEndpointBindingBoundary(makeValidOorBinding());
+  assertOorAllFlagsFalse(r);
+});
+
+test('(H15) valid binding keeps requires_separate_live_binding_pr === true (fixed invariant)', () => {
+  const r = evaluateOutOfRepoEndpointBindingBoundary(makeValidOorBinding());
+  assert.equal(r.requires_separate_live_binding_pr, true, 'requires_separate_live_binding_pr true');
+});
+
+test('(H16) all 3 binding_source_kind enum values pass', () => {
+  for (const kind of ['env_out_of_repo', 'secret_manager_out_of_repo', 'operator_provided_out_of_repo']) {
+    const rec = makeValidOorBinding();
+    rec.binding_source_kind = kind;
+    const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+    assert.equal(r.boundary_passed, true, `kind ${kind} boundary_passed true`);
+    assert.equal(r.binding_descriptor_valid, true, `kind ${kind} descriptor valid`);
+    assertOorAllFlagsFalse(r);
+  }
+});
+
+test('(H17) missing binding -> evaluate(undefined) and evaluate({}) both fail closed', () => {
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(undefined).boundary_passed, false, 'undefined -> false');
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary({}).boundary_passed, false, '{} -> false');
+  assertOorAllFlagsFalse(evaluateOutOfRepoEndpointBindingBoundary(undefined));
+  assertOorAllFlagsFalse(evaluateOutOfRepoEndpointBindingBoundary({}));
+});
+
+test('(H18..H25) dropping any one of the 8 attestations fails the boundary', () => {
+  const attestations = [
+    'no_network', 'no_send', 'no_broadcast', 'no_serialize',
+    'no_mainnet', 'no_real_live', 'requires_out_of_repo_secret_source', 'requires_separate_live_binding_pr',
+  ];
+  for (const key of attestations) {
+    const rec = makeValidOorBinding();
+    delete rec[key];
+    const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+    assert.equal(r.boundary_passed, false, `missing ${key} -> boundary_passed false`);
+    assert.equal(r.binding_descriptor_valid, false, `missing ${key} -> descriptor invalid`);
+    assertOorAllFlagsFalse(r);
+  }
+});
+
+test('(H26) secret_in_repo:true -> false', () => {
+  const rec = makeValidOorBinding();
+  rec.secret_in_repo = true;
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(rec).boundary_passed, false, 'secret_in_repo true -> false');
+});
+
+test('(H27) endpoint_in_repo:true -> false', () => {
+  const rec = makeValidOorBinding();
+  rec.endpoint_in_repo = true;
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(rec).boundary_passed, false, 'endpoint_in_repo true -> false');
+});
+
+test('(H28) missing secret_in_repo (undefined) -> false (must be explicitly false)', () => {
+  const rec = makeValidOorBinding();
+  delete rec.secret_in_repo;
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(rec).boundary_passed, false, 'missing secret_in_repo -> false');
+});
+
+test('(H29) missing endpoint_in_repo (undefined) -> false (must be explicitly false)', () => {
+  const rec = makeValidOorBinding();
+  delete rec.endpoint_in_repo;
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(rec).boundary_passed, false, 'missing endpoint_in_repo -> false');
+});
+
+test('(H30) fake binding flags as extra record fields are ignored/refused; result flags ALL stay false', () => {
+  const rec = makeValidOorBinding();
+  rec.has_rpc = true;
+  rec.can_send = true;
+  rec.is_live = true;
+  rec.real_live = true;
+  rec.network_call_made = true;
+  rec.live_rpc_authorized = true;
+  rec.resolved = true;
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'fake binding flags rejected as unknown fields');
+  assertOorAllFlagsFalse(r);
+});
+
+test('(H31) endpoint URL in endpoint_ref -> false AND url not echoed in result', () => {
+  const rec = makeValidOorBinding();
+  rec.endpoint_ref = 'https://rpc.example';
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'url endpoint_ref -> false');
+  assert.equal(JSON.stringify(r).includes('https://rpc.example'), false, 'url not echoed');
+});
+
+test('(H32) host-shaped endpoint_ref carrying endpoint/rpc/url substring -> false AND not echoed', () => {
+  const rec = makeValidOorBinding();
+  rec.endpoint_ref = 'endpoint-rpc-url-host-shaped';
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'host-shaped endpoint_ref -> false');
+  assert.equal(JSON.stringify(r).includes('endpoint-rpc-url-host-shaped'), false, 'host-shaped ref not echoed');
+});
+
+test('(H33) smuggled api_key field -> false AND not echoed', () => {
+  const rec = makeValidOorBinding();
+  rec.api_key = 'AKIAABCDEF1234567890';
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'api_key field -> false');
+  assert.equal(JSON.stringify(r).includes('AKIAABCDEF1234567890'), false, 'api_key value not echoed');
+});
+
+test('(H34) smuggled secret field -> false AND not echoed', () => {
+  const rec = makeValidOorBinding();
+  rec.secret = 'sk-live-1234567890abcdef';
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'secret field -> false');
+  assert.equal(JSON.stringify(r).includes('sk-live-1234567890abcdef'), false, 'secret value not echoed');
+});
+
+test('(H35) smuggled token field -> false AND not echoed', () => {
+  const rec = makeValidOorBinding();
+  rec.token = 'tok-aaaaaaaaaaaaaaaaaaaa';
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'token field -> false');
+  assert.equal(JSON.stringify(r).includes('tok-aaaaaaaaaaaaaaaaaaaa'), false, 'token value not echoed');
+});
+
+test('(H36) key-material-shaped endpoint_ref (70 base58 chars) -> false AND not echoed', () => {
+  const km = '5KQwrPbwdL6PhXujxW37FSSQZ1JiwsST1J1JiwsST1JiwsST1JiwsST1JiwsST1Jiws2ab';
+  assert.equal(km.length, 70, 'fixture is 70 chars');
+  const rec = makeValidOorBinding();
+  rec.endpoint_ref = km;
+  const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+  assert.equal(r.boundary_passed, false, 'key-material endpoint_ref -> false');
+  assert.equal(JSON.stringify(r).includes(km), false, 'key-material ref not echoed');
+});
+
+test('(H37) mainnet / prod environment -> false', () => {
+  for (const env of ['mainnet', 'mainnet-beta', 'prod', 'production']) {
+    const rec = makeValidOorBinding();
+    rec.environment = env;
+    assert.equal(evaluateOutOfRepoEndpointBindingBoundary(rec).boundary_passed, false, `${env} env -> false`);
+  }
+});
+
+test('(H38) invalid binding_source_kind -> false AND not echoed', () => {
+  for (const bad of ['http://x', 'unknown_kind']) {
+    const rec = makeValidOorBinding();
+    rec.binding_source_kind = bad;
+    const r = evaluateOutOfRepoEndpointBindingBoundary(rec);
+    assert.equal(r.boundary_passed, false, `binding_source_kind ${bad} -> false`);
+    assert.equal(JSON.stringify(r).includes(bad), false, `binding_source_kind ${bad} not echoed`);
+  }
+});
+
+test('(H39) wrong purpose / unknown extra field -> false', () => {
+  const wrongPurpose = makeValidOorBinding();
+  wrongPurpose.purpose = 'something_else';
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(wrongPurpose).boundary_passed, false, 'wrong purpose -> false');
+  const unknownField = makeValidOorBinding();
+  unknownField.surprise_field = 'x';
+  assert.equal(evaluateOutOfRepoEndpointBindingBoundary(unknownField).boundary_passed, false, 'unknown field -> false');
+});
+
+test('(H40) hostile throwing-accessor input -> evaluate AND validate return frozen refusal, NO throw', () => {
+  const hostile = new Proxy({}, { get() { throw new Error('x'); } });
+  let evalResult;
+  assert.doesNotThrow(() => { evalResult = evaluateOutOfRepoEndpointBindingBoundary(hostile); }, 'evaluate must not throw');
+  assert.equal(evalResult.boundary_passed, false, 'evaluate boundary_passed false');
+  assert.equal(evalResult.binding_descriptor_valid, false, 'evaluate binding_descriptor_valid false');
+  assert.equal(Object.isFrozen(evalResult), true, 'evaluate result frozen');
+  assertOorAllFlagsFalse(evalResult);
+  let valResult;
+  assert.doesNotThrow(() => { valResult = validateOutOfRepoEndpointBindingDescriptor(hostile); }, 'validate must not throw');
+  assert.equal(valResult.binding_descriptor_valid, false, 'validate binding_descriptor_valid false');
+  assert.equal(valResult.valid, false, 'validate valid false');
+  assert.equal(Object.isFrozen(valResult), true, 'validate result frozen');
+});
+
+// ---- (H-describe) describe contract is read-only, all live flags false, requires separate live PR ----
+
+test('(H-describe) describeOutOfRepoEndpointBindingAdapterContract is read-only no-live', () => {
+  const d = describeOutOfRepoEndpointBindingAdapterContract();
+  assert.equal(Object.isFrozen(d), true, 'describe frozen');
+  assert.equal(d.test_only, true, 'test_only true');
+  assert.equal(d.requires_separate_live_binding_pr, true, 'requires_separate_live_binding_pr true');
+  assert.equal(d.binding_descriptor_valid, false, 'binding_descriptor_valid false');
+  assert.equal(d.boundary_passed, false, 'boundary_passed false');
+  assertOorAllFlagsFalse(d);
+});
+
+// ---- (H-static-A) rpc-provider-contract.mjs is import-free (no top-level import / require) ----
+
+test('(H-static-A) rpc-provider-contract.mjs has NO import / require (import-free module)', () => {
+  const code = stripCommentsAndStrings(readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8'));
+  for (const line of code.split('\n')) {
+    assert.equal(/^import\s/.test(line), false, `no top-level import line: ${line}`);
+  }
+  assert.equal(/\brequire\s*\(/.test(code), false, 'no require( in module');
+});
+
+// ---- (H-static-B) package.json declares NO dependencies of any kind (F-16 added none) ----
+
+test('(H-static-B) package.json declares NO dependencies/devDependencies (F-16 added none)', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false, 'no dependencies');
+  assert.equal('devDependencies' in pkg, false, 'no devDependencies');
+  assert.equal('peerDependencies' in pkg, false, 'no peerDependencies');
+  assert.equal('optionalDependencies' in pkg, false, 'no optionalDependencies');
+});
+
+// ---- (H-static-C) F-16 code region carries NO env/fs/network mechanism ----
+
+test('(H-static-C) F-16 binding adapter region has NO env/fs/network mechanism', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const idx = full.indexOf('F-16');
+  assert.ok(idx !== -1, 'F-16 region marker present');
+  const region = stripCommentsAndStrings(full.slice(idx));
+  assert.equal(/process\.env/.test(region), false, 'no process.env');
+  assert.equal(/readFileSync|readFile\s*\(/.test(region), false, 'no readFileSync');
+  assert.equal(/node:fs/.test(region), false, 'no node:fs');
+  assert.equal(/\bfetch\s*\(/.test(region), false, 'no fetch(');
+  assert.equal(/new\s+WebSocket|WebSocket\s*\(/.test(region), false, 'no WebSocket');
+  assert.equal(/new\s+Connection\s*\(/.test(region), false, 'no new Connection(');
+});
+
+// ---- (H-static-D) no `can_send: true` anywhere in packages/*/src (F-16 introduced none) ----
+
+test('(H-static-D) NO `can_send: true` anywhere in packages/*/src (F-16 introduced none)', () => {
+  const PKGS = join(HERE, '..', '..');
+  const CAN_SEND_TRUE = /can_send\s*:\s*true/;
+  const offenders = [];
+  function walk(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'test') continue;
+        walk(full);
+      } else if (entry.name.endsWith('.mjs')) {
+        if (CAN_SEND_TRUE.test(readFileSync(full, 'utf8'))) offenders.push(full);
+      }
+    }
+  }
+  for (const pkg of readdirSync(PKGS, { withFileTypes: true })) {
+    if (!pkg.isDirectory()) continue;
+    let srcDir;
+    try { srcDir = join(PKGS, pkg.name, 'src'); readdirSync(srcDir); } catch { continue; }
+    walk(srcDir);
+  }
+  assert.deepEqual(offenders, [], `can_send: true must not appear in any package src: ${offenders.join(', ')}`);
+});
+
+// ---- (H-static-E) NO real provider host (https?://[a-z0-9]) in this package's src + test (only bare scheme / example placeholders) ----
+
+test('(H-static-E) no real provider host URL in rpc-provider-contract src + test', () => {
+  const HOST_RE = /https?:\/\/[a-z0-9]/gi;
+  const files = [];
+  function collect(dir) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules') continue;
+        collect(full);
+      } else if (/\.(mjs|ts|md|json)$/.test(entry.name)) {
+        files.push(full);
+      }
+    }
+  }
+  collect(SRC);
+  collect(HERE); // the test directory
+  const offenders = [];
+  for (const f of files) {
+    const code = stripCommentsAndStrings(readFileSync(f, 'utf8'));
+    let m;
+    const re = new RegExp(HOST_RE.source, 'gi');
+    while ((m = re.exec(code)) !== null) {
+      const tail = code.slice(m.index, m.index + 40);
+      // Allow ONLY example-placeholder hosts used by the URL-rejection proofs.
+      if (/^https?:\/\/(rpc\.)?example\b/i.test(tail)) continue;
+      if (/^https?:\/\/x\b/i.test(tail)) continue;
+      offenders.push(`${f}: ${tail}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `no real provider host URL allowed: ${offenders.join(' | ')}`);
 });

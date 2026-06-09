@@ -419,3 +419,23 @@ mainnet indicator in any field is **refused and never echoed** (no freeform inpu
 descriptive RPC/SDK package name (containing words like `rpc`/`sdk`/`client`/`endpoint`) is **allowed**, since the
 gate stores/resolves nothing. A hostile/throwing input returns a frozen refusal with reason
 `input_inspection_error` and never throws.
+
+## Out-of-Repo Endpoint Binding Adapter Boundary (test-only, no-secret-in-repo)
+
+`describeOutOfRepoEndpointBindingAdapterContract()` / `validateOutOfRepoEndpointBindingDescriptor(input)` /
+`evaluateOutOfRepoEndpointBindingBoundary(input)` validate the **SHAPE** of a binding **DESCRIPTOR** — `provider_ref`
+(`helius`) + a testnet-family `environment` + an **opaque** `endpoint_ref` + a `binding_source_kind` **TAG**
+classifying where the real endpoint/secret lives **OUT OF REPO** (`env_out_of_repo` / `secret_manager_out_of_repo`
+/ `operator_provided_out_of_repo`) + attestations `secret_in_repo:false` / `endpoint_in_repo:false` / `no_*` /
+`requires_*`. The **REAL** binding to an out-of-repo source is **NOT implemented here and is a separate PR**.
+
+An approved descriptor yields `binding_descriptor_valid:true` / `boundary_passed:true`, but
+`live_rpc_authorized:false`, `has_rpc:false`, `can_send:false`, `network_capability:false`, `resolved:false` and
+**every live flag false**, plus a fixed-literal `requires_separate_live_binding_pr:true` — **binding metadata
+alone authorizes NOTHING live**. No endpoint URL / raw endpoint / API key / secret / token is **ever stored in the
+repo**; `endpoint_ref` is **opaque**; a real URL / secret / key-material / mainnet in any field is **refused and
+never echoed**; a smuggled `api_key`/`secret`/`token` field is rejected as an unknown field and never echoed. The
+boundary performs **no env/secret read, no network/fetch, no SDK/dependency, no endpoint resolution**. When
+`boundary_passed`, only the recognized literal `helius`, the validated environment enum, and the validated
+`binding_source_kind` enum are echoed — never `endpoint_ref`. A hostile/throwing input returns a frozen refusal
+with reason `input_inspection_error` and never throws.
