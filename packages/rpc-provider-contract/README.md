@@ -458,3 +458,24 @@ non-read-only method (send/broadcast/serialize/sign) is **refused and the caller
 raw result and the endpoint are **NEVER echoed** (`endpoint_echoed: false`; only a derived boolean is returned),
 and no caller/endpoint is retained (`binding_retained: false`). A hostile/throwing input or caller returns a frozen
 refusal and never throws. **Send/broadcast/mainnet/REAL-LIVE remain separate, explicitly-approved PRs.**
+
+## RPC Health Monitor — read-only health state (test-only)
+
+`describeRpcHealthMonitorContract()`, `validateRpcHealthSpikeResult(spikeResult)`, and
+`evaluateRpcHealthFromSpike(spikeResult, staleness)` add a **pure, read-only** RPC health monitor. It **CONSUMES an
+F-17 read-only spike RESULT** (from `evaluateLiveTestnetRpcReadOnlySpike`) and derives a health **STATE** —
+`UNCONFIGURED` / `DEGRADED` / `READ_ONLY_HEALTHY` / `READ_ONLY_STALE`. The monitor makes **NO network call**,
+performs **NO endpoint resolution**, and **NEVER echoes** endpoint/secret/raw result.
+
+**Mapping:** no/invalid/unrecognized spike result => `UNCONFIGURED`; spike not authorized => `UNCONFIGURED`;
+authorized but caller unavailable / read-only health check failed => `DEGRADED` (**fail-closed, never
+ready-to-trade**); healthy read-only result => `READ_ONLY_HEALTHY`; healthy but stale (explicit deterministic age)
+=> `READ_ONLY_STALE` (**no readiness**). A smuggled trading/exec indicator, a non-testnet environment, or a
+non-read-only method on the consumed spike result is **fail-closed `UNCONFIGURED`**.
+
+**Health is NOT trading readiness / routing / send / broadcast / signing:** `trading_ready`, `can_send`,
+`broadcast_permitted`, `signing_permitted`, `has_rpc`, `is_live`, `real_live`, `routing_ready`,
+`network_call_made` stay `false` on **EVERY** result; `read_only_healthy` is `true` only for `READ_ONLY_HEALTHY`
+(never for `READ_ONLY_STALE`). **Staleness is an explicit deterministic parameter** (`age_ms`/`max_age_ms`/
+`is_stale`) — **no system clock** is read. A hostile/throwing input returns a frozen refusal with reason
+`input_inspection_error` and **never throws**.

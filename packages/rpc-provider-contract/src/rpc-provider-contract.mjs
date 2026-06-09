@@ -2380,3 +2380,178 @@ export async function evaluateLiveTestnetRpcReadOnlySpike(input, outOfRepoReadOn
     });
   }
 }
+
+// ===========================================================================================================
+// E2-F-18 — RPC HEALTH MONITOR (read-only health state). ADDITIVE, import-free, function-I/O-only.
+//
+// The monitor is a PURE function that CONSUMES an F-17 read-only spike RESULT object (produced by
+// evaluateLiveTestnetRpcReadOnlySpike) and DERIVES a HEALTH STATE only. It makes NO network call, performs NO
+// endpoint resolution, reads NO system clock, and NEVER echoes any input value (endpoint/secret/raw result).
+// Staleness is supplied as an explicit deterministic parameter — never read from a clock.
+//
+// Health is NEVER trading readiness / routing / send / broadcast / signing: every trading/exec flag is fixed
+// false on EVERY result. Provider failure or an unavailable out-of-repo caller yields DEGRADED / UNCONFIGURED
+// fail-closed — never ready-to-trade. A smuggled trading/exec indicator, non-testnet environment, or
+// non-read-only method on the consumed spike result is refused fail-closed (UNCONFIGURED).
+// ===========================================================================================================
+
+const RPC_HEALTH_STATES = Object.freeze(['UNCONFIGURED', 'DEGRADED', 'READ_ONLY_HEALTHY', 'READ_ONLY_STALE']);
+// Any of these true on the input spike result => smuggled trading/exec indicator => fail-closed.
+const HEALTH_FORBIDDEN_TRUE_FLAGS = Object.freeze([
+  'can_send', 'can_broadcast', 'can_serialize', 'broadcast_permitted', 'signing_permitted',
+  'real_live', 'is_live', 'has_rpc', 'trading_ready', 'network_call_made',
+]);
+const HEALTH_READ_ONLY_METHODS = Object.freeze(['getVersion', 'getHealth']);
+const HEALTH_TESTNET_ENVS = Object.freeze(['devnet', 'testnet', 'localnet']);
+
+// Fixed-false invariant flags shared by every F-18 result — health opens NOTHING for trading/send/broadcast/sign.
+function f18HealthInvariantFlags() {
+  return {
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    trading_ready: false,
+    routing_ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    broadcast_permitted: false,
+    signing_permitted: false,
+    network_call_made: false,
+    endpoint_echoed: false,
+  };
+}
+
+// Deterministic staleness — NO system clock. Staleness is an explicit caller-supplied parameter.
+function f18IsStale(staleness) {
+  if (staleness == null || typeof staleness !== 'object') return false;
+  if (staleness.is_stale === true) return true;
+  const a = staleness.age_ms;
+  const m = staleness.max_age_ms;
+  return (typeof a === 'number' && typeof m === 'number' && a > m);
+}
+
+// describeRpcHealthMonitorContract — self-description of the monitor.
+// Consumes an F-17 spike result only; derives a health state; health is NOT trading readiness/routing/send/
+// broadcast/signing; provider failure => DEGRADED/UNCONFIGURED fail-closed; no network/endpoint-resolution;
+// no echo; deterministic staleness (no system clock).
+export function describeRpcHealthMonitorContract() {
+  return Object.freeze({
+    contract: 'rpc-health-monitor',
+    version: '0.0.0',
+    test_only: true,
+    consumes: 'live_testnet_rpc_read_only_spike_result',
+    supported_health_states: RPC_HEALTH_STATES,
+    read_only: true,
+    health_is_not_trading_readiness: true,
+    health_state: 'UNCONFIGURED',
+    read_only_healthy: false,
+    stale: false,
+    status: 'UNCONFIGURED',
+    ...f18HealthInvariantFlags(),
+    note: 'Read-only RPC health monitor. Consumes an F17 read-only spike RESULT and derives a health state (UNCONFIGURED / DEGRADED / READ_ONLY_HEALTHY / READ_ONLY_STALE). Health is NOT trading readiness, routing, send, broadcast, or signing — every trading/exec flag is fixed false on every result. Provider failure or an unavailable out-of-repo caller yields DEGRADED/UNCONFIGURED fail-closed, never ready-to-trade. Makes no network call; performs no endpoint resolution; never echoes endpoint/secret.',
+  });
+}
+
+// validateRpcHealthSpikeResult — recognizes the F-17 spike-result SHAPE and screens for forbidden indicators.
+// Consumes an F-17 spike result only; derives no health state here (recognition + screening only); health is
+// NOT trading readiness/routing/send/broadcast/signing; a smuggled trading/exec indicator, non-testnet env, or
+// non-read-only method is fail-closed; no network/endpoint-resolution; no echo of any input value; hostile/
+// throwing input returns a frozen refusal with reason 'input_inspection_error' and NEVER throws.
+export function validateRpcHealthSpikeResult(spikeResult) {
+  try {
+    const reasons = [];
+    const obj = (spikeResult != null && typeof spikeResult === 'object' && !Array.isArray(spikeResult))
+      ? spikeResult
+      : null;
+
+    if (!obj) {
+      reasons.push('no_spike_result');
+    } else {
+      // Forbidden trading/exec indicator smuggled true on the consumed spike result.
+      for (const f of HEALTH_FORBIDDEN_TRUE_FLAGS) {
+        if (obj[f] === true) {
+          if (!reasons.includes('forbidden_trading_indicator_blocked')) reasons.push('forbidden_trading_indicator_blocked');
+        }
+      }
+      // Non-testnet environment.
+      if (typeof obj.environment === 'string' && !HEALTH_TESTNET_ENVS.includes(obj.environment)) {
+        const e = obj.environment.toLowerCase();
+        if (e.indexOf('mainnet') !== -1 || e.indexOf('prod') !== -1) reasons.push('mainnet_or_nontestnet_environment_blocked');
+        else reasons.push('nontestnet_environment_blocked');
+      }
+      // Non-read-only method.
+      if (typeof obj.rpc_method === 'string' && !HEALTH_READ_ONLY_METHODS.includes(obj.rpc_method)) {
+        reasons.push('non_read_only_method_blocked');
+      }
+    }
+
+    const uniqueReasons = [...new Set(reasons)];
+    const recognized = obj != null;
+    const valid = recognized && uniqueReasons.length === 0;
+
+    return Object.freeze({
+      valid,
+      recognized,
+      reasons: Object.freeze([...uniqueReasons]),
+      ...f18HealthInvariantFlags(),
+    });
+  } catch {
+    // Fail-safe-not-fail-open: hostile/throwing input is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...f18HealthInvariantFlags(),
+    });
+  }
+}
+
+// evaluateRpcHealthFromSpike — the MONITOR CORE; derives the health state from an F-17 spike result.
+// Consumes an F-17 spike result only; derives a health state (UNCONFIGURED / DEGRADED / READ_ONLY_HEALTHY /
+// READ_ONLY_STALE); health is NOT trading readiness/routing/send/broadcast/signing (all such flags fixed false);
+// provider failure / caller unavailable / read-only check failed => DEGRADED, smuggled indicator / non-testnet /
+// non-read-only / unauthorized / unrecognized => UNCONFIGURED — fail-closed, never ready-to-trade; makes no
+// network call and performs no endpoint resolution; never echoes any input value (endpoint/secret/raw result);
+// staleness is an explicit deterministic parameter (no system clock). read_only_healthy is true ONLY for
+// READ_ONLY_HEALTHY (never for STALE). Hostile/throwing input returns a frozen UNCONFIGURED refusal, never throws.
+export function evaluateRpcHealthFromSpike(spikeResult, staleness) {
+  // Local builder — every result is fixed literals + the derived state + fixed reason tokens. NEVER echoes input.
+  const buildHealth = (state, reasons, stale) => Object.freeze({
+    valid: (state !== 'UNCONFIGURED') || reasons.includes('spike_not_authorized') || reasons.includes('no_spike_result'),
+    health_state: state,
+    read_only_healthy: state === 'READ_ONLY_HEALTHY',
+    stale: stale === true,
+    status: state,
+    reasons,
+    ...f18HealthInvariantFlags(),
+  });
+
+  try {
+    const v = validateRpcHealthSpikeResult(spikeResult);
+
+    if (!v.recognized || v.reasons.includes('input_inspection_error')) {
+      return buildHealth('UNCONFIGURED', v.reasons.length ? v.reasons : Object.freeze(['no_spike_result']), false);
+    }
+
+    if (v.reasons.includes('forbidden_trading_indicator_blocked')
+      || v.reasons.includes('mainnet_or_nontestnet_environment_blocked')
+      || v.reasons.includes('nontestnet_environment_blocked')
+      || v.reasons.includes('non_read_only_method_blocked')) {
+      return buildHealth('UNCONFIGURED', v.reasons, false);
+    }
+
+    const obj = spikeResult; // recognized object
+
+    if (obj.spike_authorized !== true) return buildHealth('UNCONFIGURED', Object.freeze(['spike_not_authorized']), false);
+    if (obj.spike_attempted !== true) return buildHealth('DEGRADED', Object.freeze(['caller_unavailable']), false);
+    if (obj.read_only_health_ok !== true) return buildHealth('DEGRADED', Object.freeze(['read_only_health_check_failed']), false);
+    if (f18IsStale(staleness)) return buildHealth('READ_ONLY_STALE', Object.freeze(['read_only_result_stale']), true);
+    return buildHealth('READ_ONLY_HEALTHY', Object.freeze([]), false);
+  } catch {
+    // Fail-safe-not-fail-open: hostile/throwing input is refused, never re-thrown, never echoed.
+    return buildHealth('UNCONFIGURED', Object.freeze(['input_inspection_error']), false);
+  }
+}

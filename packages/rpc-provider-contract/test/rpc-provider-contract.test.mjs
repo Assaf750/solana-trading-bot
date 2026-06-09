@@ -3756,3 +3756,191 @@ test('F-17 (static) package.json declares NO dependencies', () => {
   assert.equal('dependencies' in pkg, false, 'no dependencies');
   assert.equal('devDependencies' in pkg, false, 'no devDependencies');
 });
+
+// ===========================================================================================================
+// PR-E2-F-18 — RPC HEALTH MONITOR (read-only health state). Test-only; the monitor is a PURE function that
+// CONSUMES a REAL F-17 read-only spike RESULT (built here via evaluateLiveTestnetRpcReadOnlySpike — already
+// imported above; NOT re-imported) and DERIVES a health state only. No network call. M1..M32 + static guards.
+// ===========================================================================================================
+import {
+  describeRpcHealthMonitorContract,
+  validateRpcHealthSpikeResult,
+  evaluateRpcHealthFromSpike,
+} from '../src/index.mjs';
+
+// REAL F-17 spike results, built from canonical records + in-memory fake callers (NO real network).
+const f18Healthy = async (m) => (m === 'getHealth' ? 'ok' : { 'solana-core': '1.18.0' });
+
+test('F-18 monitor derives health state from REAL F-17 spike results (M1..M32)', async () => {
+  const base17 = f17Base();
+  const spikeHealthy = await evaluateLiveTestnetRpcReadOnlySpike(base17, f18Healthy);
+  const spikeDefault = await evaluateLiveTestnetRpcReadOnlySpike(base17);
+  const spikeFailed = await evaluateLiveTestnetRpcReadOnlySpike(base17, async () => { throw new Error('boom'); });
+  const spikeMainnet = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ environment: 'mainnet' }), f18Healthy);
+
+  // ---- M1..M3: missing/empty input => UNCONFIGURED ----
+  assert.equal(evaluateRpcHealthFromSpike(undefined).health_state, 'UNCONFIGURED', 'M1');
+  assert.equal(evaluateRpcHealthFromSpike(null).health_state, 'UNCONFIGURED', 'M2');
+  assert.equal(evaluateRpcHealthFromSpike({}).health_state, 'UNCONFIGURED', 'M3');
+
+  // ---- M4: authorized but no caller => DEGRADED (caller_unavailable) ----
+  const r4 = evaluateRpcHealthFromSpike(spikeDefault);
+  assert.equal(r4.health_state, 'DEGRADED', 'M4 state');
+  assert.equal(r4.reasons.includes('caller_unavailable'), true, 'M4 reason caller_unavailable');
+
+  // ---- M5: caller threw => DEGRADED ----
+  assert.equal(evaluateRpcHealthFromSpike(spikeFailed).health_state, 'DEGRADED', 'M5');
+
+  // ---- M6: healthy spike => READ_ONLY_HEALTHY, read_only_healthy true ----
+  const r6 = evaluateRpcHealthFromSpike(spikeHealthy);
+  assert.equal(r6.health_state, 'READ_ONLY_HEALTHY', 'M6 state');
+  assert.equal(r6.read_only_healthy, true, 'M6 read_only_healthy');
+
+  // ---- M7: mainnet spike => UNCONFIGURED ----
+  assert.equal(evaluateRpcHealthFromSpike(spikeMainnet).health_state, 'UNCONFIGURED', 'M7');
+
+  // ---- M8: explicit is_stale => READ_ONLY_STALE, read_only_healthy false, stale true ----
+  const r8 = evaluateRpcHealthFromSpike(spikeHealthy, { is_stale: true });
+  assert.equal(r8.health_state, 'READ_ONLY_STALE', 'M8 state');
+  assert.equal(r8.read_only_healthy, false, 'M8 read_only_healthy false');
+  assert.equal(r8.stale, true, 'M8 stale true');
+
+  // ---- M9: age_ms > max_age_ms => READ_ONLY_STALE ----
+  assert.equal(evaluateRpcHealthFromSpike(spikeHealthy, { age_ms: 100, max_age_ms: 10 }).health_state, 'READ_ONLY_STALE', 'M9');
+
+  // ---- M10: age_ms <= max_age_ms => READ_ONLY_HEALTHY ----
+  assert.equal(evaluateRpcHealthFromSpike(spikeHealthy, { age_ms: 5, max_age_ms: 10 }).health_state, 'READ_ONLY_HEALTHY', 'M10');
+
+  // ---- M11..M22: every trading/exec flag fixed false on UNCONFIGURED/DEGRADED/HEALTHY/STALE results ----
+  const FALSE_FLAGS = [
+    'can_send', 'trading_ready', 'broadcast_permitted', 'signing_permitted', 'has_rpc', 'is_live',
+    'real_live', 'routing_ready', 'can_broadcast', 'can_serialize', 'network_call_made',
+  ];
+  const RESULTS_BY_STATE = [
+    evaluateRpcHealthFromSpike(undefined),                                    // UNCONFIGURED
+    r4,                                                                       // DEGRADED
+    r6,                                                                       // READ_ONLY_HEALTHY
+    r8,                                                                       // READ_ONLY_STALE
+  ];
+  for (const res of RESULTS_BY_STATE) {
+    for (const f of FALSE_FLAGS) {
+      assert.equal(res[f], false, `M11..M22 ${res.health_state}.${f} must be false`);
+    }
+  }
+
+  // ---- M23: smuggled can_send:true => UNCONFIGURED (forbidden_trading_indicator_blocked), read_only_healthy false ----
+  const r23 = evaluateRpcHealthFromSpike({ ...spikeHealthy, can_send: true });
+  assert.equal(r23.health_state, 'UNCONFIGURED', 'M23 state');
+  assert.equal(r23.read_only_healthy, false, 'M23 read_only_healthy false');
+  assert.equal(r23.reasons.includes('forbidden_trading_indicator_blocked'), true, 'M23 reason');
+
+  // ---- M24: each smuggled trading/exec indicator => UNCONFIGURED ----
+  for (const f of ['is_live', 'has_rpc', 'broadcast_permitted', 'real_live']) {
+    assert.equal(evaluateRpcHealthFromSpike({ ...spikeHealthy, [f]: true }).health_state, 'UNCONFIGURED', `M24 ${f}`);
+  }
+
+  // ---- M25: non-testnet environment on the result => UNCONFIGURED (mainnet_or_nontestnet_environment_blocked) ----
+  const r25 = evaluateRpcHealthFromSpike({ ...spikeHealthy, environment: 'mainnet' });
+  assert.equal(r25.health_state, 'UNCONFIGURED', 'M25 state');
+  assert.equal(r25.reasons.includes('mainnet_or_nontestnet_environment_blocked'), true, 'M25 reason');
+
+  // ---- M26: non-read-only method on the result => UNCONFIGURED (non_read_only_method_blocked) ----
+  const r26 = evaluateRpcHealthFromSpike({ ...spikeHealthy, rpc_method: 'sendTransaction' });
+  assert.equal(r26.health_state, 'UNCONFIGURED', 'M26 state');
+  assert.equal(r26.reasons.includes('non_read_only_method_blocked'), true, 'M26 reason');
+
+  // ---- M27: NO-ECHO — result never echoes any input value ----
+  const r27 = evaluateRpcHealthFromSpike({ ...spikeHealthy, leaked_endpoint: 'https://secret-rpc.internal', leaked_key: 'SECRET123' });
+  const s27 = JSON.stringify(r27);
+  assert.equal(s27.includes('secret-rpc.internal'), false, 'M27 no leaked endpoint echoed');
+  assert.equal(s27.includes('SECRET123'), false, 'M27 no leaked key echoed');
+
+  // ---- M28: hostile Proxy that throws on get => frozen UNCONFIGURED, NO throw ----
+  const hostile = new Proxy({}, { get() { throw new Error('hostile-get'); } });
+  let r28;
+  assert.doesNotThrow(() => { r28 = evaluateRpcHealthFromSpike(hostile); }, 'M28 must not throw');
+  assert.equal(r28.health_state, 'UNCONFIGURED', 'M28 state');
+  assert.equal(Object.isFrozen(r28), true, 'M28 frozen');
+
+  // ---- M29: validate recognizes a valid F-17 healthy result ----
+  const v29 = validateRpcHealthSpikeResult(spikeHealthy);
+  assert.equal(v29.valid, true, 'M29 valid');
+  assert.equal(v29.recognized, true, 'M29 recognized');
+
+  // ---- M30: validate(undefined) => not recognized, reason no_spike_result ----
+  const v30 = validateRpcHealthSpikeResult(undefined);
+  assert.equal(v30.recognized, false, 'M30 not recognized');
+  assert.equal(v30.reasons.includes('no_spike_result'), true, 'M30 reason no_spike_result');
+
+  // ---- M31: descriptor self-description ----
+  const d = describeRpcHealthMonitorContract();
+  assert.equal(d.health_state, 'UNCONFIGURED', 'M31 health_state');
+  assert.equal(d.can_send, false, 'M31 can_send false');
+  assert.equal(d.trading_ready, false, 'M31 trading_ready false');
+  assert.equal(d.read_only, true, 'M31 read_only true');
+  assert.equal(Object.isFrozen(d), true, 'M31 frozen');
+
+  // ---- M32: every evaluate result is frozen ----
+  for (const res of [
+    evaluateRpcHealthFromSpike(undefined), evaluateRpcHealthFromSpike(null), evaluateRpcHealthFromSpike({}),
+    r4, evaluateRpcHealthFromSpike(spikeFailed), r6, evaluateRpcHealthFromSpike(spikeMainnet),
+    r8, r23, r25, r26, r27, r28,
+  ]) {
+    assert.equal(Object.isFrozen(res), true, `M32 frozen ${res.health_state}`);
+  }
+});
+
+// ---- F-18 static guards ----
+
+test('F-18 (static) src is import-free and F-18 region carries NO network/env/fs/clock mechanism', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const stripped = stripCommentsAndStrings(full);
+  for (const line of stripped.split('\n')) {
+    assert.equal(/^import\s/.test(line), false, `no top-level import: ${line}`);
+  }
+  assert.equal(/\brequire\s*\(/.test(stripped), false, 'no require(');
+  const idx = full.indexOf('E2-F-18');
+  assert.ok(idx !== -1, 'F-18 region marker present');
+  const region = stripCommentsAndStrings(full.slice(idx));
+  assert.equal(/\bfetch\s*\(/.test(region), false, 'no fetch(');
+  assert.equal(/new\s+WebSocket|WebSocket\s*\(/.test(region), false, 'no WebSocket');
+  assert.equal(/new\s+Connection\s*\(/.test(region), false, 'no new Connection(');
+  assert.equal(/sendTransaction/.test(region), false, 'no sendTransaction in F-18 src region');
+  assert.equal(/process\.env/.test(region), false, 'no process.env');
+  assert.equal(/readFileSync|readFile\s*\(/.test(region), false, 'no readFileSync');
+  assert.equal(/node:fs/.test(region), false, 'no node:fs');
+  assert.equal(/\bDate\s*\.\s*now\b/.test(region), false, 'no Date.now (no system clock)');
+  assert.equal(/new\s+Date\b/.test(region), false, 'no new Date (no system clock)');
+});
+
+test('F-18 (static) package.json declares NO dependencies', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false, 'no dependencies');
+  assert.equal('devDependencies' in pkg, false, 'no devDependencies');
+});
+
+test('F-18 (static) NO real endpoint host in src AND NO "can_send: true" anywhere under packages/*/src', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  // No real provider endpoint host literal in the source.
+  for (const host of ['helius-rpc.com', 'mainnet.helius', 'api.mainnet-beta.solana.com', 'rpc.ankr.com', 'quiknode', 'alchemy.com']) {
+    assert.equal(full.includes(host), false, `no real endpoint host ${host}`);
+  }
+  // No 'can_send: true' anywhere under packages/*/src.
+  const PKGS = join(HERE, '..', '..');
+  let offenders = [];
+  for (const pkgName of readdirSync(PKGS)) {
+    let srcDir;
+    try { srcDir = join(PKGS, pkgName, 'src'); readdirSync(srcDir); } catch { continue; }
+    const scan = (dir) => {
+      for (const ent of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, ent.name);
+        if (ent.isDirectory()) { scan(p); continue; }
+        if (!/\.(mjs|js|ts)$/.test(ent.name)) continue;
+        const txt = readFileSync(p, 'utf8');
+        if (/can_send\s*:\s*true/.test(txt)) offenders.push(p);
+      }
+    };
+    scan(srcDir);
+  }
+  assert.deepEqual(offenders, [], `no 'can_send: true' allowed under packages/*/src: ${offenders.join(' | ')}`);
+});

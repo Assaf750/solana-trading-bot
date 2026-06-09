@@ -664,3 +664,91 @@ export interface LiveTestnetRpcReadOnlySpikeResult {
 export function describeLiveTestnetRpcReadOnlySpikeContract(): LiveTestnetRpcReadOnlySpikeDescriptor;
 export function validateLiveTestnetRpcReadOnlySpikeRequest(input?: unknown): LiveTestnetRpcReadOnlySpikeRequestResult;
 export function evaluateLiveTestnetRpcReadOnlySpike(input?: unknown, outOfRepoReadOnlyCaller?: OutOfRepoReadOnlyRpcCaller): Promise<LiveTestnetRpcReadOnlySpikeResult>;
+
+// E2-F-18 — RPC HEALTH MONITOR (read-only health state). Consumes an F-17 spike RESULT; derives a health STATE.
+// Health is NOT trading readiness/routing/send/broadcast/signing; provider failure => DEGRADED/UNCONFIGURED
+// fail-closed; no network/endpoint-resolution; no echo; deterministic staleness (no system clock).
+
+export type RpcHealthState = 'UNCONFIGURED' | 'DEGRADED' | 'READ_ONLY_HEALTHY' | 'READ_ONLY_STALE';
+
+export interface RpcHealthStaleness {
+  readonly age_ms?: number;
+  readonly max_age_ms?: number;
+  readonly is_stale?: boolean;
+}
+
+export interface RpcHealthMonitorDescriptor {
+  readonly contract: 'rpc-health-monitor';
+  readonly version: string;
+  readonly test_only: true;
+  readonly consumes: 'live_testnet_rpc_read_only_spike_result';
+  readonly supported_health_states: readonly RpcHealthState[];
+  readonly read_only: true;
+  readonly health_is_not_trading_readiness: true;
+  readonly health_state: RpcHealthState;
+  readonly read_only_healthy: false;
+  readonly stale: false;
+  readonly status: string;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+  readonly note: string;
+}
+
+export interface RpcHealthSpikeResultValidation {
+  readonly valid: boolean;
+  readonly recognized: boolean;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+}
+
+export interface RpcHealthResult {
+  readonly valid: boolean;
+  readonly health_state: RpcHealthState;
+  readonly read_only_healthy: boolean;
+  readonly stale: boolean;
+  readonly status: RpcHealthState;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly routing_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+}
+
+export function describeRpcHealthMonitorContract(): RpcHealthMonitorDescriptor;
+export function validateRpcHealthSpikeResult(spikeResult?: unknown): RpcHealthSpikeResultValidation;
+export function evaluateRpcHealthFromSpike(spikeResult?: unknown, staleness?: RpcHealthStaleness): RpcHealthResult;
