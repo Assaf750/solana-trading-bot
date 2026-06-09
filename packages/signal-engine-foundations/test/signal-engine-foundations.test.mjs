@@ -15,7 +15,13 @@ import {
   evaluateWalletLedCandidateSignal,
   describeTokenActivityCandidateSignalContract,
   validateTokenActivitySignalInput,
-  evaluateTokenActivityCandidateSignal
+  evaluateTokenActivityCandidateSignal,
+  describeCandidateSignalScoringContract,
+  evaluateCandidateSignalScore,
+  describeSignalSuppressionContract,
+  evaluateSignalSuppression,
+  describeSignalHealthContract,
+  evaluateSignalHealth
 } from '../src/index.mjs';
 
 import {
@@ -517,6 +523,361 @@ test('G3 token-activity descriptor frozen, read-only, candidate not valid by def
   assert.equal(d.trading_ready, false);
   assert.equal(d.candidate_signal_valid, false);
   assert.equal(d.signal_kind, 'token_activity_candidate');
+});
+
+// ===========================================================================
+// PRIOR SIGNAL RESULTS (REAL Part C/D/E outputs over REAL Stage-5 intelligence)
+// ===========================================================================
+
+const walletLedCandidate = evaluateWalletLedCandidateSignal(walletLedInputGood);   // WALLET_LED_CANDIDATE
+const tokenActivityCandidate = evaluateTokenActivityCandidateSignal(tokenActivityInputGood); // TOKEN_ACTIVITY_CANDIDATE
+const boundaryValid = evaluateSignalInputBoundary(boundaryInputGood);              // SIGNAL_INPUT_VALID
+const walletLedSuppressed = evaluateWalletLedCandidateSignal({ purpose: 'wallet_led_signal_input', wallet_observation: wEmpty }); // WALLET_LED_SUPPRESSED
+
+// sanity: the prior results are what we expect
+test('PRIOR sanity: candidate / boundary / suppressed states', () => {
+  assert.equal(walletLedCandidate.candidate_signal_state, 'WALLET_LED_CANDIDATE');
+  assert.equal(tokenActivityCandidate.candidate_signal_state, 'TOKEN_ACTIVITY_CANDIDATE');
+  assert.equal(boundaryValid.signal_input_state, 'SIGNAL_INPUT_VALID');
+  assert.equal(walletLedSuppressed.candidate_signal_state, 'WALLET_LED_SUPPRESSED');
+});
+
+// ===========================================================================
+// (F) CANDIDATE SIGNAL SCORING / EXPLANATION  (F1..F12)
+// ===========================================================================
+
+const EXPLANATION_ALLOWLIST = new Set([
+  'wallet_led_candidate_present', 'token_activity_candidate_present',
+  'multiple_candidates_present', 'relationship_supported',
+  'sufficient_observation_density', 'no_candidates_present'
+]);
+const SUPPRESSION_ALLOWLIST = new Set([
+  'insufficient_observations', 'missing_wallet_context', 'missing_token_context',
+  'relationship_not_observed', 'diagnostic_only', 'not_risk_checked',
+  'not_intent_authorized', 'not_execution_authorized'
+]);
+
+test('F1 no candidate signals -> score_bucket none', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [] });
+  assert.equal(r.score_bucket, 'none');
+  assert.ok(r.explanation_codes.includes('no_candidates_present'));
+  assertAllExecFlagsFalse(r);
+});
+
+test('F2 undefined / missing input -> UNCONFIGURED none', () => {
+  const r = evaluateCandidateSignalScore(undefined);
+  assert.equal(r.signal_score_state, 'SIGNAL_SCORE_UNCONFIGURED');
+  assert.equal(r.score_bucket, 'none');
+  assert.equal(r.score_valid, false);
+});
+
+test('F3 suppressed candidates only -> low/none + suppression_reasons', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedSuppressed] });
+  assert.ok(['low', 'none'].includes(r.score_bucket));
+  assert.equal(r.signal_score_state, 'SIGNAL_SCORE_SUPPRESSED');
+  assert.ok(r.suppression_reasons.includes('insufficient_observations'));
+  for (const c of r.suppression_reasons) assert.ok(SUPPRESSION_ALLOWLIST.has(c), `supp ${c} allowlisted`);
+  assertAllExecFlagsFalse(r);
+});
+
+test('F4 valid multiple candidates -> a bucket only', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate, tokenActivityCandidate], boundary: boundaryValid });
+  assert.equal(r.score_valid, true);
+  assert.ok(['low', 'medium', 'high'].includes(r.score_bucket));
+  assert.ok(r.explanation_codes.includes('multiple_candidates_present'));
+  assert.ok(r.explanation_codes.includes('wallet_led_candidate_present'));
+  assert.ok(r.explanation_codes.includes('token_activity_candidate_present'));
+  for (const c of r.explanation_codes) assert.ok(EXPLANATION_ALLOWLIST.has(c), `expl ${c} allowlisted`);
+});
+
+test('F5 high bucket opens NO trading_ready/intent_ready/route/can_send', () => {
+  // force a high bucket: >=2 valid candidates with a high confidence_bucket
+  const denseWallet = evaluateWalletObservationIntelligence({
+    purpose: 'wallet_observation_input', wallet_ref: 'w-1',
+    events: Array.from({ length: 10 }, (_, i) => mk('swap_observed', 'e' + i, 'w-1', 't-1')), read_only: true
+  });
+  const denseToken = evaluateTokenObservationIntelligence({
+    purpose: 'token_observation_input', token_ref: 't-1',
+    events: Array.from({ length: 10 }, (_, i) => mk('swap_observed', 'e' + i, 'w-' + (i % 3), 't-1')), read_only: true
+  });
+  const wlDense = evaluateWalletLedCandidateSignal({ purpose: 'wallet_led_signal_input', wallet_observation: denseWallet, relationship: rOk });
+  const taDense = evaluateTokenActivityCandidateSignal({ purpose: 'token_activity_signal_input', token_observation: denseToken, relationship: rOk });
+  assert.equal(wlDense.confidence_bucket, 'high');
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [wlDense, taDense], boundary: boundaryValid });
+  assert.equal(r.score_bucket, 'high');
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.signal_ready, false);
+  assertAllExecFlagsFalse(r);
+});
+
+test('F6 score result carries NO trade size/slippage/stop-loss/order field', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate], boundary: boundaryValid });
+  for (const k of ['size', 'amount', 'slippage', 'stop_loss', 'order', 'price', 'quantity', 'lamports', 'sol']) {
+    assert.ok(!(k in r), `score must not carry ${k}`);
+  }
+  assert.equal(typeof r.score_bucket, 'string');
+});
+
+test('F7 smuggled forbidden trading flag -> fail-closed INVALID, not echoed', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate], trading_ready: true });
+  assert.equal(r.signal_score_state, 'SIGNAL_SCORE_INVALID');
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.score_valid, false);
+});
+
+test('F8 smuggled exec key / secret -> INVALID, not echoed', () => {
+  const rk = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate], buy_opportunity: true });
+  assert.equal(rk.signal_score_state, 'SIGNAL_SCORE_INVALID');
+  const rs = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate], api_key: 'SECRET123' });
+  assert.equal(rs.signal_score_state, 'SIGNAL_SCORE_INVALID');
+  assert.ok(!JSON.stringify(rs).includes('SECRET123'));
+});
+
+test('F9 candidate with smuggled forbidden flag -> fail-closed INVALID', () => {
+  const hostileCandidate = { ...walletLedCandidate, trading_ready: true };
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [hostileCandidate] });
+  assert.equal(r.signal_score_state, 'SIGNAL_SCORE_INVALID');
+  assert.equal(r.trading_ready, false);
+});
+
+test('F10 wrong purpose -> INVALID', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'nope', candidate_signals: [walletLedCandidate] });
+  assert.equal(r.signal_score_state, 'SIGNAL_SCORE_INVALID');
+});
+
+test('F11 hostile Proxy -> frozen UNCONFIGURED, no throw', () => {
+  for (const p of [hostileThrowProxy(), hostileFnProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateCandidateSignalScore(p); });
+    assert.equal(r.signal_score_state, 'SIGNAL_SCORE_UNCONFIGURED');
+    assert.ok(Object.isFrozen(r));
+    assertAllExecFlagsFalse(r);
+  }
+});
+
+test('F12 single valid candidate -> low/medium bucket, descriptive only', () => {
+  const r = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate], boundary: boundaryValid });
+  assert.equal(r.score_valid, true);
+  assert.ok(['low', 'medium'].includes(r.score_bucket));
+  assert.ok(r.explanation_codes.includes('wallet_led_candidate_present'));
+  assert.ok(Object.isFrozen(r));
+});
+
+// ===========================================================================
+// (H... actually G) SIGNAL SUPPRESSION / REJECTION  (SU1..SU11)
+// ===========================================================================
+
+const SUPP_BASELINE = ['not_risk_checked', 'not_intent_authorized', 'not_execution_authorized'];
+
+test('SU1 missing wallet context -> suppressed + missing_wallet_context', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: tokenActivityCandidate, token_observation: tOk });
+  assert.equal(r.suppressed, true);
+  assert.ok(r.suppression_reasons.includes('missing_wallet_context'));
+});
+
+test('SU2 missing token context -> suppressed + missing_token_context', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedCandidate, wallet_observation: wOk });
+  assert.equal(r.suppressed, true);
+  assert.ok(r.suppression_reasons.includes('missing_token_context'));
+});
+
+test('SU3 diagnostic-only input (no candidate) -> suppressed + diagnostic_only', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', wallet_observation: wOk, token_observation: tOk });
+  assert.equal(r.suppressed, true);
+  assert.ok(r.suppression_reasons.includes('diagnostic_only'));
+});
+
+test('SU4 no risk check -> suppressed (not_risk_checked always present when emitting)', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedSuppressed, wallet_observation: wEmpty });
+  assert.equal(r.suppressed, true);
+  for (const b of SUPP_BASELINE) assert.ok(r.suppression_reasons.includes(b), `${b} present`);
+});
+
+test('SU5 suppression opens NO risk_ready/intent_ready/trading_ready', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedSuppressed });
+  assert.equal(r.risk_ready, false);
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.trading_ready, false);
+  assertAllExecFlagsFalse(r);
+});
+
+test('SU6 valid candidate + full context -> NOT_SUPPRESSED but baseline still present', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedCandidate, wallet_observation: wOk, token_observation: tOk, relationship: rOk });
+  assert.equal(r.suppressed, false);
+  assert.equal(r.signal_suppression_state, 'SIGNAL_SUPPRESSION_NOT_SUPPRESSED');
+  for (const b of SUPP_BASELINE) assert.ok(r.suppression_reasons.includes(b), `${b} present`);
+  assertAllExecFlagsFalse(r);
+});
+
+test('SU7 suppression_reasons all in allowlist', () => {
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: tokenActivityCandidate, token_observation: tOk });
+  for (const c of r.suppression_reasons) assert.ok(SUPPRESSION_ALLOWLIST.has(c), `supp ${c} allowlisted`);
+});
+
+test('SU8 smuggled forbidden flag / secret / mainnet -> INVALID, not echoed, suppressed', () => {
+  const rf = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedCandidate, trading_ready: true });
+  assert.equal(rf.signal_suppression_state, 'SIGNAL_SUPPRESSION_INVALID');
+  assert.equal(rf.suppressed, true);
+  assert.equal(rf.trading_ready, false);
+  const rs = evaluateSignalSuppression({ purpose: 'signal_suppression_input', api_key: 'SECRET123' });
+  assert.ok(!JSON.stringify(rs).includes('SECRET123'));
+  const rm = evaluateSignalSuppression({ purpose: 'signal_suppression_input', network: 'mainnet-beta' });
+  assert.equal(rm.signal_suppression_state, 'SIGNAL_SUPPRESSION_INVALID');
+});
+
+test('SU9 candidate carrying a smuggled exec key -> INVALID', () => {
+  const hostileCandidate = { ...tokenActivityCandidate, buy_opportunity: true };
+  const r = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: hostileCandidate, token_observation: tOk });
+  assert.equal(r.signal_suppression_state, 'SIGNAL_SUPPRESSION_INVALID');
+});
+
+test('SU10 hostile Proxy -> frozen, no throw, suppressed', () => {
+  for (const p of [hostileThrowProxy(), hostileFnProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSignalSuppression(p); });
+    assert.ok(Object.isFrozen(r));
+    assert.equal(r.suppressed, true);
+    assertAllExecFlagsFalse(r);
+  }
+});
+
+test('SU11 undefined input -> suppressed UNCONFIGURED', () => {
+  const r = evaluateSignalSuppression(undefined);
+  assert.equal(r.signal_suppression_state, 'SIGNAL_SUPPRESSION_UNCONFIGURED');
+  assert.equal(r.suppressed, true);
+});
+
+// ===========================================================================
+// (H) SIGNAL HEALTH / STATUS  (HE1..HE12)
+// ===========================================================================
+
+const scoreDescribed = evaluateCandidateSignalScore({ purpose: 'candidate_signal_score_input', candidate_signals: [walletLedCandidate, tokenActivityCandidate], boundary: boundaryValid });
+const suppNotSuppressed = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: walletLedCandidate, wallet_observation: wOk, token_observation: tOk, relationship: rOk });
+const suppSuppressed = evaluateSignalSuppression({ purpose: 'signal_suppression_input', candidate_signal: tokenActivityCandidate, token_observation: tOk });
+
+test('HE1 missing components -> UNCONFIGURED', () => {
+  const r = evaluateSignalHealth({ candidate_signals: [walletLedCandidate] });
+  assert.equal(r.signal_state, 'SIGNAL_UNCONFIGURED');
+});
+
+test('HE2 undefined -> UNCONFIGURED', () => {
+  assert.equal(evaluateSignalHealth(undefined).signal_state, 'SIGNAL_UNCONFIGURED');
+});
+
+test('HE3 invalid input boundary -> BLOCKED', () => {
+  const boundaryInvalid = evaluateSignalInputBoundary({ ...boundaryInputGood, buy_opportunity: true });
+  assert.equal(boundaryInvalid.signal_input_state, 'SIGNAL_INPUT_INVALID');
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryInvalid, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_BLOCKED');
+  assert.equal(r.valid, false);
+});
+
+test('HE4 suppressed signals -> SUPPRESSED', () => {
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [tokenActivityCandidate], score: scoreDescribed, suppression: suppSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_SUPPRESSED');
+});
+
+test('HE5 all candidates suppressed -> SUPPRESSED', () => {
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedSuppressed], score: scoreDescribed, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_SUPPRESSED');
+});
+
+test('HE6 valid candidates -> READY_ADVISORY advisory only', () => {
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate, tokenActivityCandidate], score: scoreDescribed, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_READY_ADVISORY');
+  assert.equal(r.signal_ready_advisory, true);
+  assert.equal(r.valid, true);
+  assert.equal(r.advisory_only, true);
+  // READY_ADVISORY is NOT trading/risk/intent/routing readiness
+  assert.equal(r.signal_ready, false);
+  assertAllExecFlagsFalse(r);
+});
+
+test('HE7 smuggled risk/intent/routing/trading flags (top-level) -> BLOCKED', () => {
+  for (const k of ['trading_ready', 'risk_ready', 'intent_ready', 'routing_ready', 'can_send']) {
+    const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed, [k]: true });
+    assert.equal(r.signal_state, 'SIGNAL_BLOCKED', `key ${k} must block`);
+    assert.equal(r[k], false, `smuggled ${k} must never surface true`);
+  }
+});
+
+test('HE8 smuggled flag inside a component -> BLOCKED', () => {
+  const hostileScore = { ...scoreDescribed, trading_ready: true };
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate], score: hostileScore, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_BLOCKED');
+});
+
+test('HE9 secret / mainnet / REAL-LIVE -> BLOCKED, not echoed', () => {
+  const rs = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed, api_key: 'SECRET123' });
+  assert.equal(rs.signal_state, 'SIGNAL_BLOCKED');
+  assert.ok(!JSON.stringify(rs).includes('SECRET123'));
+  const rm = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed, network: 'mainnet-beta' });
+  assert.equal(rm.signal_state, 'SIGNAL_BLOCKED');
+  const rl = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed, env: 'REAL-LIVE-prod' });
+  assert.equal(rl.signal_state, 'SIGNAL_BLOCKED');
+});
+
+test('HE10 candidate carrying smuggled flag -> BLOCKED', () => {
+  const hostileCandidate = { ...walletLedCandidate, can_send: true };
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryValid, candidate_signals: [hostileCandidate], score: scoreDescribed, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_BLOCKED');
+  assert.equal(r.can_send, false);
+});
+
+test('HE11 degraded (boundary not valid but recognized) -> DEGRADED', () => {
+  const hDeg = evaluateIntelligenceHealth({ wallet_observation: wEmpty, token_observation: tOk, relationship: rOk, diagnostics: dOk });
+  const boundaryDeg = evaluateSignalInputBoundary({ ...boundaryInputGood, wallet_observation: wEmpty, intelligence_health: hDeg });
+  assert.equal(boundaryDeg.signal_input_state, 'SIGNAL_INPUT_DEGRADED');
+  const r = evaluateSignalHealth({ signal_input_boundary: boundaryDeg, candidate_signals: [walletLedCandidate], score: scoreDescribed, suppression: suppNotSuppressed });
+  assert.equal(r.signal_state, 'SIGNAL_DEGRADED');
+});
+
+test('HE12 hostile Proxy -> frozen UNCONFIGURED, no throw', () => {
+  for (const p of [hostileThrowProxy(), hostileFnProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSignalHealth(p); });
+    assert.equal(r.signal_state, 'SIGNAL_UNCONFIGURED');
+    assert.ok(Object.isFrozen(r));
+    assertAllExecFlagsFalse(r);
+  }
+});
+
+// ===========================================================================
+// DESCRIPTORS for F/G/H  (GD1..GD3)
+// ===========================================================================
+
+test('GD1 candidate-signal-scoring descriptor frozen, read-only, no exec', () => {
+  const d = describeCandidateSignalScoringContract();
+  assert.ok(Object.isFrozen(d));
+  assert.equal(d.read_only, true);
+  assert.equal(d.advisory_only, true);
+  assert.equal(d.signal_ready, false);
+  assert.equal(d.trading_ready, false);
+  assert.equal(d.score_valid, false);
+  assert.equal(d.score_bucket, 'none');
+});
+
+test('GD2 signal-suppression descriptor frozen, read-only, not a risk engine', () => {
+  const d = describeSignalSuppressionContract();
+  assert.ok(Object.isFrozen(d));
+  assert.equal(d.read_only, true);
+  assert.equal(d.advisory_only, true);
+  assert.equal(d.risk_ready, false);
+  assert.equal(d.intent_ready, false);
+  assert.equal(d.suppressed, false);
+});
+
+test('GD3 signal-health descriptor frozen, read-only, advisory only', () => {
+  const d = describeSignalHealthContract();
+  assert.ok(Object.isFrozen(d));
+  assert.equal(d.read_only, true);
+  assert.equal(d.advisory_only, true);
+  assert.equal(d.signal_ready, false);
+  assert.equal(d.signal_ready_advisory, false);
+  assert.equal(d.signal_state, 'SIGNAL_UNCONFIGURED');
 });
 
 // ===========================================================================

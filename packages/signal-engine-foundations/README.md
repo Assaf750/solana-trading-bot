@@ -64,6 +64,52 @@ the result; the output keeps all flags false. `reason_codes` allowlist only
 `TOKEN_ACTIVITY_UNCONFIGURED`, `TOKEN_ACTIVITY_INVALID`,
 `TOKEN_ACTIVITY_SUPPRESSED`, `TOKEN_ACTIVITY_CANDIDATE`.
 
+## (F) Candidate Signal Scoring / Explanation (read-only, advisory)
+
+`evaluateCandidateSignalScore` aggregates Stage-6 candidate signal RESULTS (Part
+D/E outputs, with an optional `boundary`) into a DESCRIPTIVE `score_bucket`
+(`none`/`low`/`medium`/`high`). The bucket is derived ONLY from how many valid
+candidates exist and their `confidence_bucket` — it is NEVER a trade size,
+slippage, stop-loss, order, or numeric trading score, and the result carries no
+size/slippage/order field. It opens NO execution authority: even
+`score_bucket='high'` keeps `signal_ready` / `trading_ready` / `intent_ready` /
+`routing_ready` / `can_send` `false`. No candidates -> `'none'`; suppressed/invalid
+candidates with none valid -> `'low'` or `'none'` plus `suppression_reasons`.
+`explanation_codes` allowlist only (`wallet_led_candidate_present`,
+`token_activity_candidate_present`, `multiple_candidates_present`,
+`relationship_supported`, `sufficient_observation_density`,
+`no_candidates_present`); `suppression_reasons` reuse the Part G allowlist. States:
+`SIGNAL_SCORE_UNCONFIGURED`, `SIGNAL_SCORE_INVALID`, `SIGNAL_SCORE_SUPPRESSED`,
+`SIGNAL_SCORE_DESCRIBED`.
+
+## (G) Signal Suppression / Rejection (read-only, advisory)
+
+`evaluateSignalSuppression` prevents insufficient candidates from appearing ready
+by emitting suppression REASONS only. It is **NOT a risk engine** — suppression
+happens BEFORE risk and opens NO `risk_ready` / `intent_ready` / `trading_ready`
+(all stay `false`). `suppression_reasons` is drawn from a fixed allowlist ONLY:
+`insufficient_observations`, `missing_wallet_context`, `missing_token_context`,
+`relationship_not_observed`, `diagnostic_only`, `not_risk_checked`,
+`not_intent_authorized`, `not_execution_authorized`. Whenever reasons are emitted,
+`not_risk_checked` + `not_intent_authorized` + `not_execution_authorized` are
+ALWAYS included — a signal is never risk-checked, intent-authorized, or
+execution-authorized at this layer. Missing wallet context -> suppressed +
+`missing_wallet_context`; missing token context -> suppressed +
+`missing_token_context`; diagnostic-only input -> suppressed + `diagnostic_only`.
+
+## (H) Signal Health / Status (read-only, advisory)
+
+`evaluateSignalHealth` consumes `{ signal_input_boundary, candidate_signals[],
+score, suppression }` and derives a status ONLY. Ordering: a smuggled forbidden
+trading flag / secret / mainnet / REAL-LIVE in any component, or an invalid
+signal-input boundary (`SIGNAL_INPUT_INVALID`), -> `SIGNAL_BLOCKED`; a missing
+required component -> `SIGNAL_UNCONFIGURED`; `suppression.suppressed === true` or
+all candidates suppressed -> `SIGNAL_SUPPRESSED`; boundary `SIGNAL_INPUT_VALID` +
+>=1 valid candidate + score not `'none'` + not suppressed ->
+`SIGNAL_READY_ADVISORY`; else `SIGNAL_DEGRADED`. `SIGNAL_READY_ADVISORY` is
+ADVISORY read-only ONLY — NOT trading / risk / intent / routing readiness — and
+`signal_ready` plus every execution flag STAY `false` in every state.
+
 ## Naming note
 
 All identifiers exported here (states, reason codes, contract names) are local

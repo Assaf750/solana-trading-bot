@@ -164,3 +164,114 @@ export interface TokenActivityCandidateSignalResult extends SigSafeFlags {
 export function describeTokenActivityCandidateSignalContract(): TokenActivityCandidateSignalContractDescriptor;
 export function validateTokenActivitySignalInput(input: unknown): TokenActivitySignalValidationResult;
 export function evaluateTokenActivityCandidateSignal(input: unknown): TokenActivityCandidateSignalResult;
+
+// --- (F) Candidate Signal Scoring / Explanation ---
+
+export type SignalScoreBucket = 'none' | 'low' | 'medium' | 'high';
+
+export type SignalScoreState =
+  | 'SIGNAL_SCORE_UNCONFIGURED'
+  | 'SIGNAL_SCORE_INVALID'
+  | 'SIGNAL_SCORE_SUPPRESSED'
+  | 'SIGNAL_SCORE_DESCRIBED';
+
+export interface CandidateSignalScoringContractDescriptor extends SigSafeFlags {
+  contract: 'candidate-signal-scoring';
+  version: string;
+  test_only: true;
+  supported_states: readonly SignalScoreState[];
+  supported_score_buckets: readonly SignalScoreBucket[];
+  supported_explanation_codes: readonly string[];
+  supported_suppression_reasons: readonly string[];
+  advisory_only: true;
+  score_valid: boolean;
+  score_bucket: SignalScoreBucket;
+  explanation_codes: readonly string[];
+  suppression_reasons: readonly string[];
+  status: SignalScoreState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface CandidateSignalScoreResult extends SigSafeFlags {
+  score_valid: boolean;
+  score_bucket: SignalScoreBucket;
+  signal_score_state: SignalScoreState;
+  explanation_codes: readonly string[];
+  suppression_reasons: readonly string[];
+  status: SignalScoreState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeCandidateSignalScoringContract(): CandidateSignalScoringContractDescriptor;
+export function evaluateCandidateSignalScore(input: unknown): CandidateSignalScoreResult;
+
+// --- (G) Signal Suppression / Rejection ---
+
+export type SignalSuppressionState =
+  | 'SIGNAL_SUPPRESSION_UNCONFIGURED'
+  | 'SIGNAL_SUPPRESSION_INVALID'
+  | 'SIGNAL_SUPPRESSION_SUPPRESSED'
+  | 'SIGNAL_SUPPRESSION_NOT_SUPPRESSED';
+
+export interface SignalSuppressionContractDescriptor extends SigSafeFlags {
+  contract: 'signal-suppression';
+  version: string;
+  test_only: true;
+  supported_states: readonly SignalSuppressionState[];
+  supported_suppression_reasons: readonly string[];
+  advisory_only: true;
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: SignalSuppressionState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface SignalSuppressionResult extends SigSafeFlags {
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  signal_suppression_state: SignalSuppressionState;
+  status: SignalSuppressionState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeSignalSuppressionContract(): SignalSuppressionContractDescriptor;
+export function evaluateSignalSuppression(input: unknown): SignalSuppressionResult;
+
+// --- (H) Signal Health / Status ---
+
+export type SignalHealthState =
+  | 'SIGNAL_UNCONFIGURED'
+  | 'SIGNAL_DEGRADED'
+  | 'SIGNAL_READY_ADVISORY'
+  | 'SIGNAL_SUPPRESSED'
+  | 'SIGNAL_BLOCKED';
+
+export interface SignalHealthContractDescriptor extends SigSafeFlags {
+  contract: 'signal-health';
+  version: string;
+  test_only: true;
+  supported_states: readonly SignalHealthState[];
+  advisory_only: true;
+  valid: boolean;
+  signal_state: SignalHealthState;
+  signal_ready_advisory: boolean;
+  status: SignalHealthState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface SignalHealthResult extends SigSafeFlags {
+  valid: boolean;
+  signal_state: SignalHealthState;
+  signal_ready_advisory: boolean;
+  status: SignalHealthState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeSignalHealthContract(): SignalHealthContractDescriptor;
+export function evaluateSignalHealth(inputs: unknown): SignalHealthResult;
