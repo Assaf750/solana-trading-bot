@@ -921,3 +921,742 @@ export function evaluateCandidateTransactionBuildDescriptor(input) {
     return build('CANDIDATE_TX_BUILD_UNCONFIGURED', ['input_inspection_error'], null);
   }
 }
+
+// Recognize a Stage-10 (E) candidate-tx-build-descriptor result fed forward.
+function txRecognizeDescriptorResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.candidate_tx_build_state === 'string' && CANDIDATE_TX_BUILD_STATES.includes(o.candidate_tx_build_state)) {
+    return o.candidate_tx_build_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (F) ACCOUNT / INSTRUCTION / COMPUTE BUDGET ADVISORY
+//
+// A read-only ADVISORY over safe input buckets ONLY. It performs NO transaction
+// build, NO serialization, NO message bytes, NO signing, NO send. An ACCEPTABLE
+// advisory opens NO transaction/serialize/sign/send/trading readiness — every
+// readiness/execution/serialization flag STAYS false. No transaction / message /
+// instruction output field ever appears. Fail-Safe-Not-Fail-Open: invalid enum
+// -> INVALID; missing bucket -> UNCONFIGURED; over-threshold -> REJECTED; any
+// unknown / compute high -> DEGRADED.
+// ---------------------------------------------------------------------------
+
+const TX_BUILD_RESOURCE_STATES = Object.freeze([
+  'TX_BUILD_RESOURCE_UNCONFIGURED', 'TX_BUILD_RESOURCE_INVALID',
+  'TX_BUILD_RESOURCE_DEGRADED', 'TX_BUILD_RESOURCE_REJECTED',
+  'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY'
+]);
+
+const TX_BUILD_RESOURCE_REASON_CODES = Object.freeze([
+  'account_count_unknown', 'account_count_too_high',
+  'instruction_count_unknown', 'instruction_count_too_high',
+  'compute_unit_unknown', 'compute_unit_high', 'compute_unit_too_high',
+  'transaction_size_unknown', 'transaction_size_too_large',
+  'lookup_table_unknown', 'lookup_table_required_unresolved',
+  'tx_build_resource_acceptable'
+]);
+
+const TX_BUILD_RESOURCE_TOP_KEYS = Object.freeze([
+  'purpose', 'account_count_bucket', 'instruction_count_bucket',
+  'compute_unit_bucket', 'transaction_size_bucket', 'lookup_table_bucket'
+]);
+
+export function describeTransactionBuildResourceAdvisoryContract() {
+  return Object.freeze({
+    contract: 'transaction-build-resource-advisory',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: TX_BUILD_RESOURCE_STATES,
+    supported_reason_codes: TX_BUILD_RESOURCE_REASON_CODES,
+    advisory_only: true,
+    valid: false,
+    tx_build_resource_state: 'TX_BUILD_RESOURCE_UNCONFIGURED',
+    tx_build_resource_acceptable_advisory: false,
+    tx_build_rejected: false,
+    tx_build_reason_codes: Object.freeze([]),
+    status: 'TX_BUILD_RESOURCE_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...txSafeFlags(),
+    note: 'Read-only ACCOUNT / INSTRUCTION / COMPUTE BUDGET advisory derived from safe input buckets ONLY (account_count_bucket / instruction_count_bucket / compute_unit_bucket in unknown|low|medium|high|too_high; transaction_size_bucket in unknown|small|medium|large|too_large; lookup_table_bucket in unknown|not_needed|maybe_needed|required_unresolved). It performs NO transaction build, NO serialization, NO message bytes, NO signing, NO send, NO live quote/route call. An ACCEPTABLE advisory (TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY) opens NO transaction/serialize/sign/send/trading readiness — transaction_ready / serialized_ready / message_bytes_ready / signing_permitted / can_serialize / can_send STAY false; no transaction / message / instruction output field ever appears. Fail-Safe-Not-Fail-Open: any invalid enum -> TX_BUILD_RESOURCE_INVALID; any missing bucket -> TX_BUILD_RESOURCE_UNCONFIGURED; REJECTED if account too_high OR instruction too_high OR compute too_high OR transaction_size too_large OR lookup_table required_unresolved; DEGRADED if any bucket unknown OR compute high (and no rejection); ACCEPTABLE_ADVISORY only if all buckets in the acceptable range (account/instruction low/medium/high; compute low/medium; size small/medium/large; lookup not_needed/maybe_needed). Smuggled trading/transaction/serialize/sign/send flags or commands, secrets, endpoints, mainnet/REAL-LIVE markers are refused and never echoed.'
+  });
+}
+
+export function validateTransactionBuildResourceAdvisoryInput(input) {
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (txUninspectable(obj, [...TX_BUILD_RESOURCE_TOP_KEYS])) {
+      return Object.freeze({
+        valid: false, recognized: false,
+        reasons: Object.freeze(['input_inspection_error']),
+        ...txSafeFlags()
+      });
+    }
+    const reasons = [];
+    let recognized = false;
+    if (!obj) {
+      reasons.push('no_tx_build_resource_input');
+    } else {
+      recognized = true;
+      reasons.push(...txScreen(obj));
+      if (candidateTxBuildHasForbiddenKey(obj)) reasons.push('forbidden_execution_field_blocked');
+      if (obj.purpose !== 'tx_build_resource_advisory_input') reasons.push('purpose_invalid');
+    }
+    const unique = [...new Set(reasons)];
+    const valid = recognized && unique.length === 0;
+    return Object.freeze({
+      valid, recognized,
+      reasons: Object.freeze([...unique]),
+      ...txSafeFlags()
+    });
+  } catch {
+    return Object.freeze({
+      valid: false, recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...txSafeFlags()
+    });
+  }
+}
+
+export function evaluateTransactionBuildResourceAdvisory(input) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'TX_BUILD_RESOURCE_INVALID'),
+    tx_build_resource_state: state,
+    tx_build_resource_acceptable_advisory: (state === 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY'),
+    tx_build_rejected: (state === 'TX_BUILD_RESOURCE_REJECTED'),
+    tx_build_reason_codes: Object.freeze(
+      [...new Set((reasons || []).filter((c) => TX_BUILD_RESOURCE_REASON_CODES.includes(c)))]
+    ),
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...txSafeFlags()
+  });
+  try {
+    const v = validateTransactionBuildResourceAdvisoryInput(input);
+    if (!v.recognized || v.reasons.includes('input_inspection_error')) {
+      return build('TX_BUILD_RESOURCE_UNCONFIGURED', v.reasons.length ? v.reasons : ['no_tx_build_resource_input']);
+    }
+    // smuggled forbidden flag / exec cmd / secret / endpoint / mainnet / forbidden
+    // key / bad purpose -> INVALID (never echoed)
+    if (v.reasons.includes('forbidden_trading_indicator_blocked') ||
+        v.reasons.includes('execution_command_blocked') ||
+        v.reasons.includes('forbidden_execution_field_blocked') ||
+        v.reasons.includes('secret_field_blocked') ||
+        v.reasons.includes('endpoint_or_mainnet_blocked') ||
+        v.reasons.includes('purpose_invalid')) {
+      return build('TX_BUILD_RESOURCE_INVALID', ['tx_build_resource_input_invalid']);
+    }
+
+    const acct = input.account_count_bucket;
+    const instr = input.instruction_count_bucket;
+    const compute = input.compute_unit_bucket;
+    const size = input.transaction_size_bucket;
+    const lookup = input.lookup_table_bucket;
+
+    // missing bucket -> UNCONFIGURED
+    if (acct == null || instr == null || compute == null || size == null || lookup == null) {
+      return build('TX_BUILD_RESOURCE_UNCONFIGURED', ['tx_build_resource_bucket_missing']);
+    }
+
+    // invalid enum -> INVALID (reuse the existing spec-canonical bucket enums)
+    if (!CANDIDATE_TX_BUILD_ACCOUNT_BUCKETS.includes(acct) ||
+        !CANDIDATE_TX_BUILD_INSTRUCTION_BUCKETS.includes(instr) ||
+        !CANDIDATE_TX_BUILD_COMPUTE_BUCKETS.includes(compute) ||
+        !CANDIDATE_TX_BUILD_SIZE_BUCKETS.includes(size) ||
+        !CANDIDATE_TX_BUILD_LOOKUP_BUCKETS.includes(lookup)) {
+      return build('TX_BUILD_RESOURCE_INVALID', ['tx_build_resource_input_invalid']);
+    }
+
+    // Fail-Safe: over-threshold -> REJECTED
+    const rejectCodes = [];
+    if (acct === 'too_high') rejectCodes.push('account_count_too_high');
+    if (instr === 'too_high') rejectCodes.push('instruction_count_too_high');
+    if (compute === 'too_high') rejectCodes.push('compute_unit_too_high');
+    if (size === 'too_large') rejectCodes.push('transaction_size_too_large');
+    if (lookup === 'required_unresolved') rejectCodes.push('lookup_table_required_unresolved');
+    if (rejectCodes.length > 0) {
+      return build('TX_BUILD_RESOURCE_REJECTED', rejectCodes);
+    }
+
+    // Fail-Safe: any unknown OR compute high -> DEGRADED
+    const degradeCodes = [];
+    if (acct === 'unknown') degradeCodes.push('account_count_unknown');
+    if (instr === 'unknown') degradeCodes.push('instruction_count_unknown');
+    if (compute === 'unknown') degradeCodes.push('compute_unit_unknown');
+    if (size === 'unknown') degradeCodes.push('transaction_size_unknown');
+    if (lookup === 'unknown') degradeCodes.push('lookup_table_unknown');
+    if (compute === 'high') degradeCodes.push('compute_unit_high');
+    if (degradeCodes.length > 0) {
+      return build('TX_BUILD_RESOURCE_DEGRADED', degradeCodes);
+    }
+
+    // all buckets in acceptable range -> ACCEPTABLE_ADVISORY (opens NO readiness)
+    return build('TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY', ['tx_build_resource_acceptable']);
+  } catch {
+    return build('TX_BUILD_RESOURCE_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
+
+// Recognize a Stage-10 (F) tx-build-resource-advisory result fed forward.
+function txRecognizeResourceAdvisoryResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.tx_build_resource_state === 'string' && TX_BUILD_RESOURCE_STATES.includes(o.tx_build_resource_state)) {
+    return o.tx_build_resource_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (G) SERIALIZATION FORBIDDEN SURFACE GUARD
+//
+// Proves Stage-10 neither produces nor accepts serialization artifacts. Scans
+// ONLY the top-level keys of the provided object for forbidden serialization /
+// transaction / message-bytes / signing field NAMES. If ANY is present the
+// surface is BLOCKED (serialization_artifact_detected:true, the SAFE blocked
+// state) and forbidden_field_ref carries the matched field NAME ONLY — NEVER the
+// field VALUE. serialization_artifact_detected / forbidden_field_detected are
+// DETECTION booleans (true == found == blocked), NOT readiness/exec flags.
+// ---------------------------------------------------------------------------
+
+const SERIALIZATION_SURFACE_STATES = Object.freeze([
+  'SERIALIZATION_SURFACE_UNCONFIGURED', 'SERIALIZATION_SURFACE_CLEAN',
+  'SERIALIZATION_SURFACE_BLOCKED'
+]);
+
+// Forbidden serialization / transaction / message-bytes / signing field NAMES
+// (case-sensitive, incl. camelCase variants). These appear ONLY as fixed string
+// literals in this allowlist + prose — never as real objects, calls, or emitted
+// output keys, and the guard NEVER echoes their VALUES.
+const SERIALIZATION_FORBIDDEN_FIELD_NAMES = Object.freeze([
+  'serialized_tx', 'serializedTransaction', 'message_bytes', 'messageBytes',
+  'base64_tx', 'base64Transaction', 'transaction', 'transaction_object',
+  'VersionedTransaction', 'TransactionMessage', 'MessageV0', 'signature',
+  'signatures', 'signer', 'private_key', 'secret_key', 'recentBlockhash',
+  'blockhash', 'feePayer', 'instruction_array', 'instructions', 'account_metas',
+  'lookup_table_accounts', 'broadcast_target'
+]);
+
+// classify a matched forbidden field NAME into a derivable detection group.
+function serializationFieldGroup(name) {
+  if (name === 'transaction' || name === 'transaction_object' ||
+      name === 'VersionedTransaction' || name === 'TransactionMessage' ||
+      name === 'MessageV0') return 'transaction_object_detected';
+  if (name === 'serialized_tx' || name === 'serializedTransaction' ||
+      name === 'base64_tx' || name === 'base64Transaction' ||
+      name === 'message_bytes' || name === 'messageBytes') return 'message_bytes_detected';
+  if (name === 'signature' || name === 'signatures' || name === 'signer' ||
+      name === 'private_key' || name === 'secret_key') return 'signature_detected';
+  return 'serialization_artifact_detected';
+}
+
+export function describeSerializationForbiddenSurfaceContract() {
+  return Object.freeze({
+    contract: 'serialization-forbidden-surface',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: SERIALIZATION_SURFACE_STATES,
+    forbidden_field_names: SERIALIZATION_FORBIDDEN_FIELD_NAMES,
+    advisory_only: true,
+    serialization_surface_state: 'SERIALIZATION_SURFACE_UNCONFIGURED',
+    serialization_artifact_detected: false,
+    forbidden_field_detected: false,
+    forbidden_field_ref: null,
+    status: 'SERIALIZATION_SURFACE_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...txSafeFlags(),
+    note: 'Read-only SERIALIZATION FORBIDDEN SURFACE guard. Proves Stage-10 neither produces nor accepts serialization artifacts. It scans ONLY the top-level keys of the provided object for forbidden serialization / transaction / message-bytes / signing field NAMES (serialized_tx, serializedTransaction, message_bytes, messageBytes, base64_tx, base64Transaction, transaction, transaction_object, VersionedTransaction, TransactionMessage, MessageV0, signature, signatures, signer, private_key, secret_key, recentBlockhash, blockhash, feePayer, instruction_array, instructions, account_metas, lookup_table_accounts, broadcast_target). Missing / hostile input -> SERIALIZATION_SURFACE_UNCONFIGURED (frozen, never throws); a clean descriptor with NONE of the forbidden names present -> SERIALIZATION_SURFACE_CLEAN (serialization_artifact_detected:false, forbidden_field_detected:false); ANY forbidden field name present (top-level key) -> SERIALIZATION_SURFACE_BLOCKED (serialization_artifact_detected:true, forbidden_field_detected:true, forbidden_field_ref = the matched field NAME). serialization_artifact_detected / forbidden_field_detected are DETECTION booleans (true == artifact found == the SAFE blocked state) — NOT readiness/execution flags, and they NEVER flip any readiness/serialization/sign/send flag. forbidden_field_ref is a REDACTED reference (the matched field NAME only) — the output NEVER echoes the forbidden field VALUE anywhere.'
+  });
+}
+
+export function evaluateSerializationForbiddenSurface(input) {
+  const build = (state, ref, reasons) => {
+    const blocked = (state === 'SERIALIZATION_SURFACE_BLOCKED');
+    return Object.freeze({
+      serialization_surface_state: state,
+      serialization_artifact_detected: blocked,
+      forbidden_field_detected: blocked,
+      forbidden_field_ref: (blocked && typeof ref === 'string') ? ref : null,
+      status: state,
+      reasons: Object.freeze([...new Set(reasons || [])]),
+      read_only: true,
+      advisory_only: true,
+      ...txSafeFlags()
+    });
+  };
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (!obj) {
+      return build('SERIALIZATION_SURFACE_UNCONFIGURED', null, ['no_serialization_surface_input']);
+    }
+    // hostile Proxy whose accessors throw OR return functions -> uninspectable ->
+    // fail closed UNCONFIGURED (probe forbidden field names + common keys).
+    if (txUninspectable(obj, ['purpose', ...SERIALIZATION_FORBIDDEN_FIELD_NAMES])) {
+      return build('SERIALIZATION_SURFACE_UNCONFIGURED', null, ['input_inspection_error']);
+    }
+    try {
+      // probe an accessor: a throwing-getter Proxy throws here -> UNCONFIGURED.
+      void obj.purpose;
+    } catch {
+      return build('SERIALIZATION_SURFACE_UNCONFIGURED', null, ['input_inspection_error']);
+    }
+    // top-level key NAME scan only (bounded, deterministic). A throwing/hostile
+    // Proxy makes Object.keys/enumeration throw -> caught below -> UNCONFIGURED.
+    let keys;
+    try {
+      keys = Object.keys(obj);
+    } catch {
+      return build('SERIALIZATION_SURFACE_UNCONFIGURED', null, ['input_inspection_error']);
+    }
+    for (const name of SERIALIZATION_FORBIDDEN_FIELD_NAMES) {
+      if (keys.includes(name)) {
+        // matched NAME only — never read or echo the VALUE
+        return build('SERIALIZATION_SURFACE_BLOCKED', name, [
+          'serialization_artifact_detected', serializationFieldGroup(name)
+        ]);
+      }
+    }
+    return build('SERIALIZATION_SURFACE_CLEAN', null, ['serialization_surface_clean']);
+  } catch {
+    return build('SERIALIZATION_SURFACE_UNCONFIGURED', null, ['input_inspection_error']);
+  }
+}
+
+// Recognize a Stage-10 (G) serialization-forbidden-surface result fed forward.
+function txRecognizeSerializationSurfaceResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.serialization_surface_state === 'string' && SERIALIZATION_SURFACE_STATES.includes(o.serialization_surface_state)) {
+    return o.serialization_surface_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (H) TRANSACTION BUILD REVIEW VERDICT
+//
+// Aggregates the five prior tx-build review results (input boundary + source +
+// candidate descriptor + resource advisory + serialization guard) into an
+// advisory verdict. Even TX_BUILD_REVIEW_PASS_ADVISORY opens NO
+// transaction_ready / serialized_ready / signing_permitted / can_serialize /
+// can_send — every readiness/execution/serialization flag STAYS false.
+// ---------------------------------------------------------------------------
+
+const TX_BUILD_REVIEW_STATES = Object.freeze([
+  'TX_BUILD_REVIEW_UNCONFIGURED', 'TX_BUILD_REVIEW_DEGRADED',
+  'TX_BUILD_REVIEW_BLOCKED', 'TX_BUILD_REVIEW_PASS_ADVISORY'
+]);
+
+const TX_BUILD_REVIEW_REASON_CODES = Object.freeze([
+  'input_boundary_not_valid', 'source_not_read_only_ok', 'descriptor_not_descriptor',
+  'resource_advisory_rejected', 'serialization_surface_blocked',
+  'component_invalid', 'forbidden_indicator_blocked', 'required_component_missing',
+  'resource_advisory_degraded', 'descriptor_degraded', 'tx_build_review_clean'
+]);
+
+const TX_BUILD_REVIEW_EXPLANATION_CODES = Object.freeze([
+  'input_boundary_valid', 'source_read_only_ok', 'descriptor_present',
+  'resource_advisory_acceptable', 'serialization_surface_clean',
+  'review_passed_advisory_only', 'no_transaction_build', 'no_serialization',
+  'no_signing', 'no_send', 'advisory_representation_only'
+]);
+
+const TX_BUILD_REVIEW_COMPONENTS = Object.freeze([
+  'tx_build_input_boundary', 'tx_build_source_boundary',
+  'candidate_tx_build_descriptor', 'tx_build_resource_advisory',
+  'serialization_surface'
+]);
+
+export function describeTransactionBuildReviewVerdictContract() {
+  return Object.freeze({
+    contract: 'transaction-build-review-verdict',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: TX_BUILD_REVIEW_STATES,
+    supported_reason_codes: TX_BUILD_REVIEW_REASON_CODES,
+    supported_explanation_codes: TX_BUILD_REVIEW_EXPLANATION_CODES,
+    advisory_only: true,
+    valid: false,
+    tx_build_review_state: 'TX_BUILD_REVIEW_UNCONFIGURED',
+    tx_build_review_passed_advisory: false,
+    tx_build_blocked: false,
+    tx_build_reason_codes: Object.freeze([]),
+    tx_build_explanation_codes: Object.freeze([]),
+    status: 'TX_BUILD_REVIEW_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...txSafeFlags(),
+    note: 'Read-only TRANSACTION BUILD REVIEW VERDICT. Aggregates the five prior tx-build review results — tx_build_input_boundary (C), tx_build_source_boundary (D), candidate_tx_build_descriptor (E), tx_build_resource_advisory (F), serialization_surface (G) — into an advisory verdict. States: TX_BUILD_REVIEW_UNCONFIGURED / _DEGRADED / _BLOCKED / _PASS_ADVISORY. Ordering (Fail-Safe-Not-Fail-Open): a smuggled forbidden trading flag / execution command / secret / endpoint / mainnet on the top level OR any component -> TX_BUILD_REVIEW_BLOCKED; serialization_surface SERIALIZATION_SURFACE_BLOCKED OR any component *_INVALID OR input boundary not TX_BUILD_INPUT_VALID OR source not TX_BUILD_SOURCE_READ_ONLY_OK OR descriptor not CANDIDATE_TX_BUILD_DESCRIPTOR OR resource advisory REJECTED -> TX_BUILD_REVIEW_BLOCKED; any of the 5 components missing -> TX_BUILD_REVIEW_UNCONFIGURED; resource advisory DEGRADED OR descriptor DEGRADED -> TX_BUILD_REVIEW_DEGRADED; all clean (input VALID + source READ_ONLY_OK + descriptor DESCRIPTOR + resource ACCEPTABLE_ADVISORY + serialization CLEAN) -> TX_BUILD_REVIEW_PASS_ADVISORY. CRITICAL: even TX_BUILD_REVIEW_PASS_ADVISORY opens NO transaction_ready / serialized_ready / message_bytes_ready / signing_permitted / can_serialize / can_send — every readiness/execution/serialization flag STAYS false; reason & explanation codes contain NO tx/message/sign/send artifact tokens.'
+  });
+}
+
+export function evaluateTransactionBuildReviewVerdict(input) {
+  const build = (state, reasonCodes, explanationCodes, reasons) => Object.freeze({
+    valid: (state !== 'TX_BUILD_REVIEW_BLOCKED'),
+    tx_build_review_state: state,
+    tx_build_review_passed_advisory: (state === 'TX_BUILD_REVIEW_PASS_ADVISORY'),
+    tx_build_blocked: (state === 'TX_BUILD_REVIEW_BLOCKED'),
+    tx_build_reason_codes: Object.freeze(
+      [...new Set((reasonCodes || []).filter((c) => TX_BUILD_REVIEW_REASON_CODES.includes(c)))]
+    ),
+    tx_build_explanation_codes: Object.freeze(
+      [...new Set((explanationCodes || []).filter((c) => TX_BUILD_REVIEW_EXPLANATION_CODES.includes(c)))]
+    ),
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...txSafeFlags()
+  });
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (txUninspectable(obj, ['purpose', ...TX_BUILD_REVIEW_COMPONENTS])) {
+      return build('TX_BUILD_REVIEW_UNCONFIGURED', [], [], ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('TX_BUILD_REVIEW_UNCONFIGURED', [], [], ['no_tx_build_review_input']);
+    }
+
+    // top-level + per-component forbidden-flag / exec-cmd / secret / endpoint / mainnet scan
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!TX_BUILD_REVIEW_COMPONENTS.includes(k)) shallow[k] = v;
+    }
+    if (txScreen(shallow).length > 0) {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['forbidden_indicator_blocked'], [], ['forbidden_indicator_blocked']);
+    }
+    for (const k of TX_BUILD_REVIEW_COMPONENTS) {
+      const c = obj[k];
+      if (c == null) continue;
+      if (txHasForbiddenTrueFlag(c) || txHasExecCmdKey(c) || txHasEndpointOrMainnet(c)) {
+        return build('TX_BUILD_REVIEW_BLOCKED', ['forbidden_indicator_blocked'], [], ['forbidden_indicator_blocked']);
+      }
+    }
+
+    const boundary = obj.tx_build_input_boundary;
+    const source = obj.tx_build_source_boundary;
+    const descriptor = obj.candidate_tx_build_descriptor;
+    const resource = obj.tx_build_resource_advisory;
+    const serialization = obj.serialization_surface;
+
+    const boundaryState = txRecognizeInputBoundaryResult(boundary);
+    const sourceState = txRecognizeSourceBoundaryResult(source);
+    const descriptorState = txRecognizeDescriptorResult(descriptor);
+    const resourceState = txRecognizeResourceAdvisoryResult(resource);
+    const serializationState = txRecognizeSerializationSurfaceResult(serialization);
+
+    // serialization artifact -> BLOCKED (highest non-smuggle priority)
+    if (serializationState === 'SERIALIZATION_SURFACE_BLOCKED') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['serialization_surface_blocked'], [], ['serialization_surface_blocked']);
+    }
+    // any component *_INVALID -> BLOCKED
+    if (boundaryState === 'TX_BUILD_INPUT_INVALID' ||
+        sourceState === 'TX_BUILD_SOURCE_INVALID' ||
+        descriptorState === 'CANDIDATE_TX_BUILD_INVALID' ||
+        resourceState === 'TX_BUILD_RESOURCE_INVALID') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['component_invalid'], [], ['component_invalid']);
+    }
+
+    // missing any of the 5 components -> UNCONFIGURED
+    if (boundaryState === null || sourceState === null || descriptorState === null ||
+        resourceState === null || serializationState === null) {
+      return build('TX_BUILD_REVIEW_UNCONFIGURED', ['required_component_missing'], [], ['required_component_missing']);
+    }
+
+    // hard-block conditions
+    if (boundaryState !== 'TX_BUILD_INPUT_VALID') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['input_boundary_not_valid'], [], ['input_boundary_not_valid']);
+    }
+    if (sourceState !== 'TX_BUILD_SOURCE_READ_ONLY_OK') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['source_not_read_only_ok'], [], ['source_not_read_only_ok']);
+    }
+    if (resourceState === 'TX_BUILD_RESOURCE_REJECTED') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['resource_advisory_rejected'], [], ['resource_advisory_rejected']);
+    }
+    if (descriptorState === 'CANDIDATE_TX_BUILD_REJECTED') {
+      return build('TX_BUILD_REVIEW_BLOCKED', ['descriptor_not_descriptor'], [], ['descriptor_not_descriptor']);
+    }
+
+    // degraded path: resource DEGRADED or descriptor DEGRADED
+    if (resourceState === 'TX_BUILD_RESOURCE_DEGRADED' || descriptorState === 'CANDIDATE_TX_BUILD_DEGRADED') {
+      const dc = [];
+      if (resourceState === 'TX_BUILD_RESOURCE_DEGRADED') dc.push('resource_advisory_degraded');
+      if (descriptorState === 'CANDIDATE_TX_BUILD_DEGRADED') dc.push('descriptor_degraded');
+      return build('TX_BUILD_REVIEW_DEGRADED', dc, [], dc);
+    }
+
+    // anything other than the all-clean tuple (e.g. UNCONFIGURED component) -> DEGRADED (Fail-Safe)
+    if (descriptorState !== 'CANDIDATE_TX_BUILD_DESCRIPTOR' ||
+        resourceState !== 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY' ||
+        serializationState !== 'SERIALIZATION_SURFACE_CLEAN') {
+      const dc = [];
+      if (descriptorState !== 'CANDIDATE_TX_BUILD_DESCRIPTOR') dc.push('descriptor_not_descriptor');
+      if (resourceState !== 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY') dc.push('resource_advisory_degraded');
+      return build('TX_BUILD_REVIEW_DEGRADED', dc.length ? dc : ['descriptor_degraded'], [], dc);
+    }
+
+    // all clean -> PASS_ADVISORY (opens NO readiness)
+    return build('TX_BUILD_REVIEW_PASS_ADVISORY', ['tx_build_review_clean'], [
+      'input_boundary_valid', 'source_read_only_ok', 'descriptor_present',
+      'resource_advisory_acceptable', 'serialization_surface_clean',
+      'review_passed_advisory_only', 'no_transaction_build', 'no_serialization',
+      'no_signing', 'no_send', 'advisory_representation_only'
+    ], ['tx_build_review_clean']);
+  } catch {
+    return build('TX_BUILD_REVIEW_UNCONFIGURED', [], [], ['input_inspection_error']);
+  }
+}
+
+// Recognize a Stage-10 (H) tx-build-review-verdict result fed forward.
+function txRecognizeReviewVerdictResult(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.tx_build_review_state === 'string' && TX_BUILD_REVIEW_STATES.includes(o.tx_build_review_state)) {
+    return o.tx_build_review_state;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// (I) TRANSACTION BUILD SUPPRESSION / REJECTION
+//
+// Prevents progression; reasons only. Creates NO transaction. A tx-build review
+// is NEVER serialization / sign / send / execution authorized at this layer —
+// not_serialization_authorized / not_sign_authorized / not_send_authorized /
+// not_execution_authorized are ALWAYS present when emitting. Suppression opens NO
+// transaction_ready / can_serialize / signing_permitted / can_send.
+// ---------------------------------------------------------------------------
+
+const TX_BUILD_SUPPRESSION_REASONS = Object.freeze([
+  'route_preview_not_ready', 'tx_build_source_invalid', 'tx_build_metadata_missing',
+  'tx_build_resource_unacceptable', 'serialization_artifact_detected',
+  'transaction_object_detected', 'message_bytes_detected', 'signature_detected',
+  'not_serialization_authorized', 'not_sign_authorized', 'not_send_authorized',
+  'not_execution_authorized'
+]);
+
+const TX_BUILD_SUPPRESSION_ALWAYS = Object.freeze([
+  'not_serialization_authorized', 'not_sign_authorized', 'not_send_authorized',
+  'not_execution_authorized'
+]);
+
+const TX_BUILD_SUPPRESSION_COMPONENTS = Object.freeze([
+  'tx_build_input_boundary', 'candidate_tx_build_descriptor',
+  'tx_build_resource_advisory', 'serialization_surface', 'tx_build_source_boundary'
+]);
+
+export function describeTransactionBuildSuppressionContract() {
+  return Object.freeze({
+    contract: 'transaction-build-suppression',
+    version: '0.0.0',
+    test_only: true,
+    supported_reasons: TX_BUILD_SUPPRESSION_REASONS,
+    advisory_only: true,
+    suppressed: true,
+    suppression_reasons: TX_BUILD_SUPPRESSION_ALWAYS,
+    status: 'TX_BUILD_SUPPRESSED',
+    reasons: Object.freeze([]),
+    ...txSafeFlags(),
+    note: 'Read-only TRANSACTION BUILD SUPPRESSION / REJECTION. Prevents progression; reasons only. It creates NO transaction, NO serialized transaction, NO message bytes, NO signature, NO send. A tx-build review is NEVER serialization / sign / send / execution authorized at this layer — not_serialization_authorized + not_sign_authorized + not_send_authorized + not_execution_authorized are ALWAYS present whenever suppression reasons are emitted. Rules: input boundary not TX_BUILD_INPUT_VALID -> suppressed + route_preview_not_ready; source not TX_BUILD_SOURCE_READ_ONLY_OK -> suppressed + tx_build_source_invalid; missing descriptor / metadata (descriptor not CANDIDATE_TX_BUILD_DESCRIPTOR) -> suppressed + tx_build_metadata_missing; resource advisory REJECTED -> suppressed + tx_build_resource_unacceptable; serialization_surface SERIALIZATION_SURFACE_BLOCKED -> suppressed + serialization_artifact_detected (+ transaction_object_detected / message_bytes_detected / signature_detected derived from the matched forbidden_field_ref). An advisory-clean tx-build review is STILL suppressed for serialize/sign/send (only the not_*_authorized reasons present). CRITICAL: suppression opens NO transaction_ready / can_serialize / signing_permitted / can_send — every readiness/execution/serialization flag STAYS false.'
+  });
+}
+
+export function evaluateTransactionBuildSuppression(input) {
+  const build = (reasonsList, statusStr) => {
+    const merged = [...new Set([...(reasonsList || []), ...TX_BUILD_SUPPRESSION_ALWAYS])];
+    const filtered = merged.filter((c) => TX_BUILD_SUPPRESSION_REASONS.includes(c));
+    return Object.freeze({
+      suppressed: true,
+      suppression_reasons: Object.freeze(filtered),
+      status: statusStr,
+      reasons: Object.freeze(filtered),
+      read_only: true,
+      advisory_only: true,
+      ...txSafeFlags()
+    });
+  };
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (txUninspectable(obj, ['purpose', ...TX_BUILD_SUPPRESSION_COMPONENTS])) {
+      return build(['not_execution_authorized'], 'TX_BUILD_SUPPRESSED');
+    }
+    if (!obj) {
+      // missing input -> suppressed (always not_*_authorized)
+      return build([], 'TX_BUILD_SUPPRESSED');
+    }
+
+    const reasons = [];
+    const boundary = obj.tx_build_input_boundary;
+    const source = obj.tx_build_source_boundary;
+    const descriptor = obj.candidate_tx_build_descriptor;
+    const resource = obj.tx_build_resource_advisory;
+    const serialization = obj.serialization_surface;
+
+    const boundaryState = txRecognizeInputBoundaryResult(boundary);
+    const sourceState = txRecognizeSourceBoundaryResult(source);
+    const descriptorState = txRecognizeDescriptorResult(descriptor);
+    const resourceState = txRecognizeResourceAdvisoryResult(resource);
+
+    // input boundary not VALID -> route_preview_not_ready
+    if (boundary != null && boundaryState !== 'TX_BUILD_INPUT_VALID') {
+      reasons.push('route_preview_not_ready');
+    }
+    // source not READ_ONLY_OK -> tx_build_source_invalid
+    if (source != null && sourceState !== 'TX_BUILD_SOURCE_READ_ONLY_OK') {
+      reasons.push('tx_build_source_invalid');
+    }
+    // missing descriptor / metadata -> tx_build_metadata_missing
+    if (descriptor == null || descriptorState !== 'CANDIDATE_TX_BUILD_DESCRIPTOR') {
+      reasons.push('tx_build_metadata_missing');
+    }
+    // resource advisory REJECTED -> tx_build_resource_unacceptable
+    if (resource != null && resourceState === 'TX_BUILD_RESOURCE_REJECTED') {
+      reasons.push('tx_build_resource_unacceptable');
+    }
+    // serialization artifact -> serialization_artifact_detected (+ derived group)
+    if (serialization != null && typeof serialization === 'object' && !Array.isArray(serialization)) {
+      if (serialization.serialization_surface_state === 'SERIALIZATION_SURFACE_BLOCKED' ||
+          serialization.serialization_artifact_detected === true) {
+        reasons.push('serialization_artifact_detected');
+        const ref = serialization.forbidden_field_ref;
+        if (typeof ref === 'string') {
+          const grp = serializationFieldGroup(ref);
+          if (grp !== 'serialization_artifact_detected') reasons.push(grp);
+        }
+      }
+    }
+
+    return build(reasons, 'TX_BUILD_SUPPRESSED');
+  } catch {
+    return build(['not_execution_authorized'], 'TX_BUILD_SUPPRESSED');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (J) TRANSACTION BUILD HEALTH / STATUS
+//
+// Consumes input boundary + source + descriptor + resource advisory +
+// serialization guard + verdict + suppression, and derives a status only. Every
+// state keeps all 23 flags false; TX_BUILD_HEALTH_REVIEWED_ADVISORY opens NO
+// transaction / serialize / sign / send readiness.
+// ---------------------------------------------------------------------------
+
+const TX_BUILD_HEALTH_STATES = Object.freeze([
+  'TX_BUILD_HEALTH_UNCONFIGURED', 'TX_BUILD_HEALTH_DEGRADED',
+  'TX_BUILD_HEALTH_REVIEWED_ADVISORY', 'TX_BUILD_HEALTH_SUPPRESSED',
+  'TX_BUILD_HEALTH_BLOCKED'
+]);
+
+const TX_BUILD_HEALTH_COMPONENTS = Object.freeze([
+  'tx_build_input_boundary', 'tx_build_source_boundary',
+  'candidate_tx_build_descriptor', 'tx_build_resource_advisory',
+  'serialization_surface', 'tx_build_review_verdict', 'tx_build_suppression'
+]);
+
+export function describeTransactionBuildHealthContract() {
+  return Object.freeze({
+    contract: 'transaction-build-health',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: TX_BUILD_HEALTH_STATES,
+    advisory_only: true,
+    valid: false,
+    tx_build_health_state: 'TX_BUILD_HEALTH_UNCONFIGURED',
+    status: 'TX_BUILD_HEALTH_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...txSafeFlags(),
+    note: 'Read-only TRANSACTION BUILD HEALTH / STATUS. Consumes the seven prior tx-build review results — tx_build_input_boundary (C), tx_build_source_boundary (D), candidate_tx_build_descriptor (E), tx_build_resource_advisory (F), serialization_surface (G), tx_build_review_verdict (H), tx_build_suppression (I) — and derives a status only. States: TX_BUILD_HEALTH_UNCONFIGURED / _DEGRADED / _REVIEWED_ADVISORY / _SUPPRESSED / _BLOCKED. Ordering (Fail-Safe-Not-Fail-Open): a smuggled forbidden trading flag (top-level or any component) / secret / mainnet / REAL-LIVE / invalid input boundary (TX_BUILD_INPUT_INVALID) / invalid source (TX_BUILD_SOURCE_INVALID) / serialization_surface SERIALIZATION_SURFACE_BLOCKED / verdict TX_BUILD_REVIEW_BLOCKED -> TX_BUILD_HEALTH_BLOCKED; a missing required component -> TX_BUILD_HEALTH_UNCONFIGURED; tx_build_suppression.suppressed === true -> TX_BUILD_HEALTH_SUPPRESSED; verdict TX_BUILD_REVIEW_PASS_ADVISORY + not suppressed -> TX_BUILD_HEALTH_REVIEWED_ADVISORY; else TX_BUILD_HEALTH_DEGRADED. CRITICAL: every state keeps all readiness/execution/serialization flags false; TX_BUILD_HEALTH_REVIEWED_ADVISORY does NOT open transaction_ready / serialized_ready / message_bytes_ready / signing_permitted / can_serialize / can_send.'
+  });
+}
+
+export function evaluateTransactionBuildHealth(inputs) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'TX_BUILD_HEALTH_BLOCKED'),
+    tx_build_health_state: state,
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...txSafeFlags()
+  });
+  try {
+    const obj = (inputs != null && typeof inputs === 'object' && !Array.isArray(inputs)) ? inputs : null;
+    if (txUninspectable(obj, ['purpose', ...TX_BUILD_HEALTH_COMPONENTS])) {
+      return build('TX_BUILD_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('TX_BUILD_HEALTH_UNCONFIGURED', ['no_tx_build_health_input']);
+    }
+
+    // top-level + per-component forbidden-flag / exec-cmd / secret / endpoint / mainnet scan -> BLOCKED
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!TX_BUILD_HEALTH_COMPONENTS.includes(k)) shallow[k] = v;
+    }
+    if (txScreen(shallow).length > 0) {
+      return build('TX_BUILD_HEALTH_BLOCKED', ['forbidden_indicator_blocked']);
+    }
+    for (const k of TX_BUILD_HEALTH_COMPONENTS) {
+      const c = obj[k];
+      if (c == null) continue;
+      if (txHasForbiddenTrueFlag(c) || txHasExecCmdKey(c) || txHasEndpointOrMainnet(c)) {
+        return build('TX_BUILD_HEALTH_BLOCKED', ['forbidden_indicator_blocked']);
+      }
+    }
+
+    const boundary = obj.tx_build_input_boundary;
+    const source = obj.tx_build_source_boundary;
+    const descriptor = obj.candidate_tx_build_descriptor;
+    const resource = obj.tx_build_resource_advisory;
+    const serialization = obj.serialization_surface;
+    const verdict = obj.tx_build_review_verdict;
+    const suppression = obj.tx_build_suppression;
+
+    const boundaryState = txRecognizeInputBoundaryResult(boundary);
+    const sourceState = txRecognizeSourceBoundaryResult(source);
+    const descriptorState = txRecognizeDescriptorResult(descriptor);
+    const resourceState = txRecognizeResourceAdvisoryResult(resource);
+    const serializationState = txRecognizeSerializationSurfaceResult(serialization);
+    const verdictState = txRecognizeReviewVerdictResult(verdict);
+
+    // invalid boundary / source / serialization artifact / verdict blocked -> BLOCKED
+    if (boundaryState === 'TX_BUILD_INPUT_INVALID') {
+      return build('TX_BUILD_HEALTH_BLOCKED', ['input_boundary_invalid']);
+    }
+    if (sourceState === 'TX_BUILD_SOURCE_INVALID') {
+      return build('TX_BUILD_HEALTH_BLOCKED', ['source_invalid']);
+    }
+    if (serializationState === 'SERIALIZATION_SURFACE_BLOCKED') {
+      return build('TX_BUILD_HEALTH_BLOCKED', ['serialization_surface_blocked']);
+    }
+    if (verdictState === 'TX_BUILD_REVIEW_BLOCKED') {
+      return build('TX_BUILD_HEALTH_BLOCKED', ['tx_build_review_blocked']);
+    }
+
+    // missing required component -> UNCONFIGURED
+    if (boundaryState === null || sourceState === null || descriptorState === null ||
+        resourceState === null || serializationState === null ||
+        verdictState === null || suppression == null ||
+        typeof suppression !== 'object' || Array.isArray(suppression)) {
+      return build('TX_BUILD_HEALTH_UNCONFIGURED', ['required_component_missing']);
+    }
+
+    // suppressed -> SUPPRESSED
+    if (suppression.suppressed === true) {
+      return build('TX_BUILD_HEALTH_SUPPRESSED', ['tx_build_suppressed']);
+    }
+
+    // verdict pass advisory + not suppressed -> REVIEWED_ADVISORY (opens NO readiness)
+    if (verdictState === 'TX_BUILD_REVIEW_PASS_ADVISORY') {
+      return build('TX_BUILD_HEALTH_REVIEWED_ADVISORY', ['tx_build_reviewed_advisory']);
+    }
+
+    // else -> DEGRADED
+    return build('TX_BUILD_HEALTH_DEGRADED', ['tx_build_health_degraded']);
+  } catch {
+    return build('TX_BUILD_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+  }
+}

@@ -19,7 +19,18 @@ import {
   evaluateTransactionBuildSourceBoundary,
   describeCandidateTransactionBuildDescriptorContract,
   validateCandidateTransactionBuildDescriptorInput,
-  evaluateCandidateTransactionBuildDescriptor
+  evaluateCandidateTransactionBuildDescriptor,
+  describeTransactionBuildResourceAdvisoryContract,
+  validateTransactionBuildResourceAdvisoryInput,
+  evaluateTransactionBuildResourceAdvisory,
+  describeSerializationForbiddenSurfaceContract,
+  evaluateSerializationForbiddenSurface,
+  describeTransactionBuildReviewVerdictContract,
+  evaluateTransactionBuildReviewVerdict,
+  describeTransactionBuildSuppressionContract,
+  evaluateTransactionBuildSuppression,
+  describeTransactionBuildHealthContract,
+  evaluateTransactionBuildHealth
 } from '../src/index.mjs';
 
 import {
@@ -75,6 +86,7 @@ import { normalizeIngestionEvent } from '../../data-ingestion-foundations/src/in
 void validateTransactionBuildInputBoundary;
 void validateTransactionBuildSourceBoundary;
 void validateCandidateTransactionBuildDescriptorInput;
+void validateTransactionBuildResourceAdvisoryInput;
 
 // ---------------------------------------------------------------------------
 // REAL Stage-4 -> 5 -> 6 -> 7 -> 8 -> 9 builders
@@ -835,6 +847,598 @@ test('(E) descriptor result has NO tx/serialization/signature/blockhash artifact
   assert.equal(r.candidate_tx_build_state, 'CANDIDATE_TX_BUILD_DESCRIPTOR');
   for (const k of TX_FORBIDDEN_OUTPUT_KEYS) {
     assert.equal(Object.prototype.hasOwnProperty.call(r, k), false, `output must not contain ${k}`);
+  }
+});
+
+// ===========================================================================
+// Shared Stage-10 builders for Parts F/G/H/I/J
+// ===========================================================================
+
+const goodResourceInput = (over = {}) => ({
+  purpose: 'tx_build_resource_advisory_input',
+  account_count_bucket: 'medium',
+  instruction_count_bucket: 'low',
+  compute_unit_bucket: 'medium',
+  transaction_size_bucket: 'medium',
+  lookup_table_bucket: 'maybe_needed',
+  ...over
+});
+
+const acceptableResource = evaluateTransactionBuildResourceAdvisory(goodResourceInput());
+const goodDescriptor = evaluateCandidateTransactionBuildDescriptor(goodDescriptorInput());
+const cleanSurface = evaluateSerializationForbiddenSurface({ tx_build_kind: 'candidate_tx_build_descriptor', account_count_bucket: 'medium' });
+
+const goodVerdictInput = (over = {}) => ({
+  purpose: 'tx_build_review_verdict_input',
+  tx_build_input_boundary: validTxInputBoundary,
+  tx_build_source_boundary: validTxSource,
+  candidate_tx_build_descriptor: goodDescriptor,
+  tx_build_resource_advisory: acceptableResource,
+  serialization_surface: cleanSurface,
+  ...over
+});
+
+// ===========================================================================
+// (F) ACCOUNT / INSTRUCTION / COMPUTE BUDGET ADVISORY
+// ===========================================================================
+
+test('(F) descriptor: shape, states, reason codes, safe flags', () => {
+  const d = describeTransactionBuildResourceAdvisoryContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'transaction-build-resource-advisory');
+  assert.equal(d.tx_build_resource_acceptable_advisory, false);
+  assertNoTxArtifacts(d);
+  assert.deepEqual([...d.supported_states], [
+    'TX_BUILD_RESOURCE_UNCONFIGURED', 'TX_BUILD_RESOURCE_INVALID',
+    'TX_BUILD_RESOURCE_DEGRADED', 'TX_BUILD_RESOURCE_REJECTED',
+    'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY'
+  ]);
+});
+
+test('(F) missing bucket -> UNCONFIGURED; hostile -> frozen UNCONFIGURED', () => {
+  const r = evaluateTransactionBuildResourceAdvisory({
+    purpose: 'tx_build_resource_advisory_input', account_count_bucket: 'low'
+  });
+  assertSafe(r);
+  assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_UNCONFIGURED');
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r2 = evaluateTransactionBuildResourceAdvisory(inp);
+    assertSafe(r2);
+    assert.equal(r2.tx_build_resource_state, 'TX_BUILD_RESOURCE_UNCONFIGURED');
+  }
+  for (const h of hostiles()) {
+    let r3;
+    assert.doesNotThrow(() => { r3 = evaluateTransactionBuildResourceAdvisory(h); });
+    assertSafe(r3);
+    assert.equal(r3.tx_build_resource_state, 'TX_BUILD_RESOURCE_UNCONFIGURED');
+  }
+});
+
+test('(F) invalid enum (synonym) -> INVALID', () => {
+  for (const over of [
+    { account_count_bucket: 'moderate' }, { transaction_size_bucket: 'none' },
+    { lookup_table_bucket: 'resolved' }, { compute_unit_bucket: 'extreme' }
+  ]) {
+    const r = evaluateTransactionBuildResourceAdvisory(goodResourceInput(over));
+    assertSafe(r);
+    assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_INVALID');
+    assert.equal(r.valid, false);
+  }
+});
+
+test('(F) unknown buckets -> DEGRADED', () => {
+  for (const [over, code] of [
+    [{ account_count_bucket: 'unknown' }, 'account_count_unknown'],
+    [{ instruction_count_bucket: 'unknown' }, 'instruction_count_unknown'],
+    [{ compute_unit_bucket: 'unknown' }, 'compute_unit_unknown'],
+    [{ transaction_size_bucket: 'unknown' }, 'transaction_size_unknown'],
+    [{ lookup_table_bucket: 'unknown' }, 'lookup_table_unknown'],
+    [{ compute_unit_bucket: 'high' }, 'compute_unit_high']
+  ]) {
+    const r = evaluateTransactionBuildResourceAdvisory(goodResourceInput(over));
+    assertSafe(r);
+    assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_DEGRADED');
+    assert.equal(r.tx_build_reason_codes.includes(code), true);
+    assert.equal(r.tx_build_resource_acceptable_advisory, false);
+  }
+});
+
+test('(F) too_high accounts/instructions/compute, too_large size, required_unresolved lookup -> REJECTED', () => {
+  for (const [over, code] of [
+    [{ account_count_bucket: 'too_high' }, 'account_count_too_high'],
+    [{ instruction_count_bucket: 'too_high' }, 'instruction_count_too_high'],
+    [{ compute_unit_bucket: 'too_high' }, 'compute_unit_too_high'],
+    [{ transaction_size_bucket: 'too_large' }, 'transaction_size_too_large'],
+    [{ lookup_table_bucket: 'required_unresolved' }, 'lookup_table_required_unresolved']
+  ]) {
+    const r = evaluateTransactionBuildResourceAdvisory(goodResourceInput(over));
+    assertSafe(r);
+    assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_REJECTED');
+    assert.equal(r.tx_build_rejected, true);
+    assert.equal(r.tx_build_reason_codes.includes(code), true);
+    assertNoTxArtifacts(r);
+  }
+});
+
+test('(F) acceptable buckets -> advisory acceptable ONLY (no readiness, no artifacts)', () => {
+  const r = evaluateTransactionBuildResourceAdvisory(goodResourceInput());
+  assertSafe(r);
+  assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY');
+  assert.equal(r.tx_build_resource_acceptable_advisory, true);
+  assert.equal(r.tx_build_reason_codes.includes('tx_build_resource_acceptable'), true);
+  // acceptable opens NO transaction/serialize/sign/send (asserted by assertSafe)
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.serialized_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+  assertNoTxArtifacts(r);
+  // all acceptable-range buckets
+  for (const acct of ['low', 'medium', 'high']) {
+    for (const size of ['small', 'medium', 'large']) {
+      const rr = evaluateTransactionBuildResourceAdvisory(goodResourceInput({
+        account_count_bucket: acct, instruction_count_bucket: acct,
+        compute_unit_bucket: 'low', transaction_size_bucket: size,
+        lookup_table_bucket: 'not_needed'
+      }));
+      assert.equal(rr.tx_build_resource_state, 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY');
+    }
+  }
+});
+
+test('(F) smuggled tx/serialize/sign/send flags / secret / endpoint -> INVALID, never echoed', () => {
+  for (const s of [
+    { transaction_ready: true }, { can_send: true }, { can_serialize: true },
+    { serialize: true }, { api_key: 'sk-LEAK' }, { endpoint: 'https://api.mainnet-beta.solana.com' },
+    { transaction: {} }, { serialized_tx: 'x' }
+  ]) {
+    const r = evaluateTransactionBuildResourceAdvisory(goodResourceInput(s));
+    assertSafe(r);
+    assert.equal(r.tx_build_resource_state, 'TX_BUILD_RESOURCE_INVALID');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+    assert.equal(JSON.stringify(r).includes('mainnet-beta'), false);
+    assertNoTxArtifacts(r);
+  }
+});
+
+// ===========================================================================
+// (G) SERIALIZATION FORBIDDEN SURFACE GUARD
+// ===========================================================================
+
+test('(G) descriptor: shape, states, safe flags', () => {
+  const d = describeSerializationForbiddenSurfaceContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'serialization-forbidden-surface');
+  assert.equal(d.serialization_artifact_detected, false);
+  assert.equal(d.forbidden_field_detected, false);
+  assert.equal(d.forbidden_field_ref, null);
+  assert.deepEqual([...d.supported_states], [
+    'SERIALIZATION_SURFACE_UNCONFIGURED', 'SERIALIZATION_SURFACE_CLEAN', 'SERIALIZATION_SURFACE_BLOCKED'
+  ]);
+});
+
+test('(G) missing / hostile input -> UNCONFIGURED frozen', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluateSerializationForbiddenSurface(inp);
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_UNCONFIGURED');
+  }
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSerializationForbiddenSurface(h); });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_UNCONFIGURED');
+  }
+});
+
+test('(G) clean descriptor -> surface clean', () => {
+  const r = evaluateSerializationForbiddenSurface({
+    tx_build_kind: 'candidate_tx_build_descriptor',
+    account_count_bucket: 'medium', lookup_table_bucket: 'maybe_needed'
+  });
+  assertSafe(r);
+  assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_CLEAN');
+  assert.equal(r.serialization_artifact_detected, false);
+  assert.equal(r.forbidden_field_detected, false);
+  assert.equal(r.forbidden_field_ref, null);
+});
+
+test('(G) serialized_tx / message_bytes / signature field -> BLOCKED', () => {
+  for (const name of ['serialized_tx', 'serializedTransaction', 'message_bytes', 'messageBytes', 'base64_tx', 'signature', 'signatures']) {
+    const r = evaluateSerializationForbiddenSurface({ [name]: 'PLANTED' });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+    assert.equal(r.serialization_artifact_detected, true);
+    assert.equal(r.forbidden_field_detected, true);
+    assert.equal(r.forbidden_field_ref, name);
+  }
+});
+
+test('(G) transaction object field -> BLOCKED', () => {
+  for (const name of ['transaction', 'transaction_object', 'VersionedTransaction', 'TransactionMessage', 'MessageV0']) {
+    const r = evaluateSerializationForbiddenSurface({ [name]: { real: 'object' } });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+    assert.equal(r.forbidden_field_ref, name);
+  }
+});
+
+test('(G) instruction array field -> BLOCKED', () => {
+  for (const name of ['instruction_array', 'instructions', 'account_metas', 'lookup_table_accounts']) {
+    const r = evaluateSerializationForbiddenSurface({ [name]: [] });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+    assert.equal(r.forbidden_field_ref, name);
+  }
+});
+
+test('(G) signer / private key field -> BLOCKED & never echoed', () => {
+  for (const name of ['signer', 'private_key', 'secret_key']) {
+    const r = evaluateSerializationForbiddenSurface({ [name]: 'PLANTED-SECRET-VALUE' });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+    assert.equal(r.forbidden_field_ref, name);
+    assert.equal(JSON.stringify(r).includes('PLANTED-SECRET-VALUE'), false);
+  }
+});
+
+test('(G) blockhash / feePayer / broadcast_target field -> BLOCKED', () => {
+  for (const name of ['recentBlockhash', 'blockhash', 'feePayer', 'broadcast_target']) {
+    const r = evaluateSerializationForbiddenSurface({ [name]: 'x' });
+    assertSafe(r);
+    assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+    assert.equal(r.forbidden_field_ref, name);
+  }
+});
+
+test('(G) output NEVER echoes the forbidden VALUE (planted unique secret absent)', () => {
+  const r = evaluateSerializationForbiddenSurface({
+    serialized_tx: 'UNIQUE-SECRET-9f3a2b-DO-NOT-LEAK',
+    signature: 'ANOTHER-LEAK-VALUE'
+  });
+  assertSafe(r);
+  assert.equal(r.serialization_surface_state, 'SERIALIZATION_SURFACE_BLOCKED');
+  const json = JSON.stringify(r);
+  assert.equal(json.includes('UNIQUE-SECRET-9f3a2b-DO-NOT-LEAK'), false);
+  assert.equal(json.includes('ANOTHER-LEAK-VALUE'), false);
+  // only the redacted NAME is present
+  assert.equal(r.forbidden_field_ref, 'serialized_tx');
+});
+
+// ===========================================================================
+// (H) TRANSACTION BUILD REVIEW VERDICT
+// ===========================================================================
+
+test('(H) descriptor: shape, states, safe flags', () => {
+  const d = describeTransactionBuildReviewVerdictContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'transaction-build-review-verdict');
+  assert.equal(d.tx_build_review_passed_advisory, false);
+  assert.deepEqual([...d.supported_states], [
+    'TX_BUILD_REVIEW_UNCONFIGURED', 'TX_BUILD_REVIEW_DEGRADED',
+    'TX_BUILD_REVIEW_BLOCKED', 'TX_BUILD_REVIEW_PASS_ADVISORY'
+  ]);
+});
+
+test('(H) missing components -> UNCONFIGURED; hostile -> frozen UNCONFIGURED', () => {
+  const r = evaluateTransactionBuildReviewVerdict({
+    purpose: 'tx_build_review_verdict_input',
+    tx_build_input_boundary: validTxInputBoundary
+  });
+  assertSafe(r);
+  assert.equal(r.tx_build_review_state, 'TX_BUILD_REVIEW_UNCONFIGURED');
+  for (const h of hostiles()) {
+    let r2;
+    assert.doesNotThrow(() => { r2 = evaluateTransactionBuildReviewVerdict(h); });
+    assertSafe(r2);
+    assert.equal(r2.tx_build_review_state, 'TX_BUILD_REVIEW_UNCONFIGURED');
+  }
+});
+
+test('(H) any blocked component or serialization artifact -> BLOCKED', () => {
+  // serialization artifact
+  const blockedSurface = evaluateSerializationForbiddenSurface({ serialized_tx: 'x' });
+  const r1 = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ serialization_surface: blockedSurface }));
+  assertSafe(r1);
+  assert.equal(r1.tx_build_review_state, 'TX_BUILD_REVIEW_BLOCKED');
+  assert.equal(r1.tx_build_blocked, true);
+  // rejected resource
+  const rejectedResource = evaluateTransactionBuildResourceAdvisory(goodResourceInput({ account_count_bucket: 'too_high' }));
+  const r2 = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ tx_build_resource_advisory: rejectedResource }));
+  assert.equal(r2.tx_build_review_state, 'TX_BUILD_REVIEW_BLOCKED');
+  // invalid input boundary
+  const badBoundary = evaluateTransactionBuildInputBoundary({ ...goodTxInput(), can_send: true });
+  const r3 = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ tx_build_input_boundary: badBoundary }));
+  assert.equal(r3.tx_build_review_state, 'TX_BUILD_REVIEW_BLOCKED');
+  // invalid source
+  const badSource = evaluateTransactionBuildSourceBoundary({ purpose: 'tx_build_source_boundary', tx_build_source: 'solana_tx_builder_live' });
+  const r4 = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ tx_build_source_boundary: badSource }));
+  assert.equal(r4.tx_build_review_state, 'TX_BUILD_REVIEW_BLOCKED');
+});
+
+test('(H) degraded resource -> DEGRADED', () => {
+  const degradedResource = evaluateTransactionBuildResourceAdvisory(goodResourceInput({ compute_unit_bucket: 'unknown' }));
+  const r = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ tx_build_resource_advisory: degradedResource }));
+  assertSafe(r);
+  assert.equal(r.tx_build_review_state, 'TX_BUILD_REVIEW_DEGRADED');
+  // degraded descriptor
+  const degDescriptor = evaluateCandidateTransactionBuildDescriptor(goodDescriptorInput({
+    tx_build_metadata: { ...goodTxMetadata(), compute_unit_bucket: 'unknown' }
+  }));
+  const r2 = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ candidate_tx_build_descriptor: degDescriptor }));
+  assert.equal(r2.tx_build_review_state, 'TX_BUILD_REVIEW_DEGRADED');
+});
+
+test('(H) clean + acceptable + clean-surface -> PASS ADVISORY ONLY (no readiness)', () => {
+  const r = evaluateTransactionBuildReviewVerdict(goodVerdictInput());
+  assertSafe(r);
+  assert.equal(r.tx_build_review_state, 'TX_BUILD_REVIEW_PASS_ADVISORY');
+  assert.equal(r.tx_build_review_passed_advisory, true);
+  // pass opens NO readiness
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.serialized_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+  // reason / explanation codes contain NO tx/message/sign/send artifact tokens
+  const tokens = [...r.tx_build_reason_codes, ...r.tx_build_explanation_codes].join('|');
+  for (const bad of ['serialized_tx', 'message_bytes', 'instruction_array', 'signature', 'feePayer', 'blockhash', 'broadcast_target']) {
+    assert.equal(tokens.includes(bad), false, `codes must not contain artifact token ${bad}`);
+  }
+});
+
+test('(H) smuggled forbidden flag/cmd/secret on top-level or component -> BLOCKED', () => {
+  for (const s of [{ can_send: true }, { serialize: true }, { api_key: 'sk-LEAK' }, { network: 'mainnet' }, { real_live: true }]) {
+    const r = evaluateTransactionBuildReviewVerdict({ ...goodVerdictInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.tx_build_review_state, 'TX_BUILD_REVIEW_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+// ===========================================================================
+// (I) TRANSACTION BUILD SUPPRESSION / REJECTION
+// ===========================================================================
+
+test('(I) descriptor: shape, always-present reasons, safe flags', () => {
+  const d = describeTransactionBuildSuppressionContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'transaction-build-suppression');
+  for (const req of ['not_serialization_authorized', 'not_sign_authorized', 'not_send_authorized', 'not_execution_authorized']) {
+    assert.equal(d.suppression_reasons.includes(req), true);
+  }
+});
+
+test('(I) missing descriptor -> suppressed + tx_build_metadata_missing', () => {
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: validTxSource,
+    tx_build_resource_advisory: acceptableResource
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('tx_build_metadata_missing'), true);
+});
+
+test('(I) invalid source -> suppressed + tx_build_source_invalid', () => {
+  const badSource = evaluateTransactionBuildSourceBoundary({ purpose: 'tx_build_source_boundary', tx_build_source: 'solana_tx_builder_live' });
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: badSource,
+    candidate_tx_build_descriptor: goodDescriptor,
+    tx_build_resource_advisory: acceptableResource
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('tx_build_source_invalid'), true);
+});
+
+test('(I) route preview not ready -> suppressed + route_preview_not_ready', () => {
+  const badBoundary = evaluateTransactionBuildInputBoundary({ ...goodTxInput(), route_suppression: Object.freeze({ suppressed: true, suppression_reasons: ['x'], read_only: true }) });
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: badBoundary,
+    tx_build_source_boundary: validTxSource,
+    candidate_tx_build_descriptor: goodDescriptor,
+    tx_build_resource_advisory: acceptableResource
+  });
+  assertSafe(r);
+  assert.equal(r.suppression_reasons.includes('route_preview_not_ready'), true);
+});
+
+test('(I) unacceptable resources -> suppressed + tx_build_resource_unacceptable', () => {
+  const rejectedResource = evaluateTransactionBuildResourceAdvisory(goodResourceInput({ transaction_size_bucket: 'too_large' }));
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: validTxSource,
+    candidate_tx_build_descriptor: goodDescriptor,
+    tx_build_resource_advisory: rejectedResource
+  });
+  assertSafe(r);
+  assert.equal(r.suppression_reasons.includes('tx_build_resource_unacceptable'), true);
+});
+
+test('(I) serialization artifact -> suppressed + serialization_artifact_detected + derived group', () => {
+  const blockedSurface = evaluateSerializationForbiddenSurface({ transaction: { x: 1 } });
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: validTxSource,
+    candidate_tx_build_descriptor: goodDescriptor,
+    tx_build_resource_advisory: acceptableResource,
+    serialization_surface: blockedSurface
+  });
+  assertSafe(r);
+  assert.equal(r.suppression_reasons.includes('serialization_artifact_detected'), true);
+  assert.equal(r.suppression_reasons.includes('transaction_object_detected'), true);
+  // message_bytes derived
+  const sigSurface = evaluateSerializationForbiddenSurface({ message_bytes: 'x' });
+  const r2 = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    candidate_tx_build_descriptor: goodDescriptor,
+    serialization_surface: sigSurface
+  });
+  assert.equal(r2.suppression_reasons.includes('message_bytes_detected'), true);
+});
+
+test('(I) advisory clean -> STILL not serialize/sign/send (only not_*_authorized), opens no readiness', () => {
+  const r = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: validTxSource,
+    candidate_tx_build_descriptor: goodDescriptor,
+    tx_build_resource_advisory: acceptableResource,
+    serialization_surface: cleanSurface
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  // only the not_*_authorized reasons present
+  assert.deepEqual([...r.suppression_reasons].sort(), [
+    'not_execution_authorized', 'not_send_authorized', 'not_serialization_authorized', 'not_sign_authorized'
+  ].sort());
+  // suppression opens NO readiness (asserted by assertSafe)
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(I) hostile input -> frozen, no throw, suppressed', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateTransactionBuildSuppression(h); });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assert.equal(r.suppression_reasons.includes('not_execution_authorized'), true);
+  }
+});
+
+// ===========================================================================
+// (J) TRANSACTION BUILD HEALTH / STATUS
+// ===========================================================================
+
+const cleanSuppression = evaluateTransactionBuildSuppression({
+  purpose: 'tx_build_suppression_input',
+  tx_build_input_boundary: validTxInputBoundary,
+  tx_build_source_boundary: validTxSource,
+  candidate_tx_build_descriptor: goodDescriptor,
+  tx_build_resource_advisory: acceptableResource,
+  serialization_surface: cleanSurface
+});
+const passVerdict = evaluateTransactionBuildReviewVerdict(goodVerdictInput());
+
+const goodHealthInput = (over = {}) => ({
+  tx_build_input_boundary: validTxInputBoundary,
+  tx_build_source_boundary: validTxSource,
+  candidate_tx_build_descriptor: goodDescriptor,
+  tx_build_resource_advisory: acceptableResource,
+  serialization_surface: cleanSurface,
+  tx_build_review_verdict: passVerdict,
+  tx_build_suppression: cleanSuppression,
+  ...over
+});
+
+test('(J) descriptor: shape, states, safe flags', () => {
+  const d = describeTransactionBuildHealthContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'transaction-build-health');
+  assert.deepEqual([...d.supported_states], [
+    'TX_BUILD_HEALTH_UNCONFIGURED', 'TX_BUILD_HEALTH_DEGRADED',
+    'TX_BUILD_HEALTH_REVIEWED_ADVISORY', 'TX_BUILD_HEALTH_SUPPRESSED',
+    'TX_BUILD_HEALTH_BLOCKED'
+  ]);
+});
+
+test('(J) missing components -> UNCONFIGURED; hostile -> frozen UNCONFIGURED', () => {
+  const r = evaluateTransactionBuildHealth({
+    tx_build_input_boundary: validTxInputBoundary
+  });
+  assertSafe(r);
+  assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_UNCONFIGURED');
+  for (const h of hostiles()) {
+    let r2;
+    assert.doesNotThrow(() => { r2 = evaluateTransactionBuildHealth(h); });
+    assertSafe(r2);
+    assert.equal(r2.tx_build_health_state, 'TX_BUILD_HEALTH_UNCONFIGURED');
+  }
+});
+
+test('(J) invalid boundary / invalid source / serialization artifact -> BLOCKED', () => {
+  const badBoundary = evaluateTransactionBuildInputBoundary({ ...goodTxInput(), can_send: true });
+  const r1 = evaluateTransactionBuildHealth(goodHealthInput({ tx_build_input_boundary: badBoundary }));
+  assertSafe(r1);
+  assert.equal(r1.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+  const badSource = evaluateTransactionBuildSourceBoundary({ purpose: 'tx_build_source_boundary', tx_build_source: 'solana_tx_builder_live' });
+  const r2 = evaluateTransactionBuildHealth(goodHealthInput({ tx_build_source_boundary: badSource }));
+  assert.equal(r2.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+  const blockedSurface = evaluateSerializationForbiddenSurface({ serialized_tx: 'x' });
+  const r3 = evaluateTransactionBuildHealth(goodHealthInput({ serialization_surface: blockedSurface }));
+  assert.equal(r3.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+  // blocked verdict
+  const blockedVerdict = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ serialization_surface: blockedSurface }));
+  const r4 = evaluateTransactionBuildHealth(goodHealthInput({ tx_build_review_verdict: blockedVerdict, serialization_surface: cleanSurface }));
+  assert.equal(r4.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+});
+
+test('(J) suppressed -> SUPPRESSED', () => {
+  const suppressed = evaluateTransactionBuildSuppression({
+    purpose: 'tx_build_suppression_input',
+    tx_build_input_boundary: validTxInputBoundary,
+    tx_build_source_boundary: validTxSource,
+    tx_build_resource_advisory: acceptableResource
+  });
+  assert.equal(suppressed.suppressed, true);
+  const r = evaluateTransactionBuildHealth(goodHealthInput({ tx_build_suppression: suppressed }));
+  assertSafe(r);
+  assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_SUPPRESSED');
+});
+
+test('(J) advisory review pass + not suppressed -> REVIEWED ADVISORY ONLY (no readiness)', () => {
+  // build a non-suppressing suppression object (only not_*_authorized, but suppressed:true)
+  // health treats suppressed:true as SUPPRESSED; the spec: PASS + not suppressed -> REVIEWED.
+  // Use a suppression result with suppressed:false to represent "not suppressed".
+  const notSuppressed = Object.freeze({ suppressed: false, suppression_reasons: [], read_only: true });
+  const r = evaluateTransactionBuildHealth(goodHealthInput({ tx_build_suppression: notSuppressed }));
+  assertSafe(r);
+  assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_REVIEWED_ADVISORY');
+  // reviewed advisory opens NO transaction/serialize/sign/send (asserted by assertSafe)
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.serialized_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(J) degraded path -> DEGRADED', () => {
+  const degradedResource = evaluateTransactionBuildResourceAdvisory(goodResourceInput({ compute_unit_bucket: 'unknown' }));
+  const degradedVerdict = evaluateTransactionBuildReviewVerdict(goodVerdictInput({ tx_build_resource_advisory: degradedResource }));
+  const notSuppressed = Object.freeze({ suppressed: false, suppression_reasons: [], read_only: true });
+  const r = evaluateTransactionBuildHealth(goodHealthInput({
+    tx_build_resource_advisory: degradedResource,
+    tx_build_review_verdict: degradedVerdict,
+    tx_build_suppression: notSuppressed
+  }));
+  assertSafe(r);
+  assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_DEGRADED');
+});
+
+test('(J) smuggled tx/serialize/sign/send flags -> BLOCKED', () => {
+  for (const s of [{ can_send: true }, { transaction_ready: true }, { serialize: true }, { sign: true }, { send: true }]) {
+    const r = evaluateTransactionBuildHealth({ ...goodHealthInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+  }
+});
+
+test('(J) secret / mainnet / REAL-LIVE -> BLOCKED, never echoed', () => {
+  for (const s of [{ api_key: 'sk-LEAK' }, { secret: 'LEAK' }, { network: 'mainnet' }, { mode: 'prod' }, { real_live: true }]) {
+    const r = evaluateTransactionBuildHealth({ ...goodHealthInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.tx_build_health_state, 'TX_BUILD_HEALTH_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
   }
 });
 

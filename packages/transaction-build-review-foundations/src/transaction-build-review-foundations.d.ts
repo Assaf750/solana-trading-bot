@@ -175,3 +175,181 @@ export interface CandidateTransactionBuildDescriptorResult extends TxSafeFlags {
 export function describeCandidateTransactionBuildDescriptorContract(): CandidateTransactionBuildDescriptorContractDescriptor;
 export function validateCandidateTransactionBuildDescriptorInput(input: unknown): TxValidationResult;
 export function evaluateCandidateTransactionBuildDescriptor(input: unknown): CandidateTransactionBuildDescriptorResult;
+
+// --- (F) Account / Instruction / Compute Budget Advisory ---
+
+export type TransactionBuildResourceState =
+  | 'TX_BUILD_RESOURCE_UNCONFIGURED'
+  | 'TX_BUILD_RESOURCE_INVALID'
+  | 'TX_BUILD_RESOURCE_DEGRADED'
+  | 'TX_BUILD_RESOURCE_REJECTED'
+  | 'TX_BUILD_RESOURCE_ACCEPTABLE_ADVISORY';
+
+export interface TransactionBuildResourceAdvisoryContractDescriptor extends TxSafeFlags {
+  contract: 'transaction-build-resource-advisory';
+  version: string;
+  test_only: true;
+  supported_states: readonly TransactionBuildResourceState[];
+  supported_reason_codes: readonly string[];
+  advisory_only: true;
+  valid: boolean;
+  tx_build_resource_state: TransactionBuildResourceState;
+  tx_build_resource_acceptable_advisory: boolean;
+  tx_build_rejected: boolean;
+  tx_build_reason_codes: readonly string[];
+  status: TransactionBuildResourceState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface TransactionBuildResourceAdvisoryResult extends TxSafeFlags {
+  valid: boolean;
+  tx_build_resource_state: TransactionBuildResourceState;
+  tx_build_resource_acceptable_advisory: boolean;
+  tx_build_rejected: boolean;
+  tx_build_reason_codes: readonly string[];
+  status: TransactionBuildResourceState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeTransactionBuildResourceAdvisoryContract(): TransactionBuildResourceAdvisoryContractDescriptor;
+export function validateTransactionBuildResourceAdvisoryInput(input: unknown): TxValidationResult;
+export function evaluateTransactionBuildResourceAdvisory(input: unknown): TransactionBuildResourceAdvisoryResult;
+
+// --- (G) Serialization Forbidden Surface Guard ---
+
+export type SerializationForbiddenSurfaceState =
+  | 'SERIALIZATION_SURFACE_UNCONFIGURED'
+  | 'SERIALIZATION_SURFACE_CLEAN'
+  | 'SERIALIZATION_SURFACE_BLOCKED';
+
+export interface SerializationForbiddenSurfaceContractDescriptor extends TxSafeFlags {
+  contract: 'serialization-forbidden-surface';
+  version: string;
+  test_only: true;
+  supported_states: readonly SerializationForbiddenSurfaceState[];
+  forbidden_field_names: readonly string[];
+  advisory_only: true;
+  serialization_surface_state: SerializationForbiddenSurfaceState;
+  serialization_artifact_detected: boolean;
+  forbidden_field_detected: boolean;
+  forbidden_field_ref: string | null;
+  status: SerializationForbiddenSurfaceState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface SerializationForbiddenSurfaceResult extends TxSafeFlags {
+  serialization_surface_state: SerializationForbiddenSurfaceState;
+  serialization_artifact_detected: boolean;
+  forbidden_field_detected: boolean;
+  forbidden_field_ref: string | null;
+  status: SerializationForbiddenSurfaceState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeSerializationForbiddenSurfaceContract(): SerializationForbiddenSurfaceContractDescriptor;
+export function evaluateSerializationForbiddenSurface(input: unknown): SerializationForbiddenSurfaceResult;
+
+// --- (H) Transaction Build Review Verdict ---
+
+export type TransactionBuildReviewState =
+  | 'TX_BUILD_REVIEW_UNCONFIGURED'
+  | 'TX_BUILD_REVIEW_DEGRADED'
+  | 'TX_BUILD_REVIEW_BLOCKED'
+  | 'TX_BUILD_REVIEW_PASS_ADVISORY';
+
+export interface TransactionBuildReviewVerdictContractDescriptor extends TxSafeFlags {
+  contract: 'transaction-build-review-verdict';
+  version: string;
+  test_only: true;
+  supported_states: readonly TransactionBuildReviewState[];
+  supported_reason_codes: readonly string[];
+  supported_explanation_codes: readonly string[];
+  advisory_only: true;
+  valid: boolean;
+  tx_build_review_state: TransactionBuildReviewState;
+  tx_build_review_passed_advisory: boolean;
+  tx_build_blocked: boolean;
+  tx_build_reason_codes: readonly string[];
+  tx_build_explanation_codes: readonly string[];
+  status: TransactionBuildReviewState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface TransactionBuildReviewVerdictResult extends TxSafeFlags {
+  valid: boolean;
+  tx_build_review_state: TransactionBuildReviewState;
+  tx_build_review_passed_advisory: boolean;
+  tx_build_blocked: boolean;
+  tx_build_reason_codes: readonly string[];
+  tx_build_explanation_codes: readonly string[];
+  status: TransactionBuildReviewState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeTransactionBuildReviewVerdictContract(): TransactionBuildReviewVerdictContractDescriptor;
+export function evaluateTransactionBuildReviewVerdict(input: unknown): TransactionBuildReviewVerdictResult;
+
+// --- (I) Transaction Build Suppression / Rejection ---
+
+export interface TransactionBuildSuppressionContractDescriptor extends TxSafeFlags {
+  contract: 'transaction-build-suppression';
+  version: string;
+  test_only: true;
+  supported_reasons: readonly string[];
+  advisory_only: true;
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface TransactionBuildSuppressionResult extends TxSafeFlags {
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeTransactionBuildSuppressionContract(): TransactionBuildSuppressionContractDescriptor;
+export function evaluateTransactionBuildSuppression(input: unknown): TransactionBuildSuppressionResult;
+
+// --- (J) Transaction Build Health / Status ---
+
+export type TransactionBuildHealthState =
+  | 'TX_BUILD_HEALTH_UNCONFIGURED'
+  | 'TX_BUILD_HEALTH_DEGRADED'
+  | 'TX_BUILD_HEALTH_REVIEWED_ADVISORY'
+  | 'TX_BUILD_HEALTH_SUPPRESSED'
+  | 'TX_BUILD_HEALTH_BLOCKED';
+
+export interface TransactionBuildHealthContractDescriptor extends TxSafeFlags {
+  contract: 'transaction-build-health';
+  version: string;
+  test_only: true;
+  supported_states: readonly TransactionBuildHealthState[];
+  advisory_only: true;
+  valid: boolean;
+  tx_build_health_state: TransactionBuildHealthState;
+  status: TransactionBuildHealthState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface TransactionBuildHealthResult extends TxSafeFlags {
+  valid: boolean;
+  tx_build_health_state: TransactionBuildHealthState;
+  status: TransactionBuildHealthState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeTransactionBuildHealthContract(): TransactionBuildHealthContractDescriptor;
+export function evaluateTransactionBuildHealth(inputs: unknown): TransactionBuildHealthResult;

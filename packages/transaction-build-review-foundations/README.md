@@ -84,6 +84,74 @@ opens NO `transaction_ready` / `serialized_ready` / `signing_permitted` /
 / `message_bytes` / `instruction_array` / `signature` / `blockhash` / `feePayer`
 / `signer` / `broadcast_target` / `endpoint` field.
 
+### (F) Account / Instruction / Compute Budget Advisory
+`describeTransactionBuildResourceAdvisoryContract()` ·
+`validateTransactionBuildResourceAdvisoryInput(input)` ·
+`evaluateTransactionBuildResourceAdvisory(input)`
+
+A read-only advisory derived from safe input **buckets only** (no transaction
+build). Buckets reuse the spec-canonical enums: `account_count_bucket` /
+`instruction_count_bucket` / `compute_unit_bucket` ∈
+`unknown|low|medium|high|too_high`; `transaction_size_bucket` ∈
+`unknown|small|medium|large|too_large`; `lookup_table_bucket` ∈
+`unknown|not_needed|maybe_needed|required_unresolved`. States:
+`TX_BUILD_RESOURCE_UNCONFIGURED` / `_INVALID` / `_DEGRADED` / `_REJECTED` /
+`_ACCEPTABLE_ADVISORY`. Over-threshold (`too_high` accounts/instructions/compute,
+`too_large` size, `required_unresolved` lookup) → `_REJECTED`; any `unknown` or
+compute `high` → `_DEGRADED`; all-acceptable → `_ACCEPTABLE_ADVISORY`.
+`_ACCEPTABLE_ADVISORY` opens **no** transaction/serialize/sign/send readiness and
+emits no transaction / message / instruction field.
+
+### (G) Serialization Forbidden Surface Guard
+`describeSerializationForbiddenSurfaceContract()` ·
+`evaluateSerializationForbiddenSurface(input)`
+
+Proves Stage-10 neither produces nor accepts serialization artifacts. Scans
+**only top-level keys** for forbidden serialization / transaction / message-bytes
+/ signing field NAMES. States: `SERIALIZATION_SURFACE_UNCONFIGURED` / `_CLEAN` /
+`_BLOCKED`. A clean descriptor → `_CLEAN`
+(`serialization_artifact_detected:false`); ANY forbidden field name present →
+`_BLOCKED` (`serialization_artifact_detected:true` — the SAFE blocked state) with
+`forbidden_field_ref` carrying the matched **NAME only**, never the VALUE.
+`serialization_artifact_detected` / `forbidden_field_detected` are **detection**
+booleans (true == found == blocked), not readiness flags.
+
+### (H) Transaction Build Review Verdict
+`describeTransactionBuildReviewVerdictContract()` ·
+`evaluateTransactionBuildReviewVerdict(input)`
+
+Aggregates input boundary + source + descriptor + resource advisory +
+serialization guard into an advisory verdict. States:
+`TX_BUILD_REVIEW_UNCONFIGURED` / `_DEGRADED` / `_BLOCKED` / `_PASS_ADVISORY`.
+Smuggled flags/commands or a blocked/invalid/rejected component →`_BLOCKED`;
+missing any of the 5 components → `_UNCONFIGURED`; degraded resource/descriptor →
+`_DEGRADED`; all-clean → `_PASS_ADVISORY`. Even `_PASS_ADVISORY` opens **no**
+`transaction_ready` / `serialized_ready` / `signing_permitted` / `can_serialize`
+/ `can_send`.
+
+### (I) Transaction Build Suppression / Rejection
+`describeTransactionBuildSuppressionContract()` ·
+`evaluateTransactionBuildSuppression(input)`
+
+Prevents progression; reasons only — creates **no** transaction. The
+`not_serialization_authorized` + `not_sign_authorized` + `not_send_authorized` +
+`not_execution_authorized` reasons are **always** present; an advisory-clean
+review is still suppressed for serialize/sign/send. Suppression opens **no**
+`transaction_ready` / `can_serialize` / `signing_permitted` / `can_send`.
+
+### (J) Transaction Build Health / Status
+`describeTransactionBuildHealthContract()` ·
+`evaluateTransactionBuildHealth(inputs)`
+
+Consumes input boundary + source + descriptor + resource advisory +
+serialization guard + verdict + suppression, deriving a status only. States:
+`TX_BUILD_HEALTH_UNCONFIGURED` / `_DEGRADED` / `_REVIEWED_ADVISORY` /
+`_SUPPRESSED` / `_BLOCKED`. Smuggled flags / invalid boundary or source /
+serialization artifact / blocked verdict → `_BLOCKED`; missing component →
+`_UNCONFIGURED`; suppressed → `_SUPPRESSED`; passing verdict & not suppressed →
+`_REVIEWED_ADVISORY`. `_REVIEWED_ADVISORY` does **not** open
+transaction/serialize/sign/send.
+
 ## Test
 
 ```
@@ -93,4 +161,4 @@ node --test test
 Tests build a REAL Stage-4 → 5 → 6 → 7 → 8 → 9 chain (via the lower-stage
 evaluators) to an `EXECUTION_PLAN_PREVIEW_PREVIEW_VALID` +
 `ROUTE_HEALTH_PREVIEW_READY` state and feed it into the Stage-10 tx-build-review
-foundation, covering Parts C/D/E plus a static source guard.
+foundation, covering Parts C/D/E/F/G/H/I/J plus a static source guard.
