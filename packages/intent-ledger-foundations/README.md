@@ -69,6 +69,59 @@ persistence (`persistence_performed: false`), no module-level array.
 - `evaluateIntentLedgerAppend(input)` — states
   `INTENT_LEDGER_UNCONFIGURED | INTENT_LEDGER_INVALID | INTENT_LEDGER_DUPLICATE | INTENT_LEDGER_APPEND_EVALUATED`
 
+### (F) Intent state machine
+Evaluates the **state** for a candidate intent **without execution**. An intent
+state is an auditable representation only.
+
+- `describeIntentStateMachineContract()`
+- `evaluateIntentStateTransition(input)` — states
+  `INTENT_UNCONFIGURED | INTENT_CANDIDATE_RECORDED | INTENT_REJECTED | INTENT_SUPPRESSED | INTENT_BLOCKED | INTENT_AWAITING_ROUTE_REVIEW`
+
+> **CRITICAL:** `INTENT_AWAITING_ROUTE_REVIEW` does **NOT** mean a route is ready
+> or executed — it only records that a later stage (Stage 9) **may** review a
+> route. Every readiness/execution flag (`routing_ready`, `route_ready`,
+> `transaction_ready`, `can_send`, `signing_permitted`, …) **stays false** in
+> every state.
+
+### (G) Intent audit envelope
+Every candidate intent must be **auditable, without secrets**. The output carries
+**only** opaque refs + fixed reason codes + state — no `private_key` / `seed` /
+`signer_credential` / `auth_token` / `endpoint` / `raw_wallet_secret`.
+
+- `describeIntentAuditEnvelopeContract()`
+- `validateIntentAuditEnvelope(input)`
+- `evaluateIntentAuditEnvelope(input)` — states
+  `INTENT_AUDIT_UNCONFIGURED | INTENT_AUDIT_INVALID | INTENT_AUDIT_VALID`.
+  Missing `reason_codes` / `decision_ref` / `intent_record_ref`/`actor_ref` ->
+  `INTENT_AUDIT_INVALID` (no hidden decision, no missing reason). Any secret /
+  endpoint / mainnet material or smuggled execution flag is refused and **never
+  echoed**.
+
+### (H) Intent suppression / rejection
+Prevents an intent from progressing; **reasons only**. Creates **no route/order**.
+
+- `describeIntentSuppressionContract()`
+- `evaluateIntentSuppression(input)` — `suppression_reasons` drawn only from a
+  fixed allowlist. The `not_route_authorized` + `not_order_authorized` +
+  `not_sign_authorized` + `not_send_authorized` + `not_execution_authorized`
+  reasons are **always** attached. An advisory-valid intent (candidate recorded +
+  risk pass + audit valid + not duplicate) is **still** suppressed for
+  routing/sign/send (`route_not_reviewed` + the `not_*_authorized` reasons) — it
+  never progresses to routing/sign/send at this layer. Suppression opens **no**
+  `routing_ready` / `route_ready` / `signing_permitted` / `can_send`.
+
+### (I) Intent health / status
+Consumes the intent input boundary + candidate intent + ledger append + state
+machine + audit + suppression and derives a **status only**.
+
+- `describeIntentHealthContract()`
+- `evaluateIntentHealth(inputs)` — states
+  `INTENT_HEALTH_UNCONFIGURED | INTENT_HEALTH_DEGRADED | INTENT_HEALTH_CANDIDATE_RECORDED | INTENT_HEALTH_AWAITING_ROUTE_REVIEW | INTENT_HEALTH_SUPPRESSED | INTENT_HEALTH_BLOCKED`.
+  Smuggled forbidden flag / secret / mainnet / REAL-LIVE / invalid boundary /
+  invalid audit -> `INTENT_HEALTH_BLOCKED`. Every state keeps all 20 flags false;
+  `INTENT_HEALTH_AWAITING_ROUTE_REVIEW` does **not** open
+  routing/route/transaction/can_send.
+
 ## Test
 
 ```

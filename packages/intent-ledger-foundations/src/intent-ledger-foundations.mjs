@@ -763,3 +763,587 @@ export function evaluateIntentLedgerAppend(input) {
     return build('INTENT_LEDGER_UNCONFIGURED', 0, null, false, ['input_inspection_error']);
   }
 }
+
+// Recognize a candidate-intent-record RESULT (Stage-8 (D) output) by its dedicated
+// state field — read-only required. Returns the candidate intent state, or null.
+function intentRecognizeCandidateRecord(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.candidate_intent_state === 'string' && CANDIDATE_INTENT_STATES.includes(o.candidate_intent_state)) {
+    return o.candidate_intent_state;
+  }
+  return null;
+}
+
+// Recognize a risk-verdict RESULT by its dedicated state field — read-only
+// required. Returns the verdict state, or null.
+function intentRecognizeRiskVerdict(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.risk_verdict_state === 'string' && INTENT_RISK_VERDICT_STATES.includes(o.risk_verdict_state)) {
+    return o.risk_verdict_state;
+  }
+  return null;
+}
+
+// Recognize an intent-audit-envelope RESULT (Stage-8 (G) output) by its dedicated
+// state field — read-only required. Returns the audit state, or null.
+function intentRecognizeAuditEnvelope(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.audit_state === 'string' && INTENT_AUDIT_STATES.includes(o.audit_state)) {
+    return o.audit_state;
+  }
+  return null;
+}
+
+// Recognize a ledger-append RESULT (Stage-8 (E) output) by its dedicated state
+// field — read-only required. Returns the ledger state, or null.
+function intentRecognizeLedgerAppend(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.ledger_state === 'string' && INTENT_LEDGER_STATES.includes(o.ledger_state)) {
+    return o.ledger_state;
+  }
+  return null;
+}
+
+// Recognize an intent-state-machine RESULT (Stage-8 (F) output) by its dedicated
+// state field — read-only required. Returns the intent state, or null.
+function intentRecognizeStateMachine(o) {
+  if (o == null || typeof o !== 'object' || Array.isArray(o)) return null;
+  if (o.read_only !== true) return null;
+  if (typeof o.intent_state === 'string' && INTENT_STATE_MACHINE_STATES.includes(o.intent_state)) {
+    return o.intent_state;
+  }
+  return null;
+}
+
+// Recognize an intent-input-boundary RESULT by its dedicated state field.
+function intentRecognizeInputBoundaryResult(o) {
+  return intentRecognizeRiskComponentBoundary(o);
+}
+
+// ---------------------------------------------------------------------------
+// (F) INTENT STATE MACHINE
+//
+// Evaluates the STATE for a candidate intent WITHOUT execution. An intent state is
+// an AUDITABLE REPRESENTATION ONLY — NOT an order/route/transaction/sign/send
+// permission. CRITICAL: INTENT_AWAITING_ROUTE_REVIEW does NOT mean a route is
+// ready or executed — it ONLY records that a later stage (Stage 9) MAY review a
+// route; it keeps every readiness/execution flag false. Fail-Safe-Not-Fail-Open:
+// missing input -> UNCONFIGURED; smuggled forbidden flag/exec cmd/secret/endpoint
+// -> BLOCKED; candidate not RECORDED -> REJECTED (or SUPPRESSED if suppression).
+// ---------------------------------------------------------------------------
+
+const INTENT_STATE_MACHINE_STATES = Object.freeze([
+  'INTENT_UNCONFIGURED', 'INTENT_CANDIDATE_RECORDED', 'INTENT_REJECTED',
+  'INTENT_SUPPRESSED', 'INTENT_BLOCKED', 'INTENT_AWAITING_ROUTE_REVIEW'
+]);
+
+const INTENT_STATE_TRANSITIONS = Object.freeze([
+  'record', 'reject', 'suppress', 'request_route_review'
+]);
+
+const INTENT_STATE_MACHINE_TOP_KEYS = Object.freeze([
+  'purpose', 'candidate_intent_record', 'requested_transition',
+  'suppression', 'rejection_reason'
+]);
+
+export function describeIntentStateMachineContract() {
+  return Object.freeze({
+    contract: 'intent-state-machine',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: INTENT_STATE_MACHINE_STATES,
+    supported_transitions: INTENT_STATE_TRANSITIONS,
+    advisory_only: true,
+    valid: false,
+    intent_state: 'INTENT_UNCONFIGURED',
+    awaiting_route_review: false,
+    status: 'INTENT_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...intentSafeFlags(),
+    note: 'Read-only intent STATE MACHINE. Evaluates the state for a candidate intent record WITHOUT execution. An intent state is an AUDITABLE REPRESENTATION ONLY — NOT an order, NOT a route, NOT a transaction, NOT a signing permission, NOT a send permission, NOT trading/route readiness. CRITICAL: INTENT_AWAITING_ROUTE_REVIEW does NOT mean a route is ready or executed — it ONLY records that a later stage (Stage 9) MAY review a route; routing_ready / route_ready / order_ready / transaction_ready / can_send / signing_permitted STAY false in EVERY state. Transitions: missing input -> INTENT_UNCONFIGURED; invalid input / smuggled forbidden flag, execution command, secret, or endpoint -> INTENT_BLOCKED; candidate_intent_record not CANDIDATE_INTENT_RECORDED -> INTENT_REJECTED (or INTENT_SUPPRESSED if suppression indicates); valid candidate + no transition or "record" -> INTENT_CANDIDATE_RECORDED; rejection_reason present / requested "reject" -> INTENT_REJECTED; suppression.suppressed / requested "suppress" -> INTENT_SUPPRESSED; requested "request_route_review" on a valid recorded candidate -> INTENT_AWAITING_ROUTE_REVIEW. Hostile/throwing/uninspectable input -> frozen INTENT_UNCONFIGURED, never throws.'
+  });
+}
+
+export function evaluateIntentStateTransition(input) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'INTENT_BLOCKED'),
+    intent_state: state,
+    awaiting_route_review: (state === 'INTENT_AWAITING_ROUTE_REVIEW'),
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...intentSafeFlags()
+  });
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (intentUninspectable(obj, [...INTENT_STATE_MACHINE_TOP_KEYS])) {
+      return build('INTENT_UNCONFIGURED', ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('INTENT_UNCONFIGURED', ['no_intent_state_input']);
+    }
+
+    // screen top-level shape (excluding nested component slots) for smuggled
+    // forbidden flag / exec cmd / secret / endpoint / mainnet
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (k !== 'candidate_intent_record' && k !== 'suppression') shallow[k] = v;
+    }
+    const screen = intentScreen(shallow);
+    // also screen the nested components for forbidden flags / exec cmds / endpoints
+    for (const slot of ['candidate_intent_record', 'suppression']) {
+      const c = obj[slot];
+      if (c != null && typeof c === 'object') {
+        if (intentHasForbiddenTrueFlag(c)) screen.push('forbidden_trading_indicator_blocked');
+        if (intentHasExecCmdKey(c)) screen.push('execution_command_blocked');
+        if (intentHasEndpointOrMainnet(c)) screen.push('endpoint_or_mainnet_blocked');
+      }
+    }
+    if (obj.purpose !== 'intent_state_input') screen.push('purpose_invalid');
+    if (screen.length > 0) {
+      return build('INTENT_BLOCKED', screen);
+    }
+
+    const requested = (typeof obj.requested_transition === 'string') ? obj.requested_transition : null;
+    if (requested !== null && !INTENT_STATE_TRANSITIONS.includes(requested)) {
+      return build('INTENT_BLOCKED', ['transition_not_allowed']);
+    }
+
+    const cir = obj.candidate_intent_record;
+    const suppression = obj.suppression;
+    const suppressionIndicated = (suppression != null && typeof suppression === 'object' && !Array.isArray(suppression))
+      ? suppression.suppressed === true : false;
+
+    // missing candidate -> UNCONFIGURED
+    if (cir == null) {
+      return build('INTENT_UNCONFIGURED', ['candidate_intent_record_missing']);
+    }
+    const candidateState = intentRecognizeCandidateRecord(cir);
+    if (candidateState === null) {
+      return build('INTENT_UNCONFIGURED', ['candidate_intent_record_unrecognized']);
+    }
+
+    // candidate not RECORDED -> REJECTED (or SUPPRESSED if suppression indicates)
+    if (candidateState !== 'CANDIDATE_INTENT_RECORDED' || cir.candidate_intent_valid !== true) {
+      if (suppressionIndicated || requested === 'suppress') {
+        return build('INTENT_SUPPRESSED', ['candidate_intent_not_recorded', 'suppressed']);
+      }
+      return build('INTENT_REJECTED', ['candidate_intent_not_recorded']);
+    }
+
+    // valid recorded candidate. Resolve transition.
+    const rejectionReason = (typeof obj.rejection_reason === 'string' && obj.rejection_reason.length > 0)
+      ? obj.rejection_reason : null;
+
+    if (requested === 'reject' || rejectionReason !== null) {
+      return build('INTENT_REJECTED', ['intent_rejected']);
+    }
+    if (requested === 'suppress' || suppressionIndicated) {
+      return build('INTENT_SUPPRESSED', ['intent_suppressed']);
+    }
+    if (requested === 'request_route_review') {
+      // CRITICAL: awaiting route review keeps ALL 20 flags false; route NOT ready.
+      return build('INTENT_AWAITING_ROUTE_REVIEW', ['route_review_requested_stage9_pending']);
+    }
+    // no transition or 'record' -> CANDIDATE_RECORDED
+    return build('INTENT_CANDIDATE_RECORDED', ['candidate_recorded']);
+  } catch {
+    return build('INTENT_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (G) INTENT AUDIT ENVELOPE
+//
+// Every candidate intent must be auditable, WITHOUT secrets. The audit envelope
+// carries ONLY opaque refs + fixed reason codes + state — NO secret/private-key/
+// seed/signer-credential/auth-token/endpoint material. Fail-Safe-Not-Fail-Open:
+// missing audit input -> UNCONFIGURED; missing reason_codes/decision_ref/refs ->
+// INVALID (no hidden decision, no missing reason); any secret/endpoint/mainnet or
+// smuggled execution flag -> INVALID and NEVER echoed.
+// ---------------------------------------------------------------------------
+
+const INTENT_AUDIT_STATES = Object.freeze([
+  'INTENT_AUDIT_UNCONFIGURED', 'INTENT_AUDIT_INVALID', 'INTENT_AUDIT_VALID'
+]);
+
+const INTENT_AUDIT_TOP_KEYS = Object.freeze([
+  'purpose', 'intent_record_ref', 'actor_ref', 'decision_ref', 'risk_verdict_ref',
+  'signal_ref', 'reason_codes', 'audit_required', 'no_secret_material',
+  'no_private_key_material', 'no_execution_authority'
+]);
+
+// audit attestation booleans that are allowed to be true (NOT forbidden flags)
+const INTENT_AUDIT_ATTESTATION_KEYS = Object.freeze([
+  'no_secret_material', 'no_private_key_material', 'no_execution_authority', 'audit_required'
+]);
+
+export function describeIntentAuditEnvelopeContract() {
+  return Object.freeze({
+    contract: 'intent-audit-envelope',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: INTENT_AUDIT_STATES,
+    advisory_only: true,
+    intent_audit_valid: false,
+    audit_state: 'INTENT_AUDIT_UNCONFIGURED',
+    audit_required: true,
+    audit_complete: false,
+    status: 'INTENT_AUDIT_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...intentSafeFlags(),
+    note: 'Read-only INTENT AUDIT ENVELOPE. Every candidate intent must be auditable, WITHOUT secrets. The audit envelope carries ONLY opaque refs (intent_record_ref / actor_ref / decision_ref / risk_verdict_ref / signal_ref) + fixed reason codes + state — NO private_key / seed / signer_credential / auth_token / endpoint / raw_wallet_secret material ever appears in output, and any such material is refused and NEVER echoed. An audit envelope is an AUDITABLE REPRESENTATION ONLY — it confers NO order/route/transaction/signing/send permission; every readiness/execution flag STAYS false. Fail-Safe-Not-Fail-Open: missing audit input -> INTENT_AUDIT_UNCONFIGURED; missing reason_codes -> INTENT_AUDIT_INVALID [audit_reason_missing]; missing decision_ref -> INTENT_AUDIT_INVALID [audit_decision_missing]; missing intent_record_ref/actor_ref -> INTENT_AUDIT_INVALID [audit_ref_missing] (no hidden decision, no missing reason); any secret/private-key/seed/signer-credential/auth-token/endpoint/mainnet material or smuggled execution/forbidden flag -> INTENT_AUDIT_INVALID; complete + clean -> INTENT_AUDIT_VALID.'
+  });
+}
+
+export function validateIntentAuditEnvelope(input) {
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (intentUninspectable(obj, [...INTENT_AUDIT_TOP_KEYS])) {
+      return Object.freeze({
+        valid: false, recognized: false,
+        reasons: Object.freeze(['input_inspection_error']),
+        ...intentSafeFlags()
+      });
+    }
+    const reasons = [];
+    let recognized = false;
+    if (!obj) {
+      reasons.push('no_intent_audit_input');
+    } else {
+      recognized = true;
+      reasons.push(...intentScreen(obj));
+      if (obj.purpose !== 'intent_audit_envelope_input') reasons.push('purpose_invalid');
+    }
+    const unique = [...new Set(reasons)];
+    const valid = recognized && unique.length === 0;
+    return Object.freeze({
+      valid, recognized,
+      reasons: Object.freeze([...unique]),
+      ...intentSafeFlags()
+    });
+  } catch {
+    return Object.freeze({
+      valid: false, recognized: false,
+      reasons: Object.freeze(['input_inspection_error']),
+      ...intentSafeFlags()
+    });
+  }
+}
+
+export function evaluateIntentAuditEnvelope(input) {
+  const build = (state, reasons) => Object.freeze({
+    intent_audit_valid: (state === 'INTENT_AUDIT_VALID'),
+    audit_state: state,
+    audit_required: true,
+    audit_complete: (state === 'INTENT_AUDIT_VALID'),
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...intentSafeFlags()
+  });
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (intentUninspectable(obj, [...INTENT_AUDIT_TOP_KEYS])) {
+      return build('INTENT_AUDIT_UNCONFIGURED', ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('INTENT_AUDIT_UNCONFIGURED', ['no_intent_audit_input']);
+    }
+
+    const v = validateIntentAuditEnvelope(obj);
+    // secret / endpoint / mainnet / forbidden flag / exec cmd -> INVALID (never echoed)
+    if (v.reasons.includes('forbidden_trading_indicator_blocked') ||
+        v.reasons.includes('execution_command_blocked') ||
+        v.reasons.includes('secret_field_blocked') ||
+        v.reasons.includes('endpoint_or_mainnet_blocked')) {
+      return build('INTENT_AUDIT_INVALID', ['audit_forbidden_material_blocked']);
+    }
+    if (v.reasons.includes('purpose_invalid')) {
+      return build('INTENT_AUDIT_INVALID', ['audit_purpose_invalid']);
+    }
+
+    // required completeness: reason_codes, decision_ref, intent_record_ref + actor_ref
+    const invalid = [];
+    const reasonCodes = obj.reason_codes;
+    if (!Array.isArray(reasonCodes) || reasonCodes.length === 0) invalid.push('audit_reason_missing');
+    if (typeof obj.decision_ref !== 'string' || obj.decision_ref.length === 0) invalid.push('audit_decision_missing');
+    if (typeof obj.intent_record_ref !== 'string' || obj.intent_record_ref.length === 0 ||
+        typeof obj.actor_ref !== 'string' || obj.actor_ref.length === 0) invalid.push('audit_ref_missing');
+    if (invalid.length > 0) {
+      return build('INTENT_AUDIT_INVALID', invalid);
+    }
+
+    // complete + clean -> VALID (opaque refs + fixed codes + state ONLY)
+    return build('INTENT_AUDIT_VALID', ['audit_complete']);
+  } catch {
+    return build('INTENT_AUDIT_UNCONFIGURED', ['input_inspection_error']);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (H) INTENT SUPPRESSION / REJECTION
+//
+// Prevents an intent from progressing; REASONS ONLY. Creates NO route/order. An
+// advisory-valid intent (candidate recorded + risk pass + audit valid + not
+// duplicate) is STILL suppressed for routing/sign/send (route_not_reviewed + the
+// not_*_authorized reasons) — it never progresses to routing/sign/send at this
+// layer. CRITICAL: suppression opens NO routing_ready / route_ready /
+// signing_permitted / can_send.
+// ---------------------------------------------------------------------------
+
+const INTENT_SUPPRESSION_REASON_ALLOWLIST = Object.freeze([
+  'risk_not_passed', 'audit_missing', 'candidate_intent_invalid',
+  'duplicate_intent_record', 'route_not_reviewed', 'not_route_authorized',
+  'not_order_authorized', 'not_sign_authorized', 'not_send_authorized',
+  'not_execution_authorized'
+]);
+
+// the not_*_authorized reasons ALWAYS attached whenever suppression is emitted:
+// an intent is never route/order/sign/send/execution authorized at this layer.
+const INTENT_NOT_AUTHORIZED_REASONS = Object.freeze([
+  'not_route_authorized', 'not_order_authorized', 'not_sign_authorized',
+  'not_send_authorized', 'not_execution_authorized'
+]);
+
+const INTENT_SUPPRESSION_TOP_KEYS = Object.freeze([
+  'purpose', 'candidate_intent_record', 'risk_verdict', 'audit', 'ledger_append',
+  'route_reviewed'
+]);
+
+const INTENT_SUPPRESSION_COMPONENTS = Object.freeze([
+  'candidate_intent_record', 'risk_verdict', 'audit', 'ledger_append'
+]);
+
+export function describeIntentSuppressionContract() {
+  return Object.freeze({
+    contract: 'intent-suppression',
+    version: '0.0.0',
+    test_only: true,
+    supported_reason_codes: INTENT_SUPPRESSION_REASON_ALLOWLIST,
+    advisory_only: true,
+    suppressed: true,
+    suppression_reasons: INTENT_NOT_AUTHORIZED_REASONS,
+    status: 'INTENT_SUPPRESSED',
+    reasons: Object.freeze([]),
+    ...intentSafeFlags(),
+    note: 'Read-only INTENT SUPPRESSION / REJECTION. Prevents an intent from progressing; REASONS ONLY. Creates NO route, NO order, NO transaction, NO signing, NO send. suppression_reasons is drawn ONLY from a fixed allowlist (risk_not_passed, audit_missing, candidate_intent_invalid, duplicate_intent_record, route_not_reviewed, not_route_authorized, not_order_authorized, not_sign_authorized, not_send_authorized, not_execution_authorized). The not_route_authorized + not_order_authorized + not_sign_authorized + not_send_authorized + not_execution_authorized reasons are ALWAYS attached when suppression is emitted — an intent is never route/order/sign/send/execution authorized at this layer. Rules: missing candidate -> suppressed + candidate_intent_invalid; candidate not CANDIDATE_INTENT_RECORDED -> candidate_intent_invalid; risk_verdict not RISK_PASS_ADVISORY -> risk_not_passed; audit not INTENT_AUDIT_VALID -> audit_missing; ledger_append INTENT_LEDGER_DUPLICATE -> duplicate_intent_record; route_reviewed !== true -> route_not_reviewed (Stage 9 not done yet). An advisory-valid intent (candidate recorded + risk pass + audit valid + not duplicate) is STILL suppressed for routing/sign/send. CRITICAL: suppression opens NO routing_ready / route_ready / signing_permitted / can_send — every readiness/execution flag STAYS false.'
+  });
+}
+
+export function evaluateIntentSuppression(input) {
+  const build = (suppressed, suppressionReasons, reasons) => Object.freeze({
+    suppressed,
+    suppression_reasons: Object.freeze([...new Set((suppressionReasons || []).filter((x) => INTENT_SUPPRESSION_REASON_ALLOWLIST.includes(x)))]),
+    status: suppressed ? 'INTENT_SUPPRESSED' : 'INTENT_NOT_SUPPRESSED',
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...intentSafeFlags()
+  });
+  try {
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+    if (intentUninspectable(obj, [...INTENT_SUPPRESSION_TOP_KEYS])) {
+      // fail closed: suppressed with the not_*_authorized reasons
+      return build(true, [...INTENT_NOT_AUTHORIZED_REASONS], ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build(true, ['candidate_intent_invalid', ...INTENT_NOT_AUTHORIZED_REASONS], ['no_intent_suppression_input']);
+    }
+
+    // screen for smuggled forbidden flag / exec cmd / secret / endpoint -> fail closed
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!INTENT_SUPPRESSION_COMPONENTS.includes(k)) shallow[k] = v;
+    }
+    const screen = intentScreen(shallow);
+    for (const slot of INTENT_SUPPRESSION_COMPONENTS) {
+      const c = obj[slot];
+      if (c != null && typeof c === 'object') {
+        if (intentHasForbiddenTrueFlag(c)) screen.push('forbidden_trading_indicator_blocked');
+        if (intentHasExecCmdKey(c)) screen.push('execution_command_blocked');
+        if (intentHasEndpointOrMainnet(c)) screen.push('endpoint_or_mainnet_blocked');
+      }
+    }
+    if (screen.length > 0) {
+      return build(true, [...INTENT_NOT_AUTHORIZED_REASONS], ['suppression_input_blocked']);
+    }
+
+    const suppressionReasons = [];
+
+    // candidate intent must be CANDIDATE_INTENT_RECORDED
+    const cir = obj.candidate_intent_record;
+    const candidateState = intentRecognizeCandidateRecord(cir);
+    if (candidateState === null || candidateState !== 'CANDIDATE_INTENT_RECORDED' || cir.candidate_intent_valid !== true) {
+      suppressionReasons.push('candidate_intent_invalid');
+    }
+
+    // risk_verdict must be RISK_PASS_ADVISORY
+    const verdictState = intentRecognizeRiskVerdict(obj.risk_verdict);
+    if (verdictState !== 'RISK_PASS_ADVISORY') {
+      suppressionReasons.push('risk_not_passed');
+    }
+
+    // audit must be INTENT_AUDIT_VALID
+    const auditState = intentRecognizeAuditEnvelope(obj.audit);
+    if (auditState !== 'INTENT_AUDIT_VALID') {
+      suppressionReasons.push('audit_missing');
+    }
+
+    // ledger_append duplicate -> suppressed
+    const ledgerState = intentRecognizeLedgerAppend(obj.ledger_append);
+    if (ledgerState === 'INTENT_LEDGER_DUPLICATE') {
+      suppressionReasons.push('duplicate_intent_record');
+    }
+
+    // route not reviewed (Stage 9 not done yet)
+    if (obj.route_reviewed !== true) {
+      suppressionReasons.push('route_not_reviewed');
+    }
+
+    // ALWAYS attach the not_*_authorized reasons (never authorized at this layer)
+    suppressionReasons.push(...INTENT_NOT_AUTHORIZED_REASONS);
+
+    // suppression is ALWAYS emitted at this layer (intent never progresses to
+    // routing/sign/send here) -> suppressed is always true.
+    return build(true, suppressionReasons, ['intent_suppressed_at_intent_layer']);
+  } catch {
+    return build(true, [...INTENT_NOT_AUTHORIZED_REASONS], ['input_inspection_error']);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// (I) INTENT HEALTH / STATUS
+//
+// Consumes the intent input boundary + candidate intent + ledger append + state
+// machine + audit + suppression, and derives a STATUS ONLY. CRITICAL: every state
+// keeps all 20 flags false; INTENT_HEALTH_AWAITING_ROUTE_REVIEW does NOT open
+// routing/route/transaction/can_send. Ordering: smuggled forbidden flag / secret /
+// mainnet / REAL-LIVE / invalid boundary / invalid audit -> BLOCKED; missing
+// required component -> UNCONFIGURED; suppressed -> SUPPRESSED; awaiting route
+// review -> AWAITING_ROUTE_REVIEW; candidate recorded + audit valid + not
+// suppressed -> CANDIDATE_RECORDED; else -> DEGRADED.
+// ---------------------------------------------------------------------------
+
+const INTENT_HEALTH_STATES = Object.freeze([
+  'INTENT_HEALTH_UNCONFIGURED', 'INTENT_HEALTH_DEGRADED',
+  'INTENT_HEALTH_CANDIDATE_RECORDED', 'INTENT_HEALTH_AWAITING_ROUTE_REVIEW',
+  'INTENT_HEALTH_SUPPRESSED', 'INTENT_HEALTH_BLOCKED'
+]);
+
+const INTENT_HEALTH_COMPONENTS = Object.freeze([
+  'intent_input_boundary', 'candidate_intent_record', 'ledger_append',
+  'intent_state', 'audit', 'suppression'
+]);
+
+export function describeIntentHealthContract() {
+  return Object.freeze({
+    contract: 'intent-health',
+    version: '0.0.0',
+    test_only: true,
+    supported_states: INTENT_HEALTH_STATES,
+    advisory_only: true,
+    valid: false,
+    intent_health_state: 'INTENT_HEALTH_UNCONFIGURED',
+    status: 'INTENT_HEALTH_UNCONFIGURED',
+    reasons: Object.freeze([]),
+    ...intentSafeFlags(),
+    note: 'Read-only INTENT HEALTH / STATUS. Consumes the intent input boundary + candidate intent record + ledger append + intent state machine + audit envelope + suppression and derives a STATUS ONLY — it confers NO order/route/transaction/signing/send permission. CRITICAL: every state keeps all 20 readiness/execution flags false; INTENT_HEALTH_AWAITING_ROUTE_REVIEW does NOT open routing_ready / route_ready / transaction_ready / can_send. Ordering: smuggled forbidden trading flag (top-level or any component) / secret / mainnet / REAL-LIVE / invalid intent_input_boundary (INTENT_INPUT_INVALID) / invalid audit (INTENT_AUDIT_INVALID) -> INTENT_HEALTH_BLOCKED; missing required component -> INTENT_HEALTH_UNCONFIGURED; suppression.suppressed === true -> INTENT_HEALTH_SUPPRESSED; intent_state INTENT_AWAITING_ROUTE_REVIEW -> INTENT_HEALTH_AWAITING_ROUTE_REVIEW (routing still false); intent_state INTENT_CANDIDATE_RECORDED + audit valid + not suppressed -> INTENT_HEALTH_CANDIDATE_RECORDED; else INTENT_HEALTH_DEGRADED. Hostile/throwing input -> frozen INTENT_HEALTH_UNCONFIGURED, never throws.'
+  });
+}
+
+export function evaluateIntentHealth(inputs) {
+  const build = (state, reasons) => Object.freeze({
+    valid: (state !== 'INTENT_HEALTH_BLOCKED'),
+    intent_health_state: state,
+    status: state,
+    reasons: Object.freeze([...new Set(reasons || [])]),
+    read_only: true,
+    advisory_only: true,
+    ...intentSafeFlags()
+  });
+  try {
+    const obj = (inputs != null && typeof inputs === 'object' && !Array.isArray(inputs)) ? inputs : null;
+    if (intentUninspectable(obj, [...INTENT_HEALTH_COMPONENTS])) {
+      return build('INTENT_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+    }
+    if (!obj) {
+      return build('INTENT_HEALTH_UNCONFIGURED', ['no_intent_health_input']);
+    }
+
+    // screen top-level + every component for smuggled forbidden flag / exec cmd /
+    // secret / endpoint / mainnet -> BLOCKED
+    const shallow = {};
+    for (const [k, v] of Object.entries(obj)) {
+      if (!INTENT_HEALTH_COMPONENTS.includes(k)) shallow[k] = v;
+    }
+    const blocked = intentScreen(shallow);
+    for (const slot of INTENT_HEALTH_COMPONENTS) {
+      const c = obj[slot];
+      if (c != null && typeof c === 'object') {
+        if (intentHasForbiddenTrueFlag(c)) blocked.push('forbidden_trading_indicator_blocked');
+        if (intentHasExecCmdKey(c)) blocked.push('execution_command_blocked');
+        if (intentHasEndpointOrMainnet(c)) blocked.push('endpoint_or_mainnet_blocked');
+      }
+    }
+
+    const boundary = obj.intent_input_boundary;
+    const candidate = obj.candidate_intent_record;
+    const ledger = obj.ledger_append;
+    const stateMachine = obj.intent_state;
+    const audit = obj.audit;
+    const suppression = obj.suppression;
+
+    const boundaryState = intentRecognizeInputBoundaryResult(boundary);
+    const auditState = intentRecognizeAuditEnvelope(audit);
+
+    // invalid boundary / invalid audit -> BLOCKED
+    if (boundaryState === 'INTENT_INPUT_INVALID') blocked.push('intent_input_boundary_invalid');
+    if (auditState === 'INTENT_AUDIT_INVALID') blocked.push('intent_audit_invalid');
+    if (blocked.length > 0) {
+      return build('INTENT_HEALTH_BLOCKED', blocked);
+    }
+
+    // missing required component -> UNCONFIGURED
+    const candidateState = intentRecognizeCandidateRecord(candidate);
+    const intentState = intentRecognizeStateMachine(stateMachine);
+    if (boundaryState === null || candidateState === null || intentState === null ||
+        auditState === null || suppression == null || typeof suppression !== 'object' || Array.isArray(suppression)) {
+      return build('INTENT_HEALTH_UNCONFIGURED', ['required_component_missing']);
+    }
+    // ledger_append, when present, must be a recognized result
+    if (ledger != null && intentRecognizeLedgerAppend(ledger) === null) {
+      return build('INTENT_HEALTH_UNCONFIGURED', ['required_component_missing']);
+    }
+
+    const suppressed = suppression.suppressed === true;
+
+    // suppressed -> SUPPRESSED
+    if (suppressed) {
+      return build('INTENT_HEALTH_SUPPRESSED', ['intent_suppressed']);
+    }
+
+    // awaiting route review -> AWAITING_ROUTE_REVIEW (routing still false)
+    if (intentState === 'INTENT_AWAITING_ROUTE_REVIEW') {
+      return build('INTENT_HEALTH_AWAITING_ROUTE_REVIEW', ['route_review_pending_routing_not_ready']);
+    }
+
+    // candidate recorded + audit valid + not suppressed -> CANDIDATE_RECORDED
+    if (intentState === 'INTENT_CANDIDATE_RECORDED' &&
+        candidateState === 'CANDIDATE_INTENT_RECORDED' &&
+        auditState === 'INTENT_AUDIT_VALID') {
+      return build('INTENT_HEALTH_CANDIDATE_RECORDED', ['candidate_recorded_audit_valid']);
+    }
+
+    // else -> DEGRADED
+    return build('INTENT_HEALTH_DEGRADED', ['intent_health_degraded']);
+  } catch {
+    return build('INTENT_HEALTH_UNCONFIGURED', ['input_inspection_error']);
+  }
+}

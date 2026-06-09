@@ -18,7 +18,16 @@ import {
   evaluateCandidateIntentRecord,
   describeIntentLedgerContract,
   validateIntentLedgerAppend,
-  evaluateIntentLedgerAppend
+  evaluateIntentLedgerAppend,
+  describeIntentStateMachineContract,
+  evaluateIntentStateTransition,
+  describeIntentAuditEnvelopeContract,
+  validateIntentAuditEnvelope,
+  evaluateIntentAuditEnvelope,
+  describeIntentSuppressionContract,
+  evaluateIntentSuppression,
+  describeIntentHealthContract,
+  evaluateIntentHealth
 } from '../src/index.mjs';
 
 import {
@@ -54,6 +63,7 @@ import { normalizeIngestionEvent } from '../../data-ingestion-foundations/src/in
 void validateIntentInputBoundary;
 void validateCandidateIntentRecordInput;
 void validateIntentLedgerAppend;
+void validateIntentAuditEnvelope;
 
 // ---------------------------------------------------------------------------
 // REAL Stage-4 -> Stage-5 -> Stage-6 -> Stage-7 builders
@@ -692,6 +702,514 @@ test('(E) hostile input -> frozen, no throw, UNCONFIGURED', () => {
     assert.doesNotThrow(() => { r = evaluateIntentLedgerAppend(h); });
     assertSafe(r);
     assert.equal(r.ledger_state, 'INTENT_LEDGER_UNCONFIGURED');
+  }
+});
+
+// shared good audit envelope input + valid audit result
+function goodAuditInput() {
+  return {
+    purpose: 'intent_audit_envelope_input',
+    intent_record_ref: 'rec-1',
+    actor_ref: 'actor-1',
+    decision_ref: 'dec-1',
+    risk_verdict_ref: 'rv-1',
+    signal_ref: 'sig-ref-1',
+    reason_codes: ['risk_pass_advisory_confirmed', 'candidate_recorded'],
+    audit_required: true,
+    no_secret_material: true,
+    no_private_key_material: true,
+    no_execution_authority: true
+  };
+}
+const validAudit = evaluateIntentAuditEnvelope(goodAuditInput());
+
+// ===========================================================================
+// (F) INTENT STATE MACHINE
+// ===========================================================================
+
+test('(F) descriptor: shape, states, safe flags, no exec authority', () => {
+  const d = describeIntentStateMachineContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'intent-state-machine');
+  assert.equal(d.awaiting_route_review, false);
+  assert.deepEqual([...d.supported_states], [
+    'INTENT_UNCONFIGURED', 'INTENT_CANDIDATE_RECORDED', 'INTENT_REJECTED',
+    'INTENT_SUPPRESSED', 'INTENT_BLOCKED', 'INTENT_AWAITING_ROUTE_REVIEW'
+  ]);
+});
+
+test('(F) missing intent -> fail-closed UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 5, 'x']) {
+    const r = evaluateIntentStateTransition(inp);
+    assertSafe(r);
+    assert.equal(r.intent_state, 'INTENT_UNCONFIGURED');
+  }
+  // recognized object but no candidate record -> UNCONFIGURED
+  const r2 = evaluateIntentStateTransition({ purpose: 'intent_state_input' });
+  assertSafe(r2);
+  assert.equal(r2.intent_state, 'INTENT_UNCONFIGURED');
+});
+
+test('(F) valid candidate -> CANDIDATE_RECORDED only (no exec authority)', () => {
+  const r = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate
+  });
+  assertSafe(r);
+  assert.equal(r.intent_state, 'INTENT_CANDIDATE_RECORDED');
+  assert.equal(r.awaiting_route_review, false);
+  assert.equal(r.valid, true);
+});
+
+test('(F) rejection reason -> REJECTED', () => {
+  const r = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+    rejection_reason: 'user_cancelled'
+  });
+  assertSafe(r);
+  assert.equal(r.intent_state, 'INTENT_REJECTED');
+  // also via requested transition
+  const r2 = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+    requested_transition: 'reject'
+  });
+  assertSafe(r2);
+  assert.equal(r2.intent_state, 'INTENT_REJECTED');
+});
+
+test('(F) suppression -> SUPPRESSED', () => {
+  const r = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+    suppression: { suppressed: true, suppression_reasons: ['route_not_reviewed'], read_only: true }
+  });
+  assertSafe(r);
+  assert.equal(r.intent_state, 'INTENT_SUPPRESSED');
+  const r2 = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+    requested_transition: 'suppress'
+  });
+  assertSafe(r2);
+  assert.equal(r2.intent_state, 'INTENT_SUPPRESSED');
+});
+
+test('(F) candidate not recorded (rejected) -> REJECTED', () => {
+  const rejected = evaluateCandidateIntentRecord({
+    purpose: 'candidate_intent_record_input',
+    intent_input_boundary: validIntentBoundaryResult,
+    risk_verdict: verdictDegraded, record_ref: 'rec-rj'
+  });
+  assert.equal(rejected.candidate_intent_state, 'CANDIDATE_INTENT_REJECTED');
+  const r = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: rejected
+  });
+  assertSafe(r);
+  assert.equal(r.intent_state, 'INTENT_REJECTED');
+});
+
+test('(F) route review request -> AWAITING only, routing flags false', () => {
+  const r = evaluateIntentStateTransition({
+    purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+    requested_transition: 'request_route_review'
+  });
+  assertSafe(r);
+  assert.equal(r.intent_state, 'INTENT_AWAITING_ROUTE_REVIEW');
+  assert.equal(r.awaiting_route_review, true);
+  // CRITICAL: awaiting route review does NOT mean route ready / executed
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.route_ready, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.order_ready, false);
+  assert.equal(r.signing_permitted, false);
+});
+
+test('(F) smuggled forbidden flag / exec cmd / secret / endpoint -> BLOCKED', () => {
+  for (const smuggle of [
+    { can_send: true }, { route_ready: true }, { execute: true }, { route: true },
+    { api_key: 'sk-FSECRET' }, { rpc: 'https://host/x' }, { network: 'mainnet-beta' }
+  ]) {
+    const r = evaluateIntentStateTransition({
+      purpose: 'intent_state_input', candidate_intent_record: recordedCandidate, ...smuggle
+    });
+    assertSafe(r);
+    assert.equal(r.intent_state, 'INTENT_BLOCKED');
+    assert.equal(r.valid, false);
+  }
+});
+
+test('(F) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateIntentStateTransition(h); });
+    assertSafe(r);
+    assert.equal(r.intent_state, 'INTENT_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (G) INTENT AUDIT ENVELOPE
+// ===========================================================================
+
+test('(G) descriptor: shape, states, safe flags, no secret', () => {
+  const d = describeIntentAuditEnvelopeContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'intent-audit-envelope');
+  assert.equal(d.intent_audit_valid, false);
+  assert.equal(d.audit_required, true);
+  assertNoExecutionFields(d);
+  assert.deepEqual([...d.supported_states], [
+    'INTENT_AUDIT_UNCONFIGURED', 'INTENT_AUDIT_INVALID', 'INTENT_AUDIT_VALID'
+  ]);
+});
+
+test('(G) missing audit -> fail-closed UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 3]) {
+    const r = evaluateIntentAuditEnvelope(inp);
+    assertSafe(r);
+    assert.equal(r.audit_state, 'INTENT_AUDIT_UNCONFIGURED');
+  }
+});
+
+test('(G) missing reason_codes -> refused (audit_reason_missing)', () => {
+  const inp = goodAuditInput();
+  delete inp.reason_codes;
+  const r = evaluateIntentAuditEnvelope(inp);
+  assertSafe(r);
+  assert.equal(r.audit_state, 'INTENT_AUDIT_INVALID');
+  assert.equal(r.reasons.includes('audit_reason_missing'), true);
+  // empty array also refused
+  const r2 = evaluateIntentAuditEnvelope({ ...goodAuditInput(), reason_codes: [] });
+  assert.equal(r2.audit_state, 'INTENT_AUDIT_INVALID');
+  assert.equal(r2.reasons.includes('audit_reason_missing'), true);
+});
+
+test('(G) missing decision_ref -> refused (audit_decision_missing)', () => {
+  const inp = goodAuditInput();
+  delete inp.decision_ref;
+  const r = evaluateIntentAuditEnvelope(inp);
+  assertSafe(r);
+  assert.equal(r.audit_state, 'INTENT_AUDIT_INVALID');
+  assert.equal(r.reasons.includes('audit_decision_missing'), true);
+});
+
+test('(G) missing intent_record_ref/actor_ref -> refused (audit_ref_missing)', () => {
+  const inp = goodAuditInput();
+  delete inp.intent_record_ref;
+  const r = evaluateIntentAuditEnvelope(inp);
+  assertSafe(r);
+  assert.equal(r.audit_state, 'INTENT_AUDIT_INVALID');
+  assert.equal(r.reasons.includes('audit_ref_missing'), true);
+});
+
+test('(G) valid audit envelope -> AUDIT_VALID only', () => {
+  const r = evaluateIntentAuditEnvelope(goodAuditInput());
+  assertSafe(r);
+  assert.equal(r.audit_state, 'INTENT_AUDIT_VALID');
+  assert.equal(r.intent_audit_valid, true);
+  assert.equal(r.audit_complete, true);
+  assert.equal(r.audit_required, true);
+  assertNoExecutionFields(r);
+  // no secret/key material in output
+  assert.equal('private_key' in r, false);
+  assert.equal('seed' in r, false);
+});
+
+test('(G) secret / key material -> refused and never echoed', () => {
+  const cases = [
+    { private_key: 'PK-GSECRET' },
+    { seed: 'SEED-GSECRET' },
+    { signer_credential: 'CRED-GSECRET' },
+    { auth_token: 'TOK-GSECRET' },
+    { rpc_endpoint: 'https://host/GSECRETPATH' },
+    { network: 'mainnet-beta' }
+  ];
+  for (const c of cases) {
+    const r = evaluateIntentAuditEnvelope({ ...goodAuditInput(), ...c });
+    assertSafe(r);
+    assert.equal(r.audit_state, 'INTENT_AUDIT_INVALID');
+    for (const v of Object.values(c)) assertNoSecretEcho(r, v);
+  }
+});
+
+test('(G) smuggled execution flags -> refused', () => {
+  for (const smuggle of [{ can_send: true }, { route_ready: true }, { execute: true }, { send: true }]) {
+    const r = evaluateIntentAuditEnvelope({ ...goodAuditInput(), ...smuggle });
+    assertSafe(r);
+    assert.equal(r.audit_state, 'INTENT_AUDIT_INVALID');
+  }
+});
+
+test('(G) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateIntentAuditEnvelope(h); });
+    assertSafe(r);
+    assert.equal(r.audit_state, 'INTENT_AUDIT_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (H) INTENT SUPPRESSION / REJECTION
+// ===========================================================================
+
+const NOT_AUTHORIZED = [
+  'not_route_authorized', 'not_order_authorized', 'not_sign_authorized',
+  'not_send_authorized', 'not_execution_authorized'
+];
+function assertNotAuthorized(res) {
+  for (const r of NOT_AUTHORIZED) {
+    assert.equal(res.suppression_reasons.includes(r), true, `must include ${r}`);
+  }
+}
+
+const ledgerDuplicate = evaluateIntentLedgerAppend({
+  purpose: 'intent_ledger_append_input',
+  previous_records: [{ intent_record_ref: 'rec-1' }],
+  candidate_intent_record: recordedCandidate
+});
+
+test('(H) descriptor: shape, allowlist, safe flags', () => {
+  const d = describeIntentSuppressionContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'intent-suppression');
+  assert.equal(d.suppressed, true);
+  assertNotAuthorized(d);
+});
+
+test('(H) missing candidate -> suppressed + candidate_intent_invalid', () => {
+  const r = evaluateIntentSuppression({ purpose: 'intent_suppression_input' });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('candidate_intent_invalid'), true);
+  assertNotAuthorized(r);
+});
+
+test('(H) candidate not recorded -> suppressed + candidate_intent_invalid', () => {
+  const rejected = evaluateCandidateIntentRecord({
+    purpose: 'candidate_intent_record_input',
+    intent_input_boundary: validIntentBoundaryResult,
+    risk_verdict: verdictDegraded, record_ref: 'rec-h'
+  });
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: rejected,
+    risk_verdict: verdictPass, audit: validAudit, route_reviewed: true
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('candidate_intent_invalid'), true);
+  assertNotAuthorized(r);
+});
+
+test('(H) risk not passed -> suppressed + risk_not_passed', () => {
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+    risk_verdict: verdictDegraded, audit: validAudit, route_reviewed: true
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('risk_not_passed'), true);
+});
+
+test('(H) audit missing -> suppressed + audit_missing', () => {
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+    risk_verdict: verdictPass, route_reviewed: true
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('audit_missing'), true);
+});
+
+test('(H) duplicate record -> suppressed + duplicate_intent_record', () => {
+  assert.equal(ledgerDuplicate.ledger_state, 'INTENT_LEDGER_DUPLICATE');
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+    risk_verdict: verdictPass, audit: validAudit, ledger_append: ledgerDuplicate, route_reviewed: true
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('duplicate_intent_record'), true);
+});
+
+test('(H) route not reviewed -> suppressed + route_not_reviewed', () => {
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+    risk_verdict: verdictPass, audit: validAudit // route_reviewed defaults false
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('route_not_reviewed'), true);
+});
+
+test('(H) advisory-valid intent -> STILL suppressed (route_not_reviewed + not_*_authorized), no routing/sign/send', () => {
+  const r = evaluateIntentSuppression({
+    purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+    risk_verdict: verdictPass, audit: validAudit
+    // route_reviewed defaults false -> still suppressed for routing/sign/send
+  });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  // even advisory-valid -> never progresses
+  assert.equal(r.suppression_reasons.includes('route_not_reviewed'), true);
+  assertNotAuthorized(r);
+  // suppression opens NO routing/sign/send
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.route_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(H) smuggled forbidden flag / exec cmd / secret -> fail-closed suppressed', () => {
+  for (const smuggle of [{ can_send: true }, { route_ready: true }, { execute: true }, { api_key: 'sk-HSECRET' }]) {
+    const r = evaluateIntentSuppression({
+      purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+      risk_verdict: verdictPass, audit: validAudit, route_reviewed: true, ...smuggle
+    });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assertNotAuthorized(r);
+    if (smuggle.api_key) assertNoSecretEcho(r, smuggle.api_key);
+  }
+});
+
+test('(H) hostile input -> frozen, no throw, suppressed', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateIntentSuppression(h); });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assertNotAuthorized(r);
+  }
+});
+
+// ===========================================================================
+// (I) INTENT HEALTH / STATUS
+// ===========================================================================
+
+const stateRecorded = evaluateIntentStateTransition({
+  purpose: 'intent_state_input', candidate_intent_record: recordedCandidate
+});
+const stateAwaiting = evaluateIntentStateTransition({
+  purpose: 'intent_state_input', candidate_intent_record: recordedCandidate,
+  requested_transition: 'request_route_review'
+});
+const suppressionResult = evaluateIntentSuppression({
+  purpose: 'intent_suppression_input', candidate_intent_record: recordedCandidate,
+  risk_verdict: verdictPass, audit: validAudit, route_reviewed: true
+});
+const ledgerAppendOk = evaluateIntentLedgerAppend({
+  purpose: 'intent_ledger_append_input', previous_records: [],
+  candidate_intent_record: recordedCandidate
+});
+
+function healthInputs(overrides) {
+  return {
+    intent_input_boundary: validIntentBoundaryResult,
+    candidate_intent_record: recordedCandidate,
+    ledger_append: ledgerAppendOk,
+    intent_state: stateRecorded,
+    audit: validAudit,
+    suppression: { suppressed: false, suppression_reasons: [], read_only: true },
+    ...overrides
+  };
+}
+
+test('(I) descriptor: shape, states, safe flags', () => {
+  const d = describeIntentHealthContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'intent-health');
+  assert.deepEqual([...d.supported_states], [
+    'INTENT_HEALTH_UNCONFIGURED', 'INTENT_HEALTH_DEGRADED',
+    'INTENT_HEALTH_CANDIDATE_RECORDED', 'INTENT_HEALTH_AWAITING_ROUTE_REVIEW',
+    'INTENT_HEALTH_SUPPRESSED', 'INTENT_HEALTH_BLOCKED'
+  ]);
+});
+
+test('(I) missing components -> UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 4, {}]) {
+    const r = evaluateIntentHealth(inp);
+    assertSafe(r);
+    assert.equal(r.intent_health_state, 'INTENT_HEALTH_UNCONFIGURED');
+  }
+  // partial -> UNCONFIGURED
+  const r2 = evaluateIntentHealth({ intent_input_boundary: validIntentBoundaryResult });
+  assertSafe(r2);
+  assert.equal(r2.intent_health_state, 'INTENT_HEALTH_UNCONFIGURED');
+});
+
+test('(I) invalid boundary -> BLOCKED', () => {
+  const invalidBoundary = evaluateIntentInputBoundary({
+    purpose: 'intent_input_boundary', risk_verdict: verdictBlocked, risk_health: healthBlocked
+  });
+  assert.equal(invalidBoundary.intent_input_state, 'INTENT_INPUT_INVALID');
+  const r = evaluateIntentHealth(healthInputs({ intent_input_boundary: invalidBoundary }));
+  assertSafe(r);
+  assert.equal(r.intent_health_state, 'INTENT_HEALTH_BLOCKED');
+  assert.equal(r.valid, false);
+});
+
+test('(I) invalid audit -> BLOCKED', () => {
+  const invalidAudit = evaluateIntentAuditEnvelope({ ...goodAuditInput(), reason_codes: [] });
+  assert.equal(invalidAudit.audit_state, 'INTENT_AUDIT_INVALID');
+  const r = evaluateIntentHealth(healthInputs({ audit: invalidAudit }));
+  assertSafe(r);
+  assert.equal(r.intent_health_state, 'INTENT_HEALTH_BLOCKED');
+});
+
+test('(I) suppressed intent -> SUPPRESSED', () => {
+  const r = evaluateIntentHealth(healthInputs({
+    suppression: { suppressed: true, suppression_reasons: ['route_not_reviewed'], read_only: true }
+  }));
+  assertSafe(r);
+  assert.equal(r.intent_health_state, 'INTENT_HEALTH_SUPPRESSED');
+});
+
+test('(I) candidate recorded -> CANDIDATE_RECORDED only', () => {
+  const r = evaluateIntentHealth(healthInputs());
+  assertSafe(r);
+  assert.equal(r.intent_health_state, 'INTENT_HEALTH_CANDIDATE_RECORDED');
+  assert.equal(r.valid, true);
+});
+
+test('(I) awaiting route review -> AWAITING only, routing false', () => {
+  const r = evaluateIntentHealth(healthInputs({ intent_state: stateAwaiting }));
+  assertSafe(r);
+  assert.equal(r.intent_health_state, 'INTENT_HEALTH_AWAITING_ROUTE_REVIEW');
+  // CRITICAL: routing not opened
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.route_ready, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(I) smuggled routing/order/sign/send flags -> BLOCKED', () => {
+  for (const smuggle of [
+    { routing_ready: true }, { route_ready: true }, { order_ready: true },
+    { signing_permitted: true }, { can_send: true }, { execute: true }
+  ]) {
+    const r = evaluateIntentHealth(healthInputs(smuggle));
+    assertSafe(r);
+    assert.equal(r.intent_health_state, 'INTENT_HEALTH_BLOCKED');
+  }
+});
+
+test('(I) secret / mainnet / REAL-LIVE -> BLOCKED', () => {
+  for (const c of [
+    { api_key: 'sk-ISECRET' }, { rpc: 'https://host/x' },
+    { network: 'mainnet-beta' }, { env: 'prod' }, { real_live: true }, { mainnet_enabled: true }
+  ]) {
+    const r = evaluateIntentHealth(healthInputs(c));
+    assertSafe(r);
+    assert.equal(r.intent_health_state, 'INTENT_HEALTH_BLOCKED');
+    if (c.api_key) assertNoSecretEcho(r, c.api_key);
+  }
+});
+
+test('(I) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateIntentHealth(h); });
+    assertSafe(r);
+    assert.equal(r.intent_health_state, 'INTENT_HEALTH_UNCONFIGURED');
   }
 });
 
