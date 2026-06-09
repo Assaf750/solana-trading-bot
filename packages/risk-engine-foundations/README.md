@@ -66,6 +66,62 @@ output. Fail-Safe: thin liquidity OR poor exit OR high slippage ->
 `LIQUIDITY_EXIT_DEGRADED`; only adequate/deep liquidity + feasible exit + low
 slippage -> `LIQUIDITY_EXIT_PASS_ADVISORY`. A PASS opens NO route / intent.
 
+## (F) Exposure / Limit Risk (read-only, advisory)
+
+`evaluateExposureLimitRisk` derives an advisory verdict from safe enum input ONLY
+(`exposure_bucket`, `wallet_limit_state`, `token_limit_state`). NO position
+lifecycle, NO live balance, NO clock. Fail-Safe: exposure `over_limit` OR
+wallet/token limit `blocked` -> `EXPOSURE_LIMIT_BLOCKED`; any `unknown` OR
+`near_limit` -> `EXPOSURE_LIMIT_DEGRADED`; only exposure `within_limit` +
+wallet_limit `ok` + token_limit `ok` -> `EXPOSURE_LIMIT_PASS_ADVISORY`. A PASS
+opens NO intent / routing / trading. `risk_reason_codes` are drawn from a fixed
+allowlist (`exposure_unknown`, `exposure_near_limit`, `exposure_over_limit`,
+`wallet_limit_unknown`, `wallet_limit_near`, `wallet_limit_blocked`,
+`token_limit_unknown`, `token_limit_near`, `token_limit_blocked`,
+`exposure_within_limit_advisory`).
+
+## (G) Risk Verdict / Explanation (read-only, advisory)
+
+`evaluateRiskVerdict` aggregates the three prior advisory risk results
+(`hard_risk`, `liquidity_exit`, `exposure`) by their dedicated `*_state` fields
+into a single advisory verdict + explanation. Fail-Safe: a smuggled forbidden
+flag / execution command / secret / endpoint / mainnet on any component ->
+`RISK_BLOCKED`; missing any of the three components -> `RISK_UNCONFIGURED`; any
+component blocked -> `RISK_BLOCKED`; any component degraded/unconfigured/invalid ->
+`RISK_DEGRADED`; all three advisory-pass -> `RISK_PASS_ADVISORY`. **CRITICAL:**
+even `RISK_PASS_ADVISORY` opens NO `intent_ready` / `routing_ready` /
+`trading_ready` / `can_send`. Reason codes (`hard_risk_blocked`,
+`liquidity_exit_blocked`, `exposure_limit_blocked`, `hard_risk_degraded`,
+`liquidity_exit_degraded`, `exposure_limit_degraded`, `risk_components_incomplete`)
+and explanation codes (`hard_risk_pass`, `liquidity_exit_pass`,
+`exposure_limit_pass`, `all_components_advisory_pass`) contain NO order/route/send
+token.
+
+## (H) Risk Suppression / Rejection (read-only)
+
+`evaluateRiskSuppression` prevents progression to intent when risk is incomplete /
+blocked / degraded. It emits REASONS ONLY and creates **NO intent**. Risk is NEVER
+intent/route/execution authorized at this layer, so `not_intent_authorized` +
+`not_route_authorized` + `not_execution_authorized` are ALWAYS present when
+emitting. Missing/unconfigured verdict -> `suppressed:true` + `risk_not_evaluated`;
+`RISK_BLOCKED` verdict -> `suppressed:true` + the matching `*_blocked` reason(s);
+`RISK_DEGRADED` -> `suppressed:true` + `risk_degraded`; `RISK_PASS_ADVISORY` ->
+`suppressed:false` but STILL no intent (only the `not_*_authorized` reasons).
+Suppression opens NO `intent_ready` / `routing_ready` / `trading_ready`.
+
+## (I) Risk Health / Status (read-only, advisory)
+
+`evaluateRiskHealth` consumes the risk input boundary + hard-risk + liquidity-exit
++ exposure + verdict + suppression and derives a STATUS ONLY. Fail-Safe: a
+smuggled forbidden trading flag (top-level or any component) OR secret OR mainnet
+OR REAL-LIVE OR invalid `risk_input_boundary` (`RISK_INPUT_INVALID`) OR any
+component blocked (verdict `RISK_BLOCKED`) -> `RISK_HEALTH_BLOCKED`; missing
+required component -> `RISK_HEALTH_UNCONFIGURED`; `risk_suppression.suppressed ===
+true` -> `RISK_HEALTH_SUPPRESSED`; `RISK_INPUT_VALID` + verdict
+`RISK_PASS_ADVISORY` + not suppressed -> `RISK_HEALTH_PASS_ADVISORY`; else
+`RISK_HEALTH_DEGRADED`. **CRITICAL:** `RISK_HEALTH_PASS_ADVISORY` is advisory
+read-only, NOT intent / routing / trading readiness.
+
 ## Note on identifiers
 
 All identifiers here (`RISK_INPUT_*`, `HARD_RISK_*`, `LIQUIDITY_EXIT_*`,

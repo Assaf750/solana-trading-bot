@@ -168,3 +168,158 @@ export interface LiquidityExitRiskResult extends RiskSafeFlags {
 export function describeLiquidityExitRiskContract(): LiquidityExitRiskContractDescriptor;
 export function validateLiquidityExitRiskInput(input: unknown): LiquidityExitRiskValidationResult;
 export function evaluateLiquidityExitRisk(input: unknown): LiquidityExitRiskResult;
+
+// --- (F) Exposure / Limit Risk ---
+
+export type ExposureLimitState =
+  | 'EXPOSURE_LIMIT_UNCONFIGURED'
+  | 'EXPOSURE_LIMIT_INVALID'
+  | 'EXPOSURE_LIMIT_DEGRADED'
+  | 'EXPOSURE_LIMIT_BLOCKED'
+  | 'EXPOSURE_LIMIT_PASS_ADVISORY';
+
+export type ExposureBucket = 'unknown' | 'within_limit' | 'near_limit' | 'over_limit';
+export type LimitState = 'unknown' | 'ok' | 'near_limit' | 'blocked';
+
+export interface ExposureLimitRiskContractDescriptor extends RiskSafeFlags {
+  contract: 'exposure-limit-risk';
+  version: string;
+  test_only: true;
+  supported_states: readonly ExposureLimitState[];
+  supported_reason_codes: readonly string[];
+  supported_exposure_buckets: readonly ExposureBucket[];
+  supported_limit_states: readonly LimitState[];
+  advisory_only: true;
+  valid: boolean;
+  exposure_risk_state: ExposureLimitState;
+  risk_blocked: boolean;
+  risk_passed_advisory: boolean;
+  risk_reason_codes: readonly string[];
+  status: ExposureLimitState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface ExposureLimitRiskValidationResult extends RiskSafeFlags {
+  valid: boolean;
+  recognized: boolean;
+  reasons: readonly string[];
+}
+
+export interface ExposureLimitRiskResult extends RiskSafeFlags {
+  valid: boolean;
+  exposure_risk_state: ExposureLimitState;
+  risk_blocked: boolean;
+  risk_passed_advisory: boolean;
+  risk_reason_codes: readonly string[];
+  status: ExposureLimitState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeExposureLimitRiskContract(): ExposureLimitRiskContractDescriptor;
+export function validateExposureLimitRiskInput(input: unknown): ExposureLimitRiskValidationResult;
+export function evaluateExposureLimitRisk(input: unknown): ExposureLimitRiskResult;
+
+// --- (G) Risk Verdict / Explanation ---
+
+export type RiskVerdictState =
+  | 'RISK_UNCONFIGURED'
+  | 'RISK_DEGRADED'
+  | 'RISK_BLOCKED'
+  | 'RISK_PASS_ADVISORY';
+
+export interface RiskVerdictContractDescriptor extends RiskSafeFlags {
+  contract: 'risk-verdict';
+  version: string;
+  test_only: true;
+  supported_states: readonly RiskVerdictState[];
+  supported_reason_codes: readonly string[];
+  supported_explanation_codes: readonly string[];
+  advisory_only: true;
+  valid: boolean;
+  risk_verdict_state: RiskVerdictState;
+  risk_passed_advisory: boolean;
+  risk_blocked: boolean;
+  risk_reason_codes: readonly string[];
+  risk_explanation_codes: readonly string[];
+  status: RiskVerdictState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RiskVerdictResult extends RiskSafeFlags {
+  valid: boolean;
+  risk_verdict_state: RiskVerdictState;
+  risk_passed_advisory: boolean;
+  risk_blocked: boolean;
+  risk_reason_codes: readonly string[];
+  risk_explanation_codes: readonly string[];
+  status: RiskVerdictState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRiskVerdictContract(): RiskVerdictContractDescriptor;
+export function evaluateRiskVerdict(input: unknown): RiskVerdictResult;
+
+// --- (H) Risk Suppression / Rejection ---
+
+export interface RiskSuppressionContractDescriptor extends RiskSafeFlags {
+  contract: 'risk-suppression';
+  version: string;
+  test_only: true;
+  supported_reason_codes: readonly string[];
+  advisory_only: true;
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RiskSuppressionResult extends RiskSafeFlags {
+  suppressed: boolean;
+  suppression_reasons: readonly string[];
+  status: string;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRiskSuppressionContract(): RiskSuppressionContractDescriptor;
+export function evaluateRiskSuppression(input: unknown): RiskSuppressionResult;
+
+// --- (I) Risk Health / Status ---
+
+export type RiskHealthState =
+  | 'RISK_HEALTH_UNCONFIGURED'
+  | 'RISK_HEALTH_DEGRADED'
+  | 'RISK_HEALTH_PASS_ADVISORY'
+  | 'RISK_HEALTH_SUPPRESSED'
+  | 'RISK_HEALTH_BLOCKED';
+
+export interface RiskHealthContractDescriptor extends RiskSafeFlags {
+  contract: 'risk-health';
+  version: string;
+  test_only: true;
+  supported_states: readonly RiskHealthState[];
+  advisory_only: true;
+  valid: boolean;
+  risk_health_state: RiskHealthState;
+  risk_health_pass_advisory: boolean;
+  status: RiskHealthState;
+  reasons: readonly string[];
+  note: string;
+}
+
+export interface RiskHealthResult extends RiskSafeFlags {
+  valid: boolean;
+  risk_health_state: RiskHealthState;
+  risk_health_pass_advisory: boolean;
+  status: RiskHealthState;
+  reasons: readonly string[];
+  advisory_only: true;
+}
+
+export function describeRiskHealthContract(): RiskHealthContractDescriptor;
+export function evaluateRiskHealth(inputs: unknown): RiskHealthResult;

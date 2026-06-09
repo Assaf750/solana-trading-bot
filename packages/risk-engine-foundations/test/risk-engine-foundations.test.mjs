@@ -18,7 +18,16 @@ import {
   evaluateHardRiskGate,
   describeLiquidityExitRiskContract,
   validateLiquidityExitRiskInput,
-  evaluateLiquidityExitRisk
+  evaluateLiquidityExitRisk,
+  describeExposureLimitRiskContract,
+  validateExposureLimitRiskInput,
+  evaluateExposureLimitRisk,
+  describeRiskVerdictContract,
+  evaluateRiskVerdict,
+  describeRiskSuppressionContract,
+  evaluateRiskSuppression,
+  describeRiskHealthContract,
+  evaluateRiskHealth
 } from '../src/index.mjs';
 
 import {
@@ -44,6 +53,7 @@ import { normalizeIngestionEvent } from '../../data-ingestion-foundations/src/in
 void validateRiskInputBoundary;
 void validateHardRiskInput;
 void validateLiquidityExitRiskInput;
+void validateExposureLimitRiskInput;
 
 // ---------------------------------------------------------------------------
 // REAL Stage-4 -> Stage-5 -> Stage-6 builders
@@ -620,6 +630,457 @@ test('(E) hostile input -> frozen, no throw', () => {
     assert.doesNotThrow(() => { r = evaluateLiquidityExitRisk(h); });
     assertSafe(r);
     assert.equal(r.liquidity_exit_state, 'LIQUIDITY_EXIT_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// Shared REAL prior risk results (Parts D/E/F) for Parts G/H/I
+// ===========================================================================
+
+const hardPass = evaluateHardRiskGate({
+  purpose: 'hard_risk_input',
+  candidate_signal: walletLed,
+  risk_input_boundary: evaluateRiskInputBoundary(goodRiskBoundaryInput),
+  risk_factors: {
+    honeypot_indicator: false, freeze_authority_indicator: false,
+    mint_authority_indicator: false, owner_concentration_indicator: false,
+    blacklist_indicator: false, unknown_token_metadata: false
+  }
+});
+const hardBlocked = evaluateHardRiskGate({ purpose: 'hard_risk_input', risk_factors: { honeypot_indicator: true } });
+const hardDegraded = evaluateHardRiskGate({ purpose: 'hard_risk_input', risk_factors: { unknown_token_metadata: true } });
+
+const liqPass = evaluateLiquidityExitRisk({
+  purpose: 'liquidity_exit_input',
+  liquidity_observed_bucket: 'deep', exit_feasibility_bucket: 'feasible', slippage_risk_bucket: 'low'
+});
+const liqBlocked = evaluateLiquidityExitRisk({
+  purpose: 'liquidity_exit_input',
+  liquidity_observed_bucket: 'thin', exit_feasibility_bucket: 'feasible', slippage_risk_bucket: 'low'
+});
+
+const expPass = evaluateExposureLimitRisk({
+  purpose: 'exposure_limit_input',
+  exposure_bucket: 'within_limit', wallet_limit_state: 'ok', token_limit_state: 'ok'
+});
+const expBlocked = evaluateExposureLimitRisk({
+  purpose: 'exposure_limit_input',
+  exposure_bucket: 'over_limit', wallet_limit_state: 'ok', token_limit_state: 'ok'
+});
+
+const verdictPass = evaluateRiskVerdict({ purpose: 'risk_verdict_input', hard_risk: hardPass, liquidity_exit: liqPass, exposure: expPass });
+const verdictBlocked = evaluateRiskVerdict({ purpose: 'risk_verdict_input', hard_risk: hardBlocked, liquidity_exit: liqPass, exposure: expPass });
+const verdictDegraded = evaluateRiskVerdict({ purpose: 'risk_verdict_input', hard_risk: hardDegraded, liquidity_exit: liqPass, exposure: expPass });
+
+const riskBoundaryValidResult = evaluateRiskInputBoundary(goodRiskBoundaryInput);
+
+const ORDER_ROUTE_SEND_RE = /order|route|send|broadcast|jupiter|swap/i;
+
+// ===========================================================================
+// (F) EXPOSURE / LIMIT RISK
+// ===========================================================================
+
+test('(F) descriptor: shape, states, reason allowlist, safe flags', () => {
+  const d = describeExposureLimitRiskContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'exposure-limit-risk');
+  assert.equal(d.risk_blocked, false);
+  assert.equal(d.risk_passed_advisory, false);
+  assert.deepEqual([...d.supported_states], [
+    'EXPOSURE_LIMIT_UNCONFIGURED', 'EXPOSURE_LIMIT_INVALID', 'EXPOSURE_LIMIT_DEGRADED',
+    'EXPOSURE_LIMIT_BLOCKED', 'EXPOSURE_LIMIT_PASS_ADVISORY'
+  ]);
+});
+
+test('(F) missing input / missing enum -> fail-closed UNCONFIGURED', () => {
+  for (const inp of [undefined, null, { purpose: 'exposure_limit_input' }]) {
+    const r = evaluateExposureLimitRisk(inp);
+    assertSafe(r);
+    assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_UNCONFIGURED');
+  }
+  const empty = evaluateExposureLimitRisk({});
+  assertSafe(empty);
+  assert.equal(empty.exposure_risk_state, 'EXPOSURE_LIMIT_INVALID');
+});
+
+test('(F) invalid enum value -> INVALID', () => {
+  const r = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'enormous', wallet_limit_state: 'ok', token_limit_state: 'ok'
+  });
+  assertSafe(r);
+  assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_INVALID');
+});
+
+test('(F) unknown exposure -> DEGRADED', () => {
+  const r = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'unknown', wallet_limit_state: 'ok', token_limit_state: 'ok'
+  });
+  assertSafe(r);
+  assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_DEGRADED');
+  assert.equal(r.risk_passed_advisory, false);
+  assert.equal(r.risk_reason_codes.includes('exposure_unknown'), true);
+});
+
+test('(F) near limit -> DEGRADED', () => {
+  const r = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'near_limit', wallet_limit_state: 'near_limit', token_limit_state: 'ok'
+  });
+  assertSafe(r);
+  assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_DEGRADED');
+  assert.equal(r.risk_reason_codes.includes('exposure_near_limit'), true);
+  assert.equal(r.risk_reason_codes.includes('wallet_limit_near'), true);
+});
+
+test('(F) over limit -> BLOCKED', () => {
+  const r = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'over_limit', wallet_limit_state: 'ok', token_limit_state: 'ok'
+  });
+  assertSafe(r);
+  assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_BLOCKED');
+  assert.equal(r.risk_blocked, true);
+  assert.equal(r.risk_reason_codes.includes('exposure_over_limit'), true);
+});
+
+test('(F) wallet / token limit blocked -> BLOCKED', () => {
+  const rw = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'within_limit', wallet_limit_state: 'blocked', token_limit_state: 'ok'
+  });
+  assertSafe(rw);
+  assert.equal(rw.exposure_risk_state, 'EXPOSURE_LIMIT_BLOCKED');
+  assert.equal(rw.risk_reason_codes.includes('wallet_limit_blocked'), true);
+  const rt = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'within_limit', wallet_limit_state: 'ok', token_limit_state: 'blocked'
+  });
+  assertSafe(rt);
+  assert.equal(rt.exposure_risk_state, 'EXPOSURE_LIMIT_BLOCKED');
+  assert.equal(rt.risk_reason_codes.includes('token_limit_blocked'), true);
+});
+
+test('(F) ok / within_limit -> advisory PASS only (opens no intent/routing/trading)', () => {
+  const r = evaluateExposureLimitRisk({
+    purpose: 'exposure_limit_input',
+    exposure_bucket: 'within_limit', wallet_limit_state: 'ok', token_limit_state: 'ok'
+  });
+  assertSafe(r);
+  assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_PASS_ADVISORY');
+  assert.equal(r.risk_passed_advisory, true);
+  assert.equal(r.risk_blocked, false);
+  assert.deepEqual([...r.risk_reason_codes], ['exposure_within_limit_advisory']);
+  // pass opens NO intent / routing / trading
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.risk_ready, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(F) smuggled forbidden flag / exec cmd / secret / endpoint / mainnet -> INVALID, no echo', () => {
+  const cases = [
+    { can_send: true },
+    { execute: true },
+    { secret: 'sk-EXPSECRET' },
+    { ws: 'wss://EXPENDPOINT/x' },
+    { network: 'mainnet-beta-cluster' }
+  ];
+  for (const c of cases) {
+    const r = evaluateExposureLimitRisk({
+      purpose: 'exposure_limit_input',
+      exposure_bucket: 'within_limit', wallet_limit_state: 'ok', token_limit_state: 'ok',
+      ...c
+    });
+    assertSafe(r);
+    assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_INVALID');
+    assertNoSecretEcho(r, 'EXPSECRET');
+    assertNoSecretEcho(r, 'EXPENDPOINT');
+    assertNoSecretEcho(r, 'beta-cluster');
+  }
+});
+
+test('(F) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateExposureLimitRisk(h); });
+    assertSafe(r);
+    assert.equal(r.exposure_risk_state, 'EXPOSURE_LIMIT_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (G) RISK VERDICT / EXPLANATION
+// ===========================================================================
+
+test('(G) descriptor: shape, states, reason+explanation allowlists, safe flags', () => {
+  const d = describeRiskVerdictContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'risk-verdict');
+  assert.equal(d.risk_blocked, false);
+  assert.equal(d.risk_passed_advisory, false);
+  assert.deepEqual([...d.supported_states], [
+    'RISK_UNCONFIGURED', 'RISK_DEGRADED', 'RISK_BLOCKED', 'RISK_PASS_ADVISORY'
+  ]);
+});
+
+test('(G) missing components -> UNCONFIGURED', () => {
+  for (const inp of [undefined, null, {}, { purpose: 'risk_verdict_input', hard_risk: hardPass }]) {
+    const r = evaluateRiskVerdict(inp);
+    assertSafe(r);
+    assert.equal(r.risk_verdict_state, 'RISK_UNCONFIGURED');
+  }
+});
+
+test('(G) any blocked component -> BLOCKED', () => {
+  const cases = [
+    [{ hard_risk: hardBlocked, liquidity_exit: liqPass, exposure: expPass }, 'hard_risk_blocked'],
+    [{ hard_risk: hardPass, liquidity_exit: liqBlocked, exposure: expPass }, 'liquidity_exit_blocked'],
+    [{ hard_risk: hardPass, liquidity_exit: liqPass, exposure: expBlocked }, 'exposure_limit_blocked']
+  ];
+  for (const [comp, code] of cases) {
+    const r = evaluateRiskVerdict({ purpose: 'risk_verdict_input', ...comp });
+    assertSafe(r);
+    assert.equal(r.risk_verdict_state, 'RISK_BLOCKED');
+    assert.equal(r.risk_blocked, true);
+    assert.equal(r.risk_reason_codes.includes(code), true);
+  }
+});
+
+test('(G) any degraded component -> DEGRADED', () => {
+  const r = evaluateRiskVerdict({ purpose: 'risk_verdict_input', hard_risk: hardDegraded, liquidity_exit: liqPass, exposure: expPass });
+  assertSafe(r);
+  assert.equal(r.risk_verdict_state, 'RISK_DEGRADED');
+  assert.equal(r.risk_reason_codes.includes('hard_risk_degraded'), true);
+});
+
+test('(G) all advisory pass -> RISK_PASS_ADVISORY (opens no intent/routing/trading/can_send)', () => {
+  const r = evaluateRiskVerdict({ purpose: 'risk_verdict_input', hard_risk: hardPass, liquidity_exit: liqPass, exposure: expPass });
+  assertSafe(r);
+  assert.equal(r.risk_verdict_state, 'RISK_PASS_ADVISORY');
+  assert.equal(r.risk_passed_advisory, true);
+  assert.equal(r.risk_blocked, false);
+  assert.equal(r.risk_explanation_codes.includes('all_components_advisory_pass'), true);
+  // pass opens NO execution authority
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.risk_ready, false);
+});
+
+test('(G) reason / explanation codes contain no order/route/send token', () => {
+  const outputs = [verdictPass, verdictBlocked, verdictDegraded, describeRiskVerdictContract()];
+  for (const o of outputs) {
+    for (const code of [...(o.risk_reason_codes || []), ...(o.risk_explanation_codes || [])]) {
+      assert.equal(ORDER_ROUTE_SEND_RE.test(code), false, `forbidden token in code: ${code}`);
+    }
+  }
+});
+
+test('(G) smuggled forbidden flag / exec cmd / secret / endpoint on component -> BLOCKED, no echo', () => {
+  const cases = [
+    { ...verdictPassInputBase(), can_send: true },
+    { ...verdictPassInputBase(), exposure: { ...expPass, execute: true } },
+    { ...verdictPassInputBase(), hard_risk: { ...hardPass, ws: 'wss://VERDICTENDPOINT/x' } },
+    { ...verdictPassInputBase(), liquidity_exit: { ...liqPass, network: 'mainnet-beta-cluster' } }
+  ];
+  for (const c of cases) {
+    const r = evaluateRiskVerdict(c);
+    assertSafe(r);
+    assert.equal(r.risk_verdict_state, 'RISK_BLOCKED');
+    assertNoSecretEcho(r, 'VERDICTENDPOINT');
+    assertNoSecretEcho(r, 'beta-cluster');
+  }
+});
+
+function verdictPassInputBase() {
+  return { purpose: 'risk_verdict_input', hard_risk: hardPass, liquidity_exit: liqPass, exposure: expPass };
+}
+
+test('(G) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRiskVerdict(h); });
+    assertSafe(r);
+    assert.equal(r.risk_verdict_state, 'RISK_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (H) RISK SUPPRESSION / REJECTION
+// ===========================================================================
+
+test('(H) descriptor: shape, reason allowlist, safe flags', () => {
+  const d = describeRiskSuppressionContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'risk-suppression');
+  assert.equal(d.suppressed, true);
+});
+
+test('(H) missing risk verdict -> suppressed + risk_not_evaluated', () => {
+  for (const inp of [undefined, null, {}, { purpose: 'risk_suppression_input' }]) {
+    const r = evaluateRiskSuppression(inp);
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assert.equal(r.suppression_reasons.includes('risk_not_evaluated'), true);
+    assert.equal(r.suppression_reasons.includes('not_intent_authorized'), true);
+    assert.equal(r.suppression_reasons.includes('not_route_authorized'), true);
+    assert.equal(r.suppression_reasons.includes('not_execution_authorized'), true);
+  }
+});
+
+test('(H) blocked verdict -> suppressed + matching *_blocked reason', () => {
+  const r = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictBlocked });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('hard_risk_blocked'), true);
+  assert.equal(r.suppression_reasons.includes('not_intent_authorized'), true);
+});
+
+test('(H) degraded verdict -> suppressed + risk_degraded', () => {
+  const r = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictDegraded });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('risk_degraded'), true);
+});
+
+test('(H) advisory pass -> NOT suppressed but still no intent', () => {
+  const r = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictPass });
+  assertSafe(r);
+  assert.equal(r.suppressed, false);
+  // still no intent: the not_*_authorized reasons remain present
+  assert.equal(r.suppression_reasons.includes('not_intent_authorized'), true);
+  assert.equal(r.suppression_reasons.includes('not_route_authorized'), true);
+  assert.equal(r.suppression_reasons.includes('not_execution_authorized'), true);
+  // suppression opens NO intent / routing / trading
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(H) smuggled forbidden indicator on verdict -> suppressed (fail-closed)', () => {
+  const r = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: { ...verdictPass, can_send: true } });
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+});
+
+test('(H) hostile input -> frozen, no throw, suppressed', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRiskSuppression(h); });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+  }
+});
+
+// ===========================================================================
+// (I) RISK HEALTH / STATUS
+// ===========================================================================
+
+function healthInputBase() {
+  return {
+    risk_input_boundary: riskBoundaryValidResult,
+    hard_risk: hardPass,
+    liquidity_exit: liqPass,
+    exposure: expPass,
+    risk_verdict: verdictPass,
+    risk_suppression: evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictPass })
+  };
+}
+
+test('(I) descriptor: shape, states, safe flags', () => {
+  const d = describeRiskHealthContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'risk-health');
+  assert.equal(d.risk_health_pass_advisory, false);
+  assert.deepEqual([...d.supported_states], [
+    'RISK_HEALTH_UNCONFIGURED', 'RISK_HEALTH_DEGRADED', 'RISK_HEALTH_PASS_ADVISORY',
+    'RISK_HEALTH_SUPPRESSED', 'RISK_HEALTH_BLOCKED'
+  ]);
+});
+
+test('(I) missing components -> UNCONFIGURED', () => {
+  for (const inp of [undefined, null, {}, { risk_input_boundary: riskBoundaryValidResult }]) {
+    const r = evaluateRiskHealth(inp);
+    assertSafe(r);
+    assert.equal(r.risk_health_state, 'RISK_HEALTH_UNCONFIGURED');
+  }
+});
+
+test('(I) invalid boundary -> BLOCKED', () => {
+  const invalidBoundary = evaluateRiskInputBoundary({ ...goodRiskBoundaryInput, can_send: true });
+  assert.equal(invalidBoundary.risk_input_state, 'RISK_INPUT_INVALID');
+  const r = evaluateRiskHealth({ ...healthInputBase(), risk_input_boundary: invalidBoundary });
+  assertSafe(r);
+  assert.equal(r.risk_health_state, 'RISK_HEALTH_BLOCKED');
+  assert.equal(r.valid, false);
+});
+
+test('(I) suppressed risk -> SUPPRESSED', () => {
+  const suppressed = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictDegraded });
+  assert.equal(suppressed.suppressed, true);
+  const r = evaluateRiskHealth({ ...healthInputBase(), risk_verdict: verdictDegraded, risk_suppression: suppressed });
+  assertSafe(r);
+  assert.equal(r.risk_health_state, 'RISK_HEALTH_SUPPRESSED');
+});
+
+test('(I) advisory pass -> PASS_ADVISORY only (not intent/routing/trading readiness)', () => {
+  const r = evaluateRiskHealth(healthInputBase());
+  assertSafe(r);
+  assert.equal(r.risk_health_state, 'RISK_HEALTH_PASS_ADVISORY');
+  assert.equal(r.risk_health_pass_advisory, true);
+  // advisory only: opens NO readiness
+  assert.equal(r.intent_ready, false);
+  assert.equal(r.routing_ready, false);
+  assert.equal(r.trading_ready, false);
+  assert.equal(r.risk_ready, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(I) blocked verdict -> BLOCKED', () => {
+  const suppressed = evaluateRiskSuppression({ purpose: 'risk_suppression_input', risk_verdict: verdictBlocked });
+  const r = evaluateRiskHealth({ ...healthInputBase(), risk_verdict: verdictBlocked, risk_suppression: suppressed });
+  assertSafe(r);
+  assert.equal(r.risk_health_state, 'RISK_HEALTH_BLOCKED');
+});
+
+test('(I) smuggled intent/routing/trading flags -> BLOCKED', () => {
+  for (const smuggle of [{ intent_ready: true }, { routing_ready: true }, { trading_ready: true }, { can_send: true }]) {
+    const r = evaluateRiskHealth({ ...healthInputBase(), ...smuggle });
+    assertSafe(r);
+    assert.equal(r.risk_health_state, 'RISK_HEALTH_BLOCKED');
+  }
+  // smuggled flag on a component too
+  const rc = evaluateRiskHealth({ ...healthInputBase(), exposure: { ...expPass, can_send: true } });
+  assertSafe(rc);
+  assert.equal(rc.risk_health_state, 'RISK_HEALTH_BLOCKED');
+});
+
+test('(I) secret / mainnet / REAL-LIVE -> BLOCKED, no echo', () => {
+  const cases = [
+    { secret: 'sk-HEALTHSECRET' },
+    { network: 'mainnet-beta-cluster' },
+    { env: 'prod-real-live' }
+  ];
+  for (const c of cases) {
+    const r = evaluateRiskHealth({ ...healthInputBase(), ...c });
+    assertSafe(r);
+    assert.equal(r.risk_health_state, 'RISK_HEALTH_BLOCKED');
+    assertNoSecretEcho(r, 'HEALTHSECRET');
+    assertNoSecretEcho(r, 'beta-cluster');
+  }
+});
+
+test('(I) hostile input -> frozen, no throw, UNCONFIGURED', () => {
+  for (const h of [throwingProxy(), fnAccessorProxy()]) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateRiskHealth(h); });
+    assertSafe(r);
+    assert.equal(r.risk_health_state, 'RISK_HEALTH_UNCONFIGURED');
   }
 });
 
