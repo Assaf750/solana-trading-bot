@@ -439,3 +439,22 @@ boundary performs **no env/secret read, no network/fetch, no SDK/dependency, no 
 `boundary_passed`, only the recognized literal `helius`, the validated environment enum, and the validated
 `binding_source_kind` enum are echoed — never `endpoint_ref`. A hostile/throwing input returns a frozen refusal
 with reason `input_inspection_error` and never throws.
+
+## Live Testnet RPC Spike — read-only / no-broadcast (test-only)
+
+`describeLiveTestnetRpcReadOnlySpikeContract()`, `validateLiveTestnetRpcReadOnlySpikeRequest(input)`, and
+`evaluateLiveTestnetRpcReadOnlySpike(input, outOfRepoReadOnlyCaller)` add a **limited, isolated, read-only** RPC
+spike — **health/version only** (`getVersion` / `getHealth`) on **devnet/testnet/localnet only**. The request is
+validated SHAPE-only: testnet-family `environment` + read-only `rpc_method` + nested **F-14 approval**, **F-15
+supply-chain**, and **F-16 binding** records (all re-evaluated and **required to pass**) + `read_only`/`no_*`
+attestations and `endpoint_in_repo: false`. The actual read-only call is performed by an **OUT-OF-REPO caller
+function injected at runtime** — the repo contains **NO network primitive, NO endpoint, NO URL, NO secret**.
+
+**DEFAULT (no caller) is FAIL-CLOSED:** status `unconfigured_no_rpc`, reason `out_of_repo_binding_unavailable`, no
+call is made. A successful read-only health/version check sets `read_only_health_ok: true` / `live_rpc_call_made:
+true` but keeps `has_rpc: false`, `can_send: false`, `trading_ready: false`, `broadcast_permitted: false`,
+`signing_permitted: false` — it opens **NOTHING** for trading/send. A mainnet/REAL-LIVE environment or any
+non-read-only method (send/broadcast/serialize/sign) is **refused and the caller is NEVER invoked**. The caller's
+raw result and the endpoint are **NEVER echoed** (`endpoint_echoed: false`; only a derived boolean is returned),
+and no caller/endpoint is retained (`binding_retained: false`). A hostile/throwing input or caller returns a frozen
+refusal and never throws. **Send/broadcast/mainnet/REAL-LIVE remain separate, explicitly-approved PRs.**

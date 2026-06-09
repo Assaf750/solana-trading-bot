@@ -2035,3 +2035,348 @@ export function evaluateOutOfRepoEndpointBindingBoundary(input) {
     });
   }
 }
+
+// ===========================================================================================================
+// E2-F-17 — LIVE TESTNET RPC SPIKE (read-only / no-broadcast). ADDITIVE, import-free, function-I/O-only.
+// ===========================================================================================================
+// This block adds a LIMITED, ISOLATED, read-only RPC spike capability — health/version ONLY (getVersion /
+// getHealth) — on devnet/testnet/localnet ONLY, gated on the F-14 approval record + F-15 supply-chain record +
+// F-16 binding-descriptor record (all re-evaluated here and REQUIRED to pass). It is FAIL-CLOSED by default.
+//
+// CRITICAL: there is NO network primitive in this module — no fetch, no Connection, no WebSocket, no send, no
+// import, no env, no fs. The repo carries NO endpoint, NO URL, NO secret. The ACTUAL read-only call is delegated
+// to an OUT-OF-REPO caller FUNCTION injected at runtime (dependency injection). Default (no caller) = fail-closed:
+// no call is made. The caller is invoked with ONLY a validated read-only method string; its raw result is NEVER
+// echoed/stored (only a derived boolean is returned); the caller/endpoint is NEVER retained (binding_retained:
+// false). A successful read-only health/version check opens NOTHING for trading/send/broadcast/serialize/signing/
+// mainnet/REAL-LIVE — has_rpc/can_send/trading_ready/broadcast_permitted/signing_permitted stay FIXED false, and
+// send/broadcast/mainnet/REAL-LIVE remain separate, explicitly-approved PRs. Results are built from Object.freeze
+// of FIXED LITERALS; hostile/throwing input returns a frozen refusal with reason 'input_inspection_error' and
+// never throws.
+
+// Read-only RPC methods permitted by this spike: health/version only.
+const READ_ONLY_RPC_METHODS = Object.freeze(['getVersion', 'getHealth']);
+
+// Attestation fields that MUST be present and exactly === true on the request (each maps to a fixed reason token).
+const F17_SPIKE_REQUIRED_TRUE = Object.freeze([
+  ['read_only', 'read_only_required'],
+  ['no_send', 'no_send_required'],
+  ['no_broadcast', 'no_broadcast_required'],
+  ['no_serialize', 'no_serialize_required'],
+  ['no_sign', 'no_sign_required'],
+  ['no_mainnet', 'no_mainnet_required'],
+  ['no_real_live', 'no_real_live_required'],
+  ['requires_out_of_repo_binding', 'out_of_repo_binding_required'],
+  ['requires_separate_send_pr', 'separate_send_pr_required'],
+]);
+
+// Attestation fields that MUST be present and exactly === false on the request.
+const F17_SPIKE_REQUIRED_FALSE = Object.freeze([
+  ['endpoint_in_repo', 'endpoint_in_repo_must_be_false'],
+]);
+
+// Only these request fields are permitted — anything else (e.g. a smuggled endpoint_url/api_key/secret/token
+// FIELD) is rejected via 'unknown_field_rejected'. Rejected fields are NEVER echoed (results are fixed literals).
+const F17_SPIKE_KNOWN_FIELDS = Object.freeze([
+  'purpose', 'environment', 'rpc_method', 'approval_gate_record', 'supply_chain_review_record',
+  'binding_descriptor_record', 'read_only', 'no_send', 'no_broadcast', 'no_serialize', 'no_sign', 'no_mainnet',
+  'no_real_live', 'endpoint_in_repo', 'requires_out_of_repo_binding', 'requires_separate_send_pr',
+]);
+
+// Module-internal ONLY (NOT exported). Returns a BOOLEAN derived from a read-only health/version result — it
+// NEVER echoes or stores the raw value, only inspects shape to decide "healthy". Used so the caller's raw result
+// is reduced to a single boolean before being placed in any frozen result.
+function f17IsHealthyReadOnlyResult(raw, method) {
+  if (raw == null) return false;
+  if (method === 'getHealth') {
+    return raw === 'ok' || (typeof raw === 'object' && (raw.result === 'ok' || raw.status === 'ok'));
+  }
+  if (method === 'getVersion') {
+    let v;
+    if (typeof raw === 'string') v = raw;
+    else if (typeof raw === 'object') v = raw['solana-core'] || (raw.result && raw.result['solana-core']) || raw.version;
+    return typeof v === 'string' && v.length > 0;
+  }
+  return false;
+}
+
+// describeLiveTestnetRpcReadOnlySpikeContract — read-only health/version ONLY; devnet/testnet/localnet ONLY; the
+// live call is performed by an out-of-repo injected caller; default fail-closed; a successful spike opens NOTHING
+// for trading/send/broadcast; no endpoint/secret in repo or in results. Every capability/live flag is a FIXED
+// LITERAL false; every "requires_*" invariant is a FIXED LITERAL true. Input is never echoed.
+export function describeLiveTestnetRpcReadOnlySpikeContract() {
+  return Object.freeze({
+    contract: 'live-testnet-rpc-read-only-spike',
+    version: '0.0.0',
+    test_only: true,
+    purpose: 'live_testnet_rpc_read_only_spike',
+    supported_environments: TESTNET_ENVS,
+    supported_read_only_methods: READ_ONLY_RPC_METHODS,
+    requires_out_of_repo_binding: true,
+    requires_separate_send_pr: true,
+    requires_read_only: true,
+    requires_no_send: true,
+    requires_no_broadcast: true,
+    requires_no_serialize: true,
+    requires_no_sign: true,
+    requires_no_mainnet: true,
+    requires_no_real_live: true,
+    endpoint_in_repo: false,
+    request_valid: false,
+    spike_authorized: false,
+    spike_attempted: false,
+    live_rpc_call_made: false,
+    read_only_health_ok: false,
+    method_read_only: false,
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    trading_ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    broadcast_permitted: false,
+    signing_permitted: false,
+    network_call_made: false,
+    endpoint_echoed: false,
+    binding_retained: false,
+    status: UNCONFIGURED,
+    note: 'Test-only read-only RPC spike (getVersion/getHealth) on devnet/testnet/localnet only. The actual read-only call is performed by an OUT-OF-REPO caller function injected at runtime; the repo holds no endpoint/URL/secret and no network primitive. Default (no caller) is fail-closed: no call. A successful read-only health check does NOT open has_rpc/can_send/trading readiness, send, broadcast, serialize, signing, mainnet, or REAL-LIVE — those remain separate, explicitly-approved PRs.',
+  });
+}
+
+// validateLiveTestnetRpcReadOnlySpikeRequest — SYNC; validates the request SHAPE only (NO call). read-only
+// health/version only; devnet/testnet/localnet only; the live call is performed elsewhere by an out-of-repo
+// injected caller (not here); default fail-closed; a successful spike opens NOTHING for trading/send/broadcast;
+// no endpoint/secret in repo or in results. Re-evaluates the nested F-14/F-15/F-16 records (all required to pass).
+// Reasons are fixed string tokens; rejected/unknown fields are never echoed; hostile input → frozen refusal.
+export function validateLiveTestnetRpcReadOnlySpikeRequest(input) {
+  try {
+    const reasons = [];
+    const obj = (input != null && typeof input === 'object' && !Array.isArray(input)) ? input : null;
+
+    if (!obj || obj.purpose !== 'live_testnet_rpc_read_only_spike') reasons.push('purpose_invalid');
+
+    const env = obj ? obj.environment : undefined;
+    if (!TESTNET_ENVS.includes(env)) {
+      const lowered = typeof env === 'string' ? env.toLowerCase() : '';
+      if (lowered && (lowered.indexOf('mainnet') !== -1 || lowered.indexOf('prod') !== -1)) {
+        reasons.push('mainnet_or_nontestnet_environment_blocked');
+      } else {
+        reasons.push('environment_invalid');
+      }
+    }
+
+    const m = obj ? obj.rpc_method : undefined;
+    if (typeof m !== 'string' || !READ_ONLY_RPC_METHODS.includes(m)) reasons.push('non_read_only_method_blocked');
+
+    for (const [k, r] of F17_SPIKE_REQUIRED_TRUE) if (!obj || obj[k] !== true) reasons.push(r);
+    for (const [k, r] of F17_SPIKE_REQUIRED_FALSE) if (!obj || obj[k] !== false) reasons.push(r);
+
+    const a = evaluateLiveRpcSpikeApprovalGate(obj ? obj.approval_gate_record : undefined);
+    if (!a || a.approval_gate_passed !== true) reasons.push('approval_gate_not_satisfied');
+
+    const s = evaluateRpcClientSupplyChainGate(obj ? obj.supply_chain_review_record : undefined);
+    if (!s || s.supply_chain_gate_passed !== true) reasons.push('supply_chain_gate_not_satisfied');
+
+    const b = evaluateOutOfRepoEndpointBindingBoundary(obj ? obj.binding_descriptor_record : undefined);
+    if (!b || b.boundary_passed !== true) reasons.push('binding_boundary_not_satisfied');
+
+    if (obj && Object.keys(obj).some((k) => !F17_SPIKE_KNOWN_FIELDS.includes(k))) reasons.push('unknown_field_rejected');
+
+    const uniqueReasons = [];
+    for (const r of reasons) if (!uniqueReasons.includes(r)) uniqueReasons.push(r);
+
+    const valid = uniqueReasons.length === 0;
+    const status = valid
+      ? 'live_testnet_rpc_read_only_spike_valid_no_call'
+      : ((uniqueReasons.includes('purpose_invalid') || uniqueReasons.includes('environment_invalid') || uniqueReasons.includes('non_read_only_method_blocked')) && !uniqueReasons.includes('unknown_field_rejected')
+        ? UNCONFIGURED
+        : 'invalid');
+
+    return Object.freeze({
+      valid,
+      request_valid: valid,
+      status,
+      reasons: Object.freeze([...uniqueReasons]),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      trading_ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      broadcast_permitted: false,
+      signing_permitted: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      read_only_health_ok: false,
+      endpoint_echoed: false,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      request_valid: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      configured: false,
+      has_rpc: false,
+      ready: false,
+      trading_ready: false,
+      can_send: false,
+      can_broadcast: false,
+      can_serialize: false,
+      is_live: false,
+      real_live: false,
+      broadcast_permitted: false,
+      signing_permitted: false,
+      network_call_made: false,
+      live_rpc_call_made: false,
+      read_only_health_ok: false,
+      endpoint_echoed: false,
+    });
+  }
+}
+
+// evaluateLiveTestnetRpcReadOnlySpike — the CORE. read-only health/version ONLY; devnet/testnet/localnet ONLY;
+// the live call is performed by an OUT-OF-REPO injected caller (outOfRepoReadOnlyCaller); default fail-closed (no
+// caller => no call); a successful spike opens NOTHING for trading/send/broadcast; no endpoint/secret in repo or
+// in results. Invariants preserved: (i) the caller is invoked with ONLY a validated read-only method string — for
+// a non-read-only method / mainnet env / any invalid request, spikeAuthorized is false so the caller is NEVER
+// invoked; (ii) the raw caller result is NEVER echoed/stored — only a derived boolean; (iii) endpoint_echoed stays
+// false; (iv) has_rpc/can_send/trading_ready/broadcast_permitted/signing_permitted stay FIXED false even on a
+// successful read-only check; (v) binding_retained:false (no caller/reference retained); (vi)
+// requires_separate_send_pr:true is a fixed-literal invariant. Hostile/throwing input → frozen refusal, never throws.
+export async function evaluateLiveTestnetRpcReadOnlySpike(input, outOfRepoReadOnlyCaller) {
+  // FIXED false capability/live flags shared by every result path.
+  const FIXED_FALSE = {
+    configured: false,
+    has_rpc: false,
+    ready: false,
+    trading_ready: false,
+    can_send: false,
+    can_broadcast: false,
+    can_serialize: false,
+    is_live: false,
+    real_live: false,
+    broadcast_permitted: false,
+    signing_permitted: false,
+    network_call_made: false,
+  };
+  // FIXED-literal invariants shared by every result path.
+  const INVARIANTS = {
+    requires_separate_send_pr: true,
+    requires_out_of_repo_binding: true,
+    endpoint_echoed: false,
+    binding_retained: false,
+  };
+
+  try {
+    const reqv = validateLiveTestnetRpcReadOnlySpikeRequest(input);
+    const spikeAuthorized = reqv.valid;
+
+    if (!spikeAuthorized) {
+      // Request shape invalid => the caller is NEVER invoked.
+      return Object.freeze({
+        valid: false,
+        request_valid: false,
+        spike_authorized: false,
+        spike_attempted: false,
+        live_rpc_call_made: false,
+        read_only_health_ok: false,
+        method_read_only: false,
+        status: reqv.status,
+        reasons: reqv.reasons,
+        ...FIXED_FALSE,
+        ...INVARIANTS,
+      });
+    }
+
+    if (typeof outOfRepoReadOnlyCaller !== 'function') {
+      // THE FAIL-CLOSED DEFAULT PATH: authorized request but no out-of-repo caller => no call is made.
+      return Object.freeze({
+        valid: true,
+        request_valid: true,
+        spike_authorized: true,
+        spike_attempted: false,
+        live_rpc_call_made: false,
+        read_only_health_ok: false,
+        method_read_only: true,
+        status: UNCONFIGURED,
+        environment: String(input.environment),
+        rpc_method: String(input.rpc_method),
+        reasons: Object.freeze(['out_of_repo_binding_unavailable']),
+        ...FIXED_FALSE,
+        ...INVARIANTS,
+      });
+    }
+
+    // Authorized AND caller is a function => invoke ONLY the validated read-only method. No endpoint/URL/secret is
+    // ever passed to or returned from this module — only the method string is handed to the out-of-repo caller.
+    let raw;
+    let callerError = false;
+    try {
+      raw = await Promise.resolve(outOfRepoReadOnlyCaller(String(input.rpc_method)));
+    } catch {
+      callerError = true;
+    }
+
+    if (callerError) {
+      return Object.freeze({
+        valid: false,
+        request_valid: true,
+        spike_authorized: true,
+        spike_attempted: true,
+        live_rpc_call_made: false,
+        read_only_health_ok: false,
+        method_read_only: true,
+        status: 'invalid',
+        environment: String(input.environment),
+        rpc_method: String(input.rpc_method),
+        reasons: Object.freeze(['read_only_caller_error']),
+        ...FIXED_FALSE,
+        ...INVARIANTS,
+      });
+    }
+
+    // Reduce the raw read-only result to a single derived boolean — raw is NEVER echoed or stored.
+    const healthOk = f17IsHealthyReadOnlyResult(raw, String(input.rpc_method));
+
+    return Object.freeze({
+      valid: healthOk,
+      request_valid: true,
+      spike_authorized: true,
+      spike_attempted: true,
+      live_rpc_call_made: true,
+      read_only_health_ok: healthOk,
+      method_read_only: true,
+      status: healthOk ? 'live_testnet_rpc_read_only_spike_ok' : 'invalid',
+      environment: String(input.environment),
+      rpc_method: String(input.rpc_method),
+      reasons: healthOk ? Object.freeze([]) : Object.freeze(['read_only_health_check_failed']),
+      // has_rpc/can_send/trading_ready STAY false even on a successful read-only health check.
+      ...FIXED_FALSE,
+      ...INVARIANTS,
+    });
+  } catch {
+    // Fail-safe-not-fail-open: a hostile/throwing accessor is refused, never re-thrown, never echoed.
+    return Object.freeze({
+      valid: false,
+      request_valid: false,
+      spike_authorized: false,
+      spike_attempted: false,
+      live_rpc_call_made: false,
+      read_only_health_ok: false,
+      method_read_only: false,
+      status: 'invalid',
+      reasons: Object.freeze(['input_inspection_error']),
+      ...FIXED_FALSE,
+      ...INVARIANTS,
+    });
+  }
+}

@@ -3449,3 +3449,310 @@ test('(H-static-E) no real provider host URL in rpc-provider-contract src + test
   }
   assert.deepEqual(offenders, [], `no real provider host URL allowed: ${offenders.join(' | ')}`);
 });
+
+// ===========================================================================================================
+// PR-E2-F-17 — LIVE TESTNET RPC SPIKE (read-only / no-broadcast / no-live). Test-only, in-memory FAKE callers
+// ONLY; NO real network call is ever made. The evaluate function is ASYNC. K1..K42 + static guards.
+// ===========================================================================================================
+import {
+  describeLiveTestnetRpcReadOnlySpikeContract,
+  validateLiveTestnetRpcReadOnlySpikeRequest,
+  evaluateLiveTestnetRpcReadOnlySpike,
+} from '../src/index.mjs';
+
+// Canonical valid nested records (F-14 approval / F-15 supply-chain / F-16 binding).
+const F17_F14rec = Object.freeze({
+  purpose: 'live_rpc_spike_approval_gate',
+  target: 'testnet_rpc_spike',
+  provider_ref: 'helius',
+  environment: 'devnet',
+  endpoint_ref: 'helius-devnet-approval-ref',
+  no_broadcast: true,
+  no_send: true,
+  no_mainnet: true,
+  no_real_live: true,
+  requires_separate_live_spike_pr: true,
+  requires_out_of_repo_endpoint_binding: true,
+  requires_supply_chain_review: true,
+  requires_post_spike_revoke_or_disable: true,
+});
+const F17_F15rec = Object.freeze({
+  purpose: 'rpc_client_supply_chain_review',
+  client_ref: 'rpc-client-pkg',
+  client_version: '1.2.3',
+  no_network: true,
+  no_send: true,
+  no_broadcast: true,
+  no_serialize: true,
+  no_mainnet: true,
+  no_real_live: true,
+  requires_lockfile_review: true,
+  requires_supply_chain_review: true,
+  requires_separate_integration_pr: true,
+  requires_pinned_version: true,
+});
+const F17_F16rec = Object.freeze({
+  purpose: 'out_of_repo_endpoint_binding_adapter',
+  provider_ref: 'helius',
+  environment: 'devnet',
+  endpoint_ref: 'helius-devnet-binding-ref',
+  binding_source_kind: 'env_out_of_repo',
+  secret_in_repo: false,
+  endpoint_in_repo: false,
+  no_network: true,
+  no_send: true,
+  no_broadcast: true,
+  no_serialize: true,
+  no_mainnet: true,
+  no_real_live: true,
+  requires_out_of_repo_secret_source: true,
+  requires_separate_live_binding_pr: true,
+});
+
+// Canonical valid F-17 spike request.
+function f17Base(overrides) {
+  return {
+    purpose: 'live_testnet_rpc_read_only_spike',
+    environment: 'devnet',
+    rpc_method: 'getVersion',
+    approval_gate_record: F17_F14rec,
+    supply_chain_review_record: F17_F15rec,
+    binding_descriptor_record: F17_F16rec,
+    read_only: true,
+    no_send: true,
+    no_broadcast: true,
+    no_serialize: true,
+    no_sign: true,
+    no_mainnet: true,
+    no_real_live: true,
+    endpoint_in_repo: false,
+    requires_out_of_repo_binding: true,
+    requires_separate_send_pr: true,
+    ...(overrides || {}),
+  };
+}
+
+// In-memory FAKE callers (NO real network).
+const f17FakeHealthyCaller = async (method) => (method === 'getHealth' ? 'ok' : { 'solana-core': '1.18.0' });
+const f17ThrowIfCalledCaller = async () => { throw new Error('CALLER MUST NOT BE INVOKED'); };
+
+// The 9 required-true attestation field names on the request.
+const F17_REQUIRED_TRUE_FIELDS = [
+  'read_only', 'no_send', 'no_broadcast', 'no_serialize', 'no_sign',
+  'no_mainnet', 'no_real_live', 'requires_out_of_repo_binding', 'requires_separate_send_pr',
+];
+
+test('F-17 K1 default fail-closed: no caller => authorized but no call, unconfigured_no_rpc', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base());
+  assert.equal(r.spike_authorized, true);
+  assert.equal(r.spike_attempted, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.read_only_health_ok, false);
+  assert.ok(r.reasons.includes('out_of_repo_binding_unavailable'));
+  assert.equal(r.status, 'unconfigured_no_rpc');
+});
+
+test('F-17 K2 default keeps all capability/live flags false', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base());
+  for (const k of ['can_send', 'has_rpc', 'trading_ready', 'is_live', 'broadcast_permitted', 'signing_permitted', 'network_call_made']) {
+    assert.equal(r[k], false, `${k} must be false`);
+  }
+});
+
+test('F-17 K3 read-only path: healthy caller => attempted, call made, health ok', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17FakeHealthyCaller);
+  assert.equal(r.spike_attempted, true);
+  assert.equal(r.live_rpc_call_made, true);
+  assert.equal(r.read_only_health_ok, true);
+  assert.equal(r.status, 'live_testnet_rpc_read_only_spike_ok');
+});
+
+const F17_SUCCESS_FALSE_FLAGS = [
+  ['K4', 'has_rpc'], ['K5', 'can_send'], ['K6', 'trading_ready'], ['K7', 'can_broadcast'],
+  ['K8', 'can_serialize'], ['K9', 'is_live'], ['K10', 'real_live'], ['K11', 'broadcast_permitted'],
+  ['K12', 'signing_permitted'], ['K13', 'network_call_made'], ['K14', 'configured'],
+];
+for (const [tag, flag] of F17_SUCCESS_FALSE_FLAGS) {
+  test(`F-17 ${tag} success keeps ${flag} === false`, async () => {
+    const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17FakeHealthyCaller);
+    assert.equal(r[flag], false, `${flag} must stay false on success`);
+  });
+}
+
+test('F-17 K15 success keeps requires_separate_send_pr true, binding_retained false, endpoint_echoed false', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17FakeHealthyCaller);
+  assert.equal(r.requires_separate_send_pr, true);
+  assert.equal(r.binding_retained, false);
+  assert.equal(r.endpoint_echoed, false);
+});
+
+test('F-17 K16 getHealth method with healthy caller => read_only_health_ok true', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ rpc_method: 'getHealth' }), f17FakeHealthyCaller);
+  assert.equal(r.read_only_health_ok, true);
+  assert.equal(r.status, 'live_testnet_rpc_read_only_spike_ok');
+});
+
+test('F-17 K17 mainnet env + throwing caller => refused, caller NOT invoked (no throw)', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ environment: 'mainnet-beta' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.spike_attempted, false);
+});
+
+test('F-17 K18 prod environment => refused', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ environment: 'prod' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+});
+
+test('F-17 K19 sendTransaction method + throwing caller => non_read_only_method_blocked, caller NOT invoked', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ rpc_method: 'sendTransaction' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.equal(r.spike_attempted, false);
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ rpc_method: 'sendTransaction' }));
+  assert.ok(v.reasons.includes('non_read_only_method_blocked'));
+});
+
+test('F-17 K20 getAccountInfo (not in read-only allowset) => refused', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ rpc_method: 'getAccountInfo' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+});
+
+let f17K = 21;
+for (const field of F17_REQUIRED_TRUE_FIELDS) {
+  const tag = `K${f17K++}`;
+  test(`F-17 ${tag} dropping required-true attestation '${field}' => not authorized`, async () => {
+    const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ [field]: false }), f17ThrowIfCalledCaller);
+    assert.equal(r.spike_authorized, false, `dropping ${field} must refuse`);
+    assert.equal(r.live_rpc_call_made, false);
+  });
+}
+
+test('F-17 K30 endpoint_in_repo:true => refused', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ endpoint_in_repo: true }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+});
+
+test('F-17 K31 missing endpoint_in_repo => refused', async () => {
+  const b = f17Base();
+  delete b.endpoint_in_repo;
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(b, f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+});
+
+test('F-17 K32 invalid/absent approval_gate_record => approval_gate_not_satisfied', async () => {
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ approval_gate_record: undefined }));
+  assert.ok(v.reasons.includes('approval_gate_not_satisfied'));
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ approval_gate_record: { purpose: 'bad' } }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+});
+
+test('F-17 K33 invalid supply_chain_review_record => supply_chain_gate_not_satisfied', async () => {
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ supply_chain_review_record: { purpose: 'bad' } }));
+  assert.ok(v.reasons.includes('supply_chain_gate_not_satisfied'));
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ supply_chain_review_record: { purpose: 'bad' } }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+});
+
+test('F-17 K34 invalid binding_descriptor_record => binding_boundary_not_satisfied', async () => {
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ binding_descriptor_record: { purpose: 'bad' } }));
+  assert.ok(v.reasons.includes('binding_boundary_not_satisfied'));
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ binding_descriptor_record: { purpose: 'bad' } }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+});
+
+test('F-17 K35 unknown extra field => unknown_field_rejected AND value not echoed', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ endpoint_url: 'https://x' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ endpoint_url: 'https://x' }));
+  assert.ok(v.reasons.includes('unknown_field_rejected'));
+  assert.equal(JSON.stringify(r).includes('https://x'), false, 'smuggled URL must NOT be echoed');
+});
+
+test('F-17 K36 smuggled api_key field => refused AND value not echoed', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ api_key: 'SECRET_API_KEY_VALUE' }), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_authorized, false);
+  const v = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base({ api_key: 'SECRET_API_KEY_VALUE' }));
+  assert.ok(v.reasons.includes('unknown_field_rejected'));
+  assert.equal(JSON.stringify(r).includes('SECRET_API_KEY_VALUE'), false, 'smuggled api_key must NOT be echoed');
+});
+
+test('F-17 K37 NO-ECHO from caller: secrets in caller result are NOT echoed (only derived boolean)', async () => {
+  const leakyCaller = async () => ({ 'solana-core': '1.0.0', endpoint: 'https://secret-rpc.internal', apiKey: 'SECRET123' });
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), leakyCaller);
+  assert.equal(r.read_only_health_ok, true);
+  const json = JSON.stringify(r);
+  assert.equal(json.includes('secret-rpc.internal'), false, 'caller endpoint must NOT be echoed');
+  assert.equal(json.includes('SECRET123'), false, 'caller apiKey must NOT be echoed');
+});
+
+test('F-17 K38 caller that throws => frozen refusal read_only_caller_error, no throw', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17ThrowIfCalledCaller);
+  assert.equal(r.spike_attempted, true);
+  assert.equal(r.live_rpc_call_made, false);
+  assert.ok(r.reasons.includes('read_only_caller_error'));
+});
+
+test('F-17 K39 caller returning null/garbage => health ok false, not ok, call made, can_send false', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), async () => null);
+  assert.equal(r.read_only_health_ok, false);
+  assert.notEqual(r.status, 'live_testnet_rpc_read_only_spike_ok');
+  assert.equal(r.live_rpc_call_made, true);
+  assert.equal(r.can_send, false);
+});
+
+test('F-17 K40 hostile Proxy input (throws on get) + healthy caller => frozen invalid, no throw, caller NOT invoked', async () => {
+  const hostile = new Proxy({}, { get() { throw new Error('HOSTILE GET'); } });
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(hostile, f17ThrowIfCalledCaller);
+  assert.equal(r.valid, false);
+  assert.equal(r.spike_authorized, false);
+  assert.equal(r.live_rpc_call_made, false);
+});
+
+test('F-17 K41 result Object.isFrozen for default, success, and refusal paths', async () => {
+  const def = await evaluateLiveTestnetRpcReadOnlySpike(f17Base());
+  const ok = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17FakeHealthyCaller);
+  const ref = await evaluateLiveTestnetRpcReadOnlySpike(f17Base({ rpc_method: 'sendTransaction' }), f17ThrowIfCalledCaller);
+  assert.equal(Object.isFrozen(def), true);
+  assert.equal(Object.isFrozen(ok), true);
+  assert.equal(Object.isFrozen(ref), true);
+});
+
+test('F-17 K42 cleanup/revoke: no function/caller ref retained, binding_retained false; sync validate request_valid', async () => {
+  const r = await evaluateLiveTestnetRpcReadOnlySpike(f17Base(), f17FakeHealthyCaller);
+  for (const v of Object.values(r)) assert.notEqual(typeof v, 'function', 'no function reference retained in result');
+  assert.equal(r.binding_retained, false);
+  const sync = validateLiveTestnetRpcReadOnlySpikeRequest(f17Base());
+  assert.equal(sync.request_valid, true);
+});
+
+// ---- F-17 static guards ----
+
+test('F-17 (static) src is import-free and F-17 region carries NO network/env/fs mechanism', () => {
+  const full = readFileSync(join(SRC, 'rpc-provider-contract.mjs'), 'utf8');
+  const stripped = stripCommentsAndStrings(full);
+  for (const line of stripped.split('\n')) {
+    assert.equal(/^import\s/.test(line), false, `no top-level import: ${line}`);
+  }
+  assert.equal(/\brequire\s*\(/.test(stripped), false, 'no require(');
+  const idx = full.indexOf('E2-F-17');
+  assert.ok(idx !== -1, 'F-17 region marker present');
+  const region = stripCommentsAndStrings(full.slice(idx));
+  assert.equal(/\bfetch\s*\(/.test(region), false, 'no fetch(');
+  assert.equal(/new\s+WebSocket|WebSocket\s*\(/.test(region), false, 'no WebSocket');
+  assert.equal(/new\s+Connection\s*\(/.test(region), false, 'no new Connection(');
+  assert.equal(/sendTransaction/.test(region), false, 'no sendTransaction in F-17 src region');
+  assert.equal(/process\.env/.test(region), false, 'no process.env');
+  assert.equal(/readFileSync|readFile\s*\(/.test(region), false, 'no readFileSync');
+  assert.equal(/node:fs/.test(region), false, 'no node:fs');
+});
+
+test('F-17 (static) package.json declares NO dependencies', () => {
+  const pkg = JSON.parse(readFileSync(PKG_JSON, 'utf8'));
+  assert.equal('dependencies' in pkg, false, 'no dependencies');
+  assert.equal('devDependencies' in pkg, false, 'no devDependencies');
+});

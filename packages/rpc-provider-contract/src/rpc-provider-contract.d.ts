@@ -554,3 +554,113 @@ export interface OutOfRepoEndpointBindingBoundaryResult {
 export function describeOutOfRepoEndpointBindingAdapterContract(): OutOfRepoEndpointBindingAdapterDescriptor;
 export function validateOutOfRepoEndpointBindingDescriptor(input?: unknown): OutOfRepoEndpointBindingDescriptorResult;
 export function evaluateOutOfRepoEndpointBindingBoundary(input?: unknown): OutOfRepoEndpointBindingBoundaryResult;
+
+// ---------------------------------------------------------------------------------------------------------
+// E2-F-17 — Live testnet RPC spike (read-only / no-broadcast). Read-only health/version only; out-of-repo
+// injected caller performs the actual call; default fail-closed; opens NOTHING for trading/send/broadcast.
+// ---------------------------------------------------------------------------------------------------------
+
+export type LiveTestnetRpcReadOnlySpikeStatus =
+  | 'live_testnet_rpc_read_only_spike_valid_no_call'
+  | 'live_testnet_rpc_read_only_spike_ok'
+  | 'unconfigured_no_rpc'
+  | 'invalid';
+
+export type OutOfRepoReadOnlyRpcCaller = (method: string) => unknown | Promise<unknown>;
+
+export interface LiveTestnetRpcReadOnlySpikeDescriptor {
+  readonly contract: 'live-testnet-rpc-read-only-spike';
+  readonly version: string;
+  readonly test_only: true;
+  readonly purpose: 'live_testnet_rpc_read_only_spike';
+  readonly supported_environments: readonly string[];
+  readonly supported_read_only_methods: readonly string[];
+  readonly requires_out_of_repo_binding: true;
+  readonly requires_separate_send_pr: true;
+  readonly requires_read_only: true;
+  readonly requires_no_send: true;
+  readonly requires_no_broadcast: true;
+  readonly requires_no_serialize: true;
+  readonly requires_no_sign: true;
+  readonly requires_no_mainnet: true;
+  readonly requires_no_real_live: true;
+  readonly endpoint_in_repo: false;
+  readonly request_valid: false;
+  readonly spike_authorized: false;
+  readonly spike_attempted: false;
+  readonly live_rpc_call_made: false;
+  readonly read_only_health_ok: false;
+  readonly method_read_only: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly endpoint_echoed: false;
+  readonly binding_retained: false;
+  readonly status: RpcProviderStatus;
+  readonly note: string;
+}
+
+export interface LiveTestnetRpcReadOnlySpikeRequestResult {
+  readonly valid: boolean;
+  readonly request_valid: boolean;
+  readonly status: LiveTestnetRpcReadOnlySpikeStatus;
+  readonly reasons: readonly string[];
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+  readonly live_rpc_call_made: false;
+  readonly read_only_health_ok: false;
+  readonly endpoint_echoed: false;
+}
+
+export interface LiveTestnetRpcReadOnlySpikeResult {
+  readonly valid: boolean;
+  readonly request_valid: boolean;
+  readonly spike_authorized: boolean;
+  readonly spike_attempted: boolean;
+  readonly live_rpc_call_made: boolean;
+  readonly read_only_health_ok: boolean;
+  readonly method_read_only: boolean;
+  readonly status: LiveTestnetRpcReadOnlySpikeStatus;
+  readonly environment?: string;
+  readonly rpc_method?: string;
+  readonly reasons: readonly string[];
+  readonly requires_separate_send_pr: true;
+  readonly requires_out_of_repo_binding: true;
+  readonly endpoint_echoed: false;
+  readonly binding_retained: false;
+  readonly configured: false;
+  readonly has_rpc: false;
+  readonly ready: false;
+  readonly trading_ready: false;
+  readonly can_send: false;
+  readonly can_broadcast: false;
+  readonly can_serialize: false;
+  readonly is_live: false;
+  readonly real_live: false;
+  readonly broadcast_permitted: false;
+  readonly signing_permitted: false;
+  readonly network_call_made: false;
+}
+
+export function describeLiveTestnetRpcReadOnlySpikeContract(): LiveTestnetRpcReadOnlySpikeDescriptor;
+export function validateLiveTestnetRpcReadOnlySpikeRequest(input?: unknown): LiveTestnetRpcReadOnlySpikeRequestResult;
+export function evaluateLiveTestnetRpcReadOnlySpike(input?: unknown, outOfRepoReadOnlyCaller?: OutOfRepoReadOnlyRpcCaller): Promise<LiveTestnetRpcReadOnlySpikeResult>;
