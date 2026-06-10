@@ -459,10 +459,15 @@ export function evaluateCalibrationDivergence(input) {
     if (!obj) {
       return build('CALIB_DIVERGENCE_UNCONFIGURED', null, 0, 0, ['no_divergence_input']);
     }
-    const records = obj.calibration_records;
-    if (!Array.isArray(records)) {
+    const rawRecords = obj.calibration_records;
+    if (!Array.isArray(rawRecords)) {
       return build('CALIB_DIVERGENCE_UNCONFIGURED', null, 0, 0, ['calibration_records_missing']);
     }
+    // TOCTOU defense: SNAPSHOT every record ONCE; screen AND compute over the
+    // SAME snapshot (a hostile getter cannot serve clean values to the screen
+    // and dirty values to the metrics).
+    const records = rawRecords.map((r) =>
+      (r != null && typeof r === 'object' && !Array.isArray(r)) ? { ...r } : r);
     // screen every record; one bad record refuses the WHOLE input (fail-closed)
     for (const r of records) {
       const rr = calibValidateRecordShape(r);
@@ -765,8 +770,26 @@ export function evaluateBacktestReplay(input) {
     if (dataset == null || typeof dataset !== 'object') {
       return build('BACKTEST_REPLAY_UNCONFIGURED', null, ['dataset_missing']);
     }
-    // fail-closed: the dataset is re-validated INTERNALLY through (C).
-    const descriptor = evaluateBacktestDatasetDescriptor(dataset);
+    // TOCTOU defense: SNAPSHOT the dataset ONCE (every field read exactly
+    // once), then validate AND walk the SAME snapshot. A hostile getter that
+    // serves a clean array to validation and a dirty array to the walk is
+    // thereby defeated — there is only one read. A throwing accessor lands in
+    // the outer catch (fail-closed UNCONFIGURED).
+    const rawRecords = dataset.records;
+    const rawCohort = dataset.cohort_wallets;
+    const rawDeclared = dataset.declared_inactive_wallet_refs;
+    const snapRecords = Array.isArray(rawRecords)
+      ? rawRecords.map((r) => (r != null && typeof r === 'object' && !Array.isArray(r)) ? { ...r } : r)
+      : rawRecords;
+    const snapshot = {
+      records: snapRecords,
+      cohort_wallets: Array.isArray(rawCohort)
+        ? rawCohort.map((w) => (w != null && typeof w === 'object' && !Array.isArray(w)) ? { ...w } : w)
+        : rawCohort,
+      declared_inactive_wallet_refs: Array.isArray(rawDeclared) ? [...rawDeclared] : rawDeclared
+    };
+    // fail-closed: the SNAPSHOT is re-validated INTERNALLY through (C).
+    const descriptor = evaluateBacktestDatasetDescriptor(snapshot);
     if (descriptor.backtest_dataset_state !== 'BACKTEST_DATASET_DESCRIPTOR') {
       return build('BACKTEST_REPLAY_INVALID', null, ['dataset_not_clean']);
     }
@@ -786,13 +809,18 @@ export function evaluateBacktestReplay(input) {
       return w.positions.get(ref);
     };
 
-    for (const record of dataset.records) {
+    // walk the SAME validated snapshot (never re-read dataset.records).
+    for (const record of snapRecords) {
       const fills = fillsByRecord[record.record_ref];
       if (fills === undefined) continue;
       if (!Array.isArray(fills)) {
         return build('BACKTEST_REPLAY_INVALID', null, ['invalid_fills_for_record']);
       }
-      for (const f of fills) {
+      for (const rawFill of fills) {
+        // TOCTOU defense for fills too: snapshot each fill ONCE, then
+        // validate AND consume the same snapshot.
+        const f = (rawFill != null && typeof rawFill === 'object' && !Array.isArray(rawFill))
+          ? { ...rawFill } : rawFill;
         const fr = calibValidateReplayFill(f);
         if (fr.length > 0) return build('BACKTEST_REPLAY_INVALID', null, fr);
         if (f.wallet_ref !== record.wallet_ref) {

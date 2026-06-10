@@ -464,6 +464,69 @@ test('(D) determinism + dataset re-validated internally + mismatches refused', (
   assert.equal(mismatch.reasons.includes('fill_wallet_mismatch'), true);
 });
 
+test('(D) TOCTOU regression: a hostile records getter cannot serve clean-to-validate / dirty-to-walk', () => {
+  // the exact pre-merge-review attack: first read returns a CLEAN array,
+  // later reads return a DIRTY array (out-of-order ranks + future key +
+  // executed:true). With the snapshot fix, records is read EXACTLY ONCE —
+  // whichever array is returned is BOTH validated and walked.
+  const cleanRecords = [rec('rc', 1, 'w-1')];
+  const dirtyRecords = [
+    rec('rd9', 9, 'w-dirty', { future_alpha: 1, executed: true }),
+    rec('rd1', 1, 'w-dirty')
+  ];
+  let reads = 0;
+  const hostileDataset = {
+    get records() { reads += 1; return reads === 1 ? cleanRecords : dirtyRecords; },
+    cohort_wallets: [{ wallet_ref: 'w-1', status_bucket: 'active' }]
+  };
+  const dirtyFill = { position_ref: 'PD', wallet_ref: 'w-dirty', side: 'buy', quantity: 5, price: 1 };
+  const r = evaluateBacktestReplay({
+    purpose: 'backtest_replay_input',
+    dataset: hostileDataset,
+    paper_fills_by_record: { rd9: [dirtyFill], rd1: [dirtyFill] }
+  });
+  // records was read exactly once (snapshot) ...
+  assert.equal(reads, 1, 'dataset.records must be read exactly once');
+  // ... so the dirty array was never seen: no dirty wallet ever consumed.
+  assert.equal(Object.prototype.hasOwnProperty.call(r.candidate_pnl_by_wallet, 'w-dirty'), false,
+    'dirty records must never be consumed');
+  assert.equal(JSON.stringify(r).includes('w-dirty'), false);
+
+  // a hostile getter on a FILL likewise cannot flip values between validation
+  // and consumption: each fill is snapshotted once.
+  let sideReads = 0;
+  const hostileFill = {
+    position_ref: 'P1', wallet_ref: 'w-1', quantity: 1, price: 1,
+    get side() { sideReads += 1; return sideReads === 1 ? 'buy' : 'sell'; }
+  };
+  const r2 = evaluateBacktestReplay({
+    purpose: 'backtest_replay_input',
+    dataset: { records: [rec('r1', 1, 'w-1')], cohort_wallets: [{ wallet_ref: 'w-1', status_bucket: 'active' }] },
+    paper_fills_by_record: { r1: [hostileFill] }
+  });
+  assert.equal(sideReads, 1, 'fill.side must be read exactly once (snapshot)');
+  // with the single read it is a plain buy: position opens, nothing sold.
+  assert.equal(r2.backtest_replay_state, 'BACKTEST_REPLAY_READ_MODEL');
+  assert.equal(r2.candidate_pnl_by_wallet['w-1'].backtest_open, 1);
+});
+
+test('(B) TOCTOU regression: divergence records are snapshotted once (screen == compute view)', () => {
+  let priceReads = 0;
+  const hostileRec = {
+    trade_id: 'h', timestamp_processed: 'tp', timestamp_confirmed: 'tc',
+    get simulated_fill_price() { priceReads += 1; return priceReads === 1 ? 100 : 999999; },
+    real_fill_price: 100
+  };
+  const r = evaluateCalibrationDivergence({
+    purpose: 'divergence_input', calibration_records: [hostileRec],
+    divergence_bands: { fill: { elevated: 0.05, high: 0.15 } }
+  });
+  assert.equal(priceReads, 1, 'simulated_fill_price must be read exactly once (snapshot)');
+  // the single snapshotted value (100 vs 100) -> zero divergence, WITHIN_BAND.
+  assert.equal(r.dimensions.fill.metric, 0);
+  assert.equal(r.dimensions.fill.classification, 'WITHIN_BAND');
+});
+
 test('(D) execution-shaped / forbidden-named fills refuse the whole replay (no echo)', () => {
   const execFill = { position_ref: 'P1', wallet_ref: 'w-1', side: 'buy', quantity: 1, price: 1, executed: true };
   const r1 = evaluateBacktestReplay({
