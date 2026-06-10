@@ -1,0 +1,11 @@
+{
+  "name": "@soltrade/calibration-backtest-foundations",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stage-15 (Phase B) calibration & backtest harness foundations: simulated-vs-real divergence read-model + point-in-time/survivorship-free backtest dataset descriptor + deterministic replay read-model. Read-only/advisory, simulated-only, fail-closed. No live data, no signer, no execution.",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  }
+}
