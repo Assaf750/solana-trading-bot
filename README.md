@@ -2,6 +2,8 @@
 
 الوثائق المرقّمة `00`–`12` موجودة في مجلّد `docs/`؛ و`CLAUDE.md` و`README.md` في جذر المشروع. الوثائق مرقّمة حسب **أولوية البناء**. الرقم الأدنى = أساس يجب قراءته أولاً. وكيل Claude Code يقرأ `CLAUDE.md` أولاً.
 
+> **حالة البناء (محدّثة 2026-06-10):** الوثائق `00`–`12` معتمدة (governance). **انتقل المشروع من DOCUMENTATION-ONLY إلى بناء مُفعَّل عبر Gate A:** repo قائم · مجلّد `docs/` موجود · بُنيت **حزم أساس الأنبوب read-only/advisory** للمراحل `data → signal → risk → intent → route → tx-build-review` (Stages 2–10 · 12+ حزمة · `node --test` أخضر 1427/1427 · mechanism guard `violations=0` · `can_send:true` غائب). التفاصيل الكاملة وخريطة الطريق إلى 100% في **`BUILD-STATUS-AND-ROADMAP.md`**. تبقى مغلقة: التوقيع الحقيقي · send/broadcast · بيانات حيّة فعلية · mainnet · REAL-LIVE (خلف بوّابات `06-BUILD §6`).
+
 | # | الوثيقة | الدور | الحالة |
 |---|---|---|---|
 | 00 | `00-ARCHITECTURE.md` | القرار الأعلى — التعريفات/السلوك/البوّابات + New-Coin Hunting §4.4 + **v1.8 §2.1/§15.2–§15.7 · §15.8 قرارات F-Elimination (F1–F14) · §15.9–§15.13 Waves 1–5 addenda** | معتمدة (v1.8 + F-Elimination + Waves 1–5) |
