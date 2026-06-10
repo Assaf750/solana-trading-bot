@@ -88,6 +88,54 @@ The package exposes three read-only/advisory foundations, each with a
   material. States: `CANDIDATE_SIGNING_REVIEW_UNCONFIGURED` / `_INVALID` /
   `_REJECTED` / `_DEGRADED` / `_DESCRIPTOR`.
 
+- **(F) Signer / Key-Custody Readiness Advisory** —
+  `describeSignerCustodyReadinessAdvisoryContract`,
+  `validateSignerCustodyReadinessAdvisoryInput`,
+  `evaluateSignerCustodyReadinessAdvisory`. An advisory derived from safe input
+  metadata buckets ONLY (`key_custody_mode_bucket`,
+  `signer_profile_status_bucket`, `dual_control_bucket`,
+  `signer_reachability_bucket`, `custody_verification_bucket`). It REVIEWS custody
+  prerequisites — it is NOT signing, a signature, a key, key material, or a
+  signing/send permission. `_ACCEPTABLE_ADVISORY` opens NO signing/transaction/send
+  (every readiness flag stays `false`). States:
+  `SIGNER_CUSTODY_READINESS_UNCONFIGURED` / `_INVALID` / `_DEGRADED` /
+  `_REJECTED` / `_ACCEPTABLE_ADVISORY`.
+
+- **(G) Private-Key Forbidden Surface Guard** —
+  `describePrivateKeyForbiddenSurfaceContract`,
+  `evaluatePrivateKeyForbiddenSurface`. Proves Stage-11 neither produces nor
+  accepts private-key / seed / keypair / signature material. Scans ONLY top-level
+  keys for forbidden field NAMES and reports a REDACTED `forbidden_field_ref` (the
+  matched NAME only — NEVER the VALUE). The detection booleans
+  (`key_material_detected` / `private_key_detected` / `forbidden_field_detected`)
+  are DETECTION outputs (true == found == the SAFE BLOCKED state), NOT readiness
+  flags. States: `PRIVATE_KEY_SURFACE_UNCONFIGURED` / `_CLEAN` / `_BLOCKED`.
+
+- **(H) Signing-Review Verdict** —
+  `describeSigningReviewVerdictContract`, `evaluateSigningReviewVerdict`.
+  Aggregates the input boundary (C) + signer/custody boundary (D) + candidate
+  descriptor (E) + custody-readiness advisory (F) + private-key surface (G) into
+  an advisory verdict. A PASS is ADVISORY ONLY — even `SIGNING_REVIEW_PASS_ADVISORY`
+  opens NO `signer_ready` / `signing_permitted` / `transaction_ready` /
+  `can_serialize` / `can_send`. States: `SIGNING_REVIEW_UNCONFIGURED` /
+  `_DEGRADED` / `_BLOCKED` / `_PASS_ADVISORY`.
+
+- **(I) Signing-Review Suppression / Rejection** —
+  `describeSigningReviewSuppressionContract`, `evaluateSigningReviewSuppression`.
+  Prevents progression; reasons only. Creates NO signing. A signing-review is
+  NEVER sign / send / execution authorized at this layer, so `not_sign_authorized`
+  + `not_send_authorized` + `not_execution_authorized` are ALWAYS emitted — even
+  an advisory-clean signing-review is STILL suppressed for sign/send.
+
+- **(J) Signing-Review Health / Status** —
+  `describeSigningReviewHealthContract`, `evaluateSigningReviewHealth`. Consumes
+  input boundary (C) + signer/custody boundary (D) + descriptor (E) +
+  custody-readiness advisory (F) + private-key surface (G) + verdict (H) +
+  suppression (I); derives status only. `_REVIEWED_ADVISORY` does NOT open
+  signer / signing / transaction / send. States:
+  `SIGNING_REVIEW_HEALTH_UNCONFIGURED` / `_DEGRADED` / `_REVIEWED_ADVISORY` /
+  `_SUPPRESSED` / `_BLOCKED`.
+
 ## Fail-Safe-Not-Fail-Open
 
 Every `evaluate*` / `validate*` wraps its body in `try/catch` and returns a
@@ -107,4 +155,4 @@ node --test test
 The suite builds a REAL Stage-4..10 chain (via the lower-stage evaluators) to a
 `TX_BUILD_REVIEW_PASS_ADVISORY` + `TX_BUILD_HEALTH_REVIEWED_ADVISORY` state, then
 feeds the Stage-11 signing-review foundations, covering every required case from
-Parts C/D/E plus a static source guard.
+Parts C/D/E/F/G/H/I/J plus a static source guard.

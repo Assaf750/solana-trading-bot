@@ -18,7 +18,18 @@ import {
   evaluateSignerCustodyBoundary,
   describeCandidateSigningReviewDescriptorContract,
   validateCandidateSigningReviewDescriptorInput,
-  evaluateCandidateSigningReviewDescriptor
+  evaluateCandidateSigningReviewDescriptor,
+  describeSignerCustodyReadinessAdvisoryContract,
+  validateSignerCustodyReadinessAdvisoryInput,
+  evaluateSignerCustodyReadinessAdvisory,
+  describePrivateKeyForbiddenSurfaceContract,
+  evaluatePrivateKeyForbiddenSurface,
+  describeSigningReviewVerdictContract,
+  evaluateSigningReviewVerdict,
+  describeSigningReviewSuppressionContract,
+  evaluateSigningReviewSuppression,
+  describeSigningReviewHealthContract,
+  evaluateSigningReviewHealth
 } from '../src/index.mjs';
 
 import {
@@ -85,6 +96,7 @@ import { normalizeIngestionEvent } from '../../data-ingestion-foundations/src/in
 void validateSigningReviewInputBoundary;
 void validateSignerCustodyBoundary;
 void validateCandidateSigningReviewDescriptorInput;
+void validateSignerCustodyReadinessAdvisoryInput;
 
 // ---------------------------------------------------------------------------
 // REAL Stage-4 -> 5 -> 6 -> 7 -> 8 -> 9 -> 10 builders
@@ -873,6 +885,546 @@ test('(E) descriptor never exposes any key/signature/transaction artifact', () =
   for (const r of states) {
     assertSafe(r);
     assertNoSignArtifacts(r);
+  }
+});
+
+// ===========================================================================
+// (F) SIGNER / KEY-CUSTODY READINESS ADVISORY
+// ===========================================================================
+
+const goodReadinessInput = (over = {}) => ({
+  purpose: 'signer_custody_readiness_input',
+  key_custody_mode_bucket: 'isolated_signer',
+  signer_profile_status_bucket: 'active',
+  dual_control_bucket: 'required_satisfied',
+  signer_reachability_bucket: 'reachable',
+  custody_verification_bucket: 'verified',
+  ...over
+});
+
+test('(F) descriptor: shape, states, reason codes, safe flags', () => {
+  const d = describeSignerCustodyReadinessAdvisoryContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'signer-custody-readiness-advisory');
+  assert.equal(d.signer_custody_acceptable_advisory, false);
+  assert.equal(d.signer_custody_rejected, false);
+  assertNoSignArtifacts(d);
+  assert.deepEqual([...d.supported_states], [
+    'SIGNER_CUSTODY_READINESS_UNCONFIGURED', 'SIGNER_CUSTODY_READINESS_INVALID',
+    'SIGNER_CUSTODY_READINESS_DEGRADED', 'SIGNER_CUSTODY_READINESS_REJECTED',
+    'SIGNER_CUSTODY_READINESS_ACCEPTABLE_ADVISORY'
+  ]);
+});
+
+test('(F) missing bucket -> fail-closed UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluateSignerCustodyReadinessAdvisory(inp);
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_UNCONFIGURED');
+  }
+  const r2 = evaluateSignerCustodyReadinessAdvisory({
+    purpose: 'signer_custody_readiness_input', key_custody_mode_bucket: 'isolated_signer'
+  });
+  assertSafe(r2);
+  assert.equal(r2.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_UNCONFIGURED');
+});
+
+test('(F) invalid enum bucket -> INVALID', () => {
+  for (const over of [{ key_custody_mode_bucket: 'live_signer' }, { signer_profile_status_bucket: 'on' },
+    { dual_control_bucket: 'maybe' }, { signer_reachability_bucket: 'online' },
+    { custody_verification_bucket: 'partly' }]) {
+    const r = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput(over));
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_INVALID');
+    assert.equal(r.valid, false);
+  }
+});
+
+test('(F) unknown buckets -> degraded', () => {
+  for (const over of [{ key_custody_mode_bucket: 'unknown' }, { signer_profile_status_bucket: 'unknown' },
+    { dual_control_bucket: 'unknown' }, { signer_reachability_bucket: 'unknown' },
+    { custody_verification_bucket: 'unknown' }, { signer_profile_status_bucket: 'degraded' }]) {
+    const r = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput(over));
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_DEGRADED');
+    assert.equal(r.signer_custody_acceptable_advisory, false);
+  }
+});
+
+test('(F) revoked/disabled/required_unsatisfied/unreachable/unverified -> rejected', () => {
+  const cases = [
+    [{ signer_profile_status_bucket: 'revoked' }, 'signer_profile_status_revoked'],
+    [{ signer_profile_status_bucket: 'disabled' }, 'signer_profile_status_disabled'],
+    [{ dual_control_bucket: 'required_unsatisfied' }, 'dual_control_required_unsatisfied'],
+    [{ signer_reachability_bucket: 'unreachable' }, 'signer_unreachable'],
+    [{ custody_verification_bucket: 'unverified' }, 'custody_unverified']
+  ];
+  for (const [over, code] of cases) {
+    const r = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput(over));
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_REJECTED');
+    assert.equal(r.signer_custody_rejected, true);
+    assert.equal(r.signing_review_reason_codes.includes(code), true);
+  }
+});
+
+test('(F) acceptable (isolated_signer+active+satisfied+reachable+verified) -> advisory acceptable only', () => {
+  const r = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput());
+  assertSafe(r);
+  assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_ACCEPTABLE_ADVISORY');
+  assert.equal(r.signer_custody_acceptable_advisory, true);
+  assert.equal(r.signing_review_reason_codes.includes('signer_custody_acceptable'), true);
+  assertNoSignArtifacts(r);
+  // not_required also acceptable
+  const r2 = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ dual_control_bucket: 'not_required' }));
+  assert.equal(r2.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_ACCEPTABLE_ADVISORY');
+  // acceptable opens NO signing / transaction / send
+  assert.equal(r.signer_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.can_serialize, false);
+});
+
+test('(F) connected_wallet mode -> not acceptable (degraded)', () => {
+  const r = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ key_custody_mode_bucket: 'connected_wallet' }));
+  assertSafe(r);
+  assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_DEGRADED');
+  assert.equal(r.signer_custody_acceptable_advisory, false);
+});
+
+test('(F) smuggled forbidden flag / secret / endpoint / key-material -> INVALID & never echoed', () => {
+  for (const s of [{ can_send: true }, { signing_permitted: true }, { sign: true },
+    { secret: 'LEAK' }, { private_key: 'LEAK' }, { rpc_url: 'https://x/LEAK' }, { real_live: true }]) {
+    const r = evaluateSignerCustodyReadinessAdvisory({ ...goodReadinessInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_INVALID');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(F) no key/signature/transaction field in output across states', () => {
+  for (const r of [
+    evaluateSignerCustodyReadinessAdvisory(goodReadinessInput()),
+    evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ signer_profile_status_bucket: 'revoked' })),
+    evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ key_custody_mode_bucket: 'unknown' })),
+    evaluateSignerCustodyReadinessAdvisory(undefined)
+  ]) {
+    assertSafe(r);
+    assertNoSignArtifacts(r);
+  }
+});
+
+test('(F) hostile -> frozen no throw', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSignerCustodyReadinessAdvisory(h); });
+    assertSafe(r);
+    assert.equal(r.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (G) PRIVATE-KEY FORBIDDEN SURFACE GUARD
+// ===========================================================================
+
+test('(G) descriptor: shape, states, safe flags', () => {
+  const d = describePrivateKeyForbiddenSurfaceContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'private-key-forbidden-surface');
+  assert.equal(d.key_material_detected, false);
+  assert.equal(d.private_key_detected, false);
+  assert.equal(d.forbidden_field_detected, false);
+  assert.equal(d.forbidden_field_ref, null);
+  assert.deepEqual([...d.supported_states], [
+    'PRIVATE_KEY_SURFACE_UNCONFIGURED', 'PRIVATE_KEY_SURFACE_CLEAN', 'PRIVATE_KEY_SURFACE_BLOCKED'
+  ]);
+});
+
+test('(G) missing / hostile input -> UNCONFIGURED', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluatePrivateKeyForbiddenSurface(inp);
+    assertSafe(r);
+    assert.equal(r.private_key_surface_state, 'PRIVATE_KEY_SURFACE_UNCONFIGURED');
+  }
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluatePrivateKeyForbiddenSurface(h); });
+    assertSafe(r);
+    assert.equal(r.private_key_surface_state, 'PRIVATE_KEY_SURFACE_UNCONFIGURED');
+  }
+});
+
+test('(G) clean descriptor -> surface clean (no detection)', () => {
+  const r = evaluatePrivateKeyForbiddenSurface({
+    purpose: 'candidate_signing_review_descriptor', signing_review_ref: 'sr-1',
+    key_custody_mode_bucket: 'isolated_signer', signer_profile_status_bucket: 'active'
+  });
+  assertSafe(r);
+  assert.equal(r.private_key_surface_state, 'PRIVATE_KEY_SURFACE_CLEAN');
+  assert.equal(r.key_material_detected, false);
+  assert.equal(r.private_key_detected, false);
+  assert.equal(r.forbidden_field_detected, false);
+  assert.equal(r.forbidden_field_ref, null);
+});
+
+test('(G) private_key/secret_key/keypair/mnemonic/seed -> blocked, key detected, VALUE never echoed', () => {
+  for (const name of ['private_key', 'privateKey', 'secret_key', 'secretKey', 'keypair', 'keyPair',
+    'mnemonic', 'seed', 'seed_phrase', 'secret_seed', 'raw_key', 'signing_key', 'signer_secret', 'ed25519_secret']) {
+    const planted = `PLANTED-${name}-SECRET-VALUE-9z9z`;
+    const r = evaluatePrivateKeyForbiddenSurface({ [name]: planted });
+    assertSafe(r);
+    assert.equal(r.private_key_surface_state, 'PRIVATE_KEY_SURFACE_BLOCKED');
+    assert.equal(r.key_material_detected, true);
+    assert.equal(r.forbidden_field_detected, true);
+    assert.equal(r.private_key_detected, true, `${name} is a key-material name`);
+    assert.equal(r.forbidden_field_ref, name);
+    // output NEVER echoes the forbidden VALUE
+    assert.equal(JSON.stringify(r).includes('PLANTED'), false, `${name} value must not be echoed`);
+  }
+});
+
+test('(G) signature-only field -> blocked, key vs signature classification', () => {
+  for (const name of ['signature', 'signatures', 'signed_tx', 'signedTransaction', 'signed_transaction']) {
+    const planted = `PLANTED-${name}-SIG-VALUE`;
+    const r = evaluatePrivateKeyForbiddenSurface({ [name]: planted });
+    assertSafe(r);
+    assert.equal(r.private_key_surface_state, 'PRIVATE_KEY_SURFACE_BLOCKED');
+    assert.equal(r.key_material_detected, true);
+    assert.equal(r.forbidden_field_detected, true);
+    // signature names are NOT key/seed/keypair -> private_key_detected false
+    assert.equal(r.private_key_detected, false, `${name} is a signature-only name`);
+    assert.equal(r.forbidden_field_ref, name);
+    assert.equal(JSON.stringify(r).includes('PLANTED'), false);
+  }
+});
+
+// ===========================================================================
+// (H) SIGNING-REVIEW VERDICT
+// ===========================================================================
+
+const cleanReadiness = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput());
+const cleanSurface = evaluatePrivateKeyForbiddenSurface({ purpose: 'candidate_signing_review_descriptor' });
+const cleanDescriptor = evaluateCandidateSigningReviewDescriptor(goodDescriptorInput());
+
+const goodVerdictInput = (over = {}) => ({
+  purpose: 'signing_review_verdict_input',
+  signing_review_input_boundary: validSigningBoundary,
+  signer_custody_boundary: validCustody,
+  candidate_signing_review_descriptor: cleanDescriptor,
+  signer_custody_readiness_advisory: cleanReadiness,
+  private_key_surface: cleanSurface,
+  ...over
+});
+
+test('(H) descriptor: shape, states, reason/explanation codes, safe flags', () => {
+  const d = describeSigningReviewVerdictContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'signing-review-verdict');
+  assert.equal(d.signing_review_passed_advisory, false);
+  assert.equal(d.signing_review_blocked, false);
+  assert.deepEqual([...d.supported_states], [
+    'SIGNING_REVIEW_UNCONFIGURED', 'SIGNING_REVIEW_DEGRADED',
+    'SIGNING_REVIEW_BLOCKED', 'SIGNING_REVIEW_PASS_ADVISORY'
+  ]);
+});
+
+test('(H) missing components -> unconfigured', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluateSigningReviewVerdict(inp);
+    assertSafe(r);
+    assert.equal(r.signing_review_state, 'SIGNING_REVIEW_UNCONFIGURED');
+  }
+  const r2 = evaluateSigningReviewVerdict(goodVerdictInput({ private_key_surface: undefined }));
+  assertSafe(r2);
+  assert.equal(r2.signing_review_state, 'SIGNING_REVIEW_UNCONFIGURED');
+});
+
+test('(H) blocked component / key-material detected -> blocked', () => {
+  // private-key surface blocked
+  const blockedSurface = evaluatePrivateKeyForbiddenSurface({ private_key: 'LEAK' });
+  const r1 = evaluateSigningReviewVerdict(goodVerdictInput({ private_key_surface: blockedSurface }));
+  assertSafe(r1);
+  assert.equal(r1.signing_review_state, 'SIGNING_REVIEW_BLOCKED');
+  assert.equal(JSON.stringify(r1).includes('LEAK'), false);
+  // custody-readiness rejected -> blocked
+  const rejReadiness = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ signer_profile_status_bucket: 'revoked' }));
+  const r2 = evaluateSigningReviewVerdict(goodVerdictInput({ signer_custody_readiness_advisory: rejReadiness }));
+  assert.equal(r2.signing_review_state, 'SIGNING_REVIEW_BLOCKED');
+  // descriptor invalid -> blocked
+  const invDescriptor = evaluateCandidateSigningReviewDescriptor({ ...goodDescriptorInput(), private_key: 'X' });
+  assert.equal(invDescriptor.candidate_signing_review_state, 'CANDIDATE_SIGNING_REVIEW_INVALID');
+  const r3 = evaluateSigningReviewVerdict(goodVerdictInput({ candidate_signing_review_descriptor: invDescriptor }));
+  assert.equal(r3.signing_review_state, 'SIGNING_REVIEW_BLOCKED');
+});
+
+test('(H) degraded readiness -> degraded', () => {
+  const degReadiness = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ signer_reachability_bucket: 'unknown' }));
+  assert.equal(degReadiness.signer_custody_readiness_state, 'SIGNER_CUSTODY_READINESS_DEGRADED');
+  const r = evaluateSigningReviewVerdict(goodVerdictInput({ signer_custody_readiness_advisory: degReadiness }));
+  assertSafe(r);
+  assert.equal(r.signing_review_state, 'SIGNING_REVIEW_DEGRADED');
+});
+
+test('(H) clean+acceptable+key-clean -> pass advisory only (no readiness)', () => {
+  const r = evaluateSigningReviewVerdict(goodVerdictInput());
+  assertSafe(r);
+  assert.equal(r.signing_review_state, 'SIGNING_REVIEW_PASS_ADVISORY');
+  assert.equal(r.signing_review_passed_advisory, true);
+  assert.equal(r.signing_review_reason_codes.includes('signer_custody_acceptable'), true);
+  assert.equal(r.signing_review_reason_codes.includes('private_key_surface_clean'), true);
+  // pass opens NO signer_ready / signing_permitted / transaction_ready / can_serialize / can_send
+  assert.equal(r.signer_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_serialize, false);
+  assert.equal(r.can_send, false);
+  // reason/explanation codes carry NO key-material/signature artifact tokens
+  // (the clean-surface status marker 'private_key_surface_clean' is allowed —
+  // it asserts the ABSENCE of key material, not its presence)
+  for (const c of [...r.signing_review_reason_codes, ...r.signing_review_explanation_codes]) {
+    assert.equal(/seed|mnemonic|keypair|secret_key|\bsign_tx\b|\bsend_tx\b|signature/.test(c), false, `code ${c} carries an artifact token`);
+  }
+});
+
+test('(H) smuggled forbidden flag/exec/secret/endpoint -> blocked', () => {
+  for (const s of [{ can_send: true }, { send: true }, { secret: 'LEAK' }, { rpc_url: 'https://x/LEAK' },
+    { real_live: true }, { private_key: 'LEAK' }]) {
+    const r = evaluateSigningReviewVerdict({ ...goodVerdictInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.signing_review_state, 'SIGNING_REVIEW_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(H) hostile -> frozen no throw', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSigningReviewVerdict(h); });
+    assertSafe(r);
+    assert.equal(r.signing_review_state, 'SIGNING_REVIEW_UNCONFIGURED');
+  }
+});
+
+// ===========================================================================
+// (I) SIGNING-REVIEW SUPPRESSION / REJECTION
+// ===========================================================================
+
+const goodSuppressionInput = (over = {}) => ({
+  purpose: 'signing_review_suppression_input',
+  signing_review_input_boundary: validSigningBoundary,
+  candidate_signing_review_descriptor: cleanDescriptor,
+  signer_custody_readiness_advisory: cleanReadiness,
+  private_key_surface: cleanSurface,
+  signer_custody_boundary: validCustody,
+  ...over
+});
+
+test('(I) descriptor: shape, reason codes, safe flags', () => {
+  const d = describeSigningReviewSuppressionContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'signing-review-suppression');
+  assert.equal(d.suppressed, false);
+  assert.deepEqual([...d.supported_reason_codes], [
+    'tx_build_not_reviewed', 'signer_custody_invalid', 'signer_metadata_missing',
+    'signer_not_ready', 'dual_control_unsatisfied', 'key_material_detected',
+    'signature_detected', 'not_sign_authorized', 'not_send_authorized',
+    'not_execution_authorized'
+  ]);
+});
+
+test('(I) missing descriptor -> suppressed + signer_metadata_missing', () => {
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ candidate_signing_review_descriptor: undefined }));
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('signer_metadata_missing'), true);
+});
+
+test('(I) invalid custody -> suppressed + signer_custody_invalid', () => {
+  const badCustody = evaluateSignerCustodyBoundary({ purpose: 'signer_custody_boundary', signer_source: 'real_signer' });
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ signer_custody_boundary: badCustody }));
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('signer_custody_invalid'), true);
+});
+
+test('(I) input boundary not valid -> suppressed + tx_build_not_reviewed', () => {
+  const notValid = evaluateSigningReviewInputBoundary({ ...goodSigningInput(), tx_build_suppression: Object.freeze({ suppressed: true, suppression_reasons: [], read_only: true }) });
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ signing_review_input_boundary: notValid }));
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('tx_build_not_reviewed'), true);
+});
+
+test('(I) unacceptable readiness (rejected, dual-control) -> suppressed + signer_not_ready (+dual_control_unsatisfied)', () => {
+  const rejReadiness = evaluateSignerCustodyReadinessAdvisory(goodReadinessInput({ dual_control_bucket: 'required_unsatisfied' }));
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ signer_custody_readiness_advisory: rejReadiness }));
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('signer_not_ready'), true);
+  assert.equal(r.suppression_reasons.includes('dual_control_unsatisfied'), true);
+});
+
+test('(I) key-material detected -> suppressed + key_material_detected', () => {
+  const blockedSurface = evaluatePrivateKeyForbiddenSurface({ keypair: 'LEAK' });
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ private_key_surface: blockedSurface }));
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('key_material_detected'), true);
+  assert.equal(JSON.stringify(r).includes('LEAK'), false);
+});
+
+test('(I) signature detected -> suppressed + signature_detected', () => {
+  const sigSurface = evaluatePrivateKeyForbiddenSurface({ signature: 'LEAK' });
+  assert.equal(sigSurface.private_key_detected, false);
+  assert.equal(sigSurface.forbidden_field_detected, true);
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput({ private_key_surface: sigSurface }));
+  assertSafe(r);
+  assert.equal(r.suppression_reasons.includes('key_material_detected'), true);
+  assert.equal(r.suppression_reasons.includes('signature_detected'), true);
+});
+
+test('(I) advisory clean -> STILL not sign/send authorized', () => {
+  const r = evaluateSigningReviewSuppression(goodSuppressionInput());
+  assertSafe(r);
+  assert.equal(r.suppressed, true);
+  assert.equal(r.suppression_reasons.includes('not_sign_authorized'), true);
+  assert.equal(r.suppression_reasons.includes('not_send_authorized'), true);
+  assert.equal(r.suppression_reasons.includes('not_execution_authorized'), true);
+  // suppression opens NO signer_ready / signing / can_send
+  assert.equal(r.signer_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.can_send, false);
+});
+
+test('(I) hostile -> frozen no throw (suppressed fail-closed)', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSigningReviewSuppression(h); });
+    assertSafe(r);
+    assert.equal(r.suppressed, true);
+    assert.equal(r.suppression_reasons.includes('not_sign_authorized'), true);
+  }
+});
+
+// ===========================================================================
+// (J) SIGNING-REVIEW HEALTH / STATUS
+// ===========================================================================
+
+const cleanVerdict = evaluateSigningReviewVerdict(goodVerdictInput());
+const cleanSuppression = evaluateSigningReviewSuppression(goodSuppressionInput());
+
+const goodHealthInput = (over = {}) => ({
+  signing_review_input_boundary: validSigningBoundary,
+  signer_custody_boundary: validCustody,
+  candidate_signing_review_descriptor: cleanDescriptor,
+  signer_custody_readiness_advisory: cleanReadiness,
+  private_key_surface: cleanSurface,
+  signing_review_verdict: cleanVerdict,
+  signing_review_suppression: cleanSuppression,
+  ...over
+});
+
+test('(J) descriptor: shape, states, safe flags', () => {
+  const d = describeSigningReviewHealthContract();
+  assertSafe(d);
+  assert.equal(d.contract, 'signing-review-health');
+  assert.deepEqual([...d.supported_states], [
+    'SIGNING_REVIEW_HEALTH_UNCONFIGURED', 'SIGNING_REVIEW_HEALTH_DEGRADED',
+    'SIGNING_REVIEW_HEALTH_REVIEWED_ADVISORY', 'SIGNING_REVIEW_HEALTH_SUPPRESSED',
+    'SIGNING_REVIEW_HEALTH_BLOCKED'
+  ]);
+});
+
+test('(J) missing components -> unconfigured', () => {
+  for (const inp of [undefined, null, [], 42, 'x']) {
+    const r = evaluateSigningReviewHealth(inp);
+    assertSafe(r);
+    assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_UNCONFIGURED');
+  }
+  const r2 = evaluateSigningReviewHealth(goodHealthInput({ signing_review_verdict: undefined }));
+  assertSafe(r2);
+  assert.equal(r2.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_UNCONFIGURED');
+});
+
+test('(J) invalid boundary -> blocked', () => {
+  const invBoundary = evaluateSigningReviewInputBoundary({ ...goodSigningInput(), can_send: true });
+  assert.equal(invBoundary.signing_review_input_state, 'SIGNING_REVIEW_INPUT_INVALID');
+  const r = evaluateSigningReviewHealth(goodHealthInput({ signing_review_input_boundary: invBoundary }));
+  assertSafe(r);
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+});
+
+test('(J) invalid custody -> blocked', () => {
+  const badCustody = evaluateSignerCustodyBoundary({ purpose: 'signer_custody_boundary', signer_source: 'real_signer' });
+  const r = evaluateSigningReviewHealth(goodHealthInput({ signer_custody_boundary: badCustody }));
+  assertSafe(r);
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+});
+
+test('(J) key-material detected -> blocked', () => {
+  const blockedSurface = evaluatePrivateKeyForbiddenSurface({ private_key: 'LEAK' });
+  const r = evaluateSigningReviewHealth(goodHealthInput({ private_key_surface: blockedSurface }));
+  assertSafe(r);
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+  assert.equal(JSON.stringify(r).includes('LEAK'), false);
+});
+
+test('(J) blocked verdict -> blocked', () => {
+  const blockedVerdict = evaluateSigningReviewVerdict(goodVerdictInput({ private_key_surface: evaluatePrivateKeyForbiddenSurface({ seed: 'x' }) }));
+  assert.equal(blockedVerdict.signing_review_state, 'SIGNING_REVIEW_BLOCKED');
+  const r = evaluateSigningReviewHealth(goodHealthInput({ signing_review_verdict: blockedVerdict }));
+  assertSafe(r);
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+});
+
+test('(J) suppressed -> suppressed', () => {
+  // build a suppression result that is suppressed for an additional reason (always suppressed),
+  // then confirm health reports SUPPRESSED when the verdict isn't a clean pass path
+  const r = evaluateSigningReviewHealth(goodHealthInput({ signing_review_suppression: cleanSuppression }));
+  assertSafe(r);
+  // cleanSuppression.suppressed === true (always suppressed for sign/send) -> SUPPRESSED
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_SUPPRESSED');
+});
+
+test('(J) advisory review pass + not suppressed -> reviewed advisory only', () => {
+  const notSuppressed = Object.freeze({ suppressed: false, suppression_reasons: [], read_only: true });
+  const r = evaluateSigningReviewHealth(goodHealthInput({ signing_review_suppression: notSuppressed }));
+  assertSafe(r);
+  assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_REVIEWED_ADVISORY');
+  // reviewed advisory opens NO signer / signing / transaction / send
+  assert.equal(r.signer_ready, false);
+  assert.equal(r.signing_permitted, false);
+  assert.equal(r.transaction_ready, false);
+  assert.equal(r.can_send, false);
+  assert.equal(r.can_serialize, false);
+});
+
+test('(J) smuggled sign/send/key flags -> blocked', () => {
+  for (const s of [{ can_send: true }, { signing_permitted: true }, { signer_ready: true },
+    { send: true }, { sign: true }, { private_key: 'LEAK' }]) {
+    const r = evaluateSigningReviewHealth({ ...goodHealthInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(J) secret / mainnet / REAL-LIVE -> blocked', () => {
+  for (const s of [{ secret: 'LEAK' }, { network: 'mainnet' }, { mode: 'prod' }, { real_live: true }]) {
+    const r = evaluateSigningReviewHealth({ ...goodHealthInput(), ...s });
+    assertSafe(r);
+    assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_BLOCKED');
+    assert.equal(JSON.stringify(r).includes('LEAK'), false);
+  }
+});
+
+test('(J) hostile -> frozen no throw', () => {
+  for (const h of hostiles()) {
+    let r;
+    assert.doesNotThrow(() => { r = evaluateSigningReviewHealth(h); });
+    assertSafe(r);
+    assert.equal(r.signing_review_health_state, 'SIGNING_REVIEW_HEALTH_UNCONFIGURED');
   }
 });
 
