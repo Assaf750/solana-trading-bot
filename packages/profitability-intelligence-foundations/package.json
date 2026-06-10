@@ -1,0 +1,11 @@
+{
+  "name": "@soltrade/profitability-intelligence-foundations",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stage-16 (Phase B) strategy & wallet profitability intelligence foundations: per-wallet profitability read-model over simulated paper/backtest outputs + heuristic diagnostic risk flags + copyability ADVISORY composer. Read-only/advisory, simulated-only, fail-closed. No auto-apply, no auto-ban, no config change, no execution authority.",
+  "main": "src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs"
+  }
+}
