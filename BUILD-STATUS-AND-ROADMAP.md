@@ -2,7 +2,7 @@
 
 > **النوع:** وثيقة حالة/تخطيط حيّة غير سلطوية (living status + roadmap). تُقرأ بعد `CLAUDE.md` و`README.md`.
 > **القاعدة الحاكمة:** عند أي تعارض مع `docs/00`–`12` / `CLAUDE.md` / `01-SSOT.md` تُغلَّب الوثيقة المعتمدة ويُصحَّح هذا الملف. لا تضيف أي اسم SSOT/API/CONFIG/DATA جديد. لا تُحوِّل `candidate_*` إلى implemented.
-> **آخر تحديث:** 2026-06-10 · **الحالة على main:** `5ba9631` · full suite **1427/1427** · mechanism guard `sources=99 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true` غائب repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])`.
+> **آخر تحديث:** 2026-06-10 · **الحالة على main:** `a466ed3` · full suite **1503/1503** · mechanism guard `sources=101 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true` غائب repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])`.
 
 ---
 
@@ -24,6 +24,7 @@
 | 8 | Intent Ledger Foundation (`intent-ledger-foundations`) — input boundary + candidate record + in-memory ledger + state machine + audit envelope + suppression + health | 18 | 75 | `bf18d44` |
 | 9 | Route / Execution-Planning Foundation (`route-planning-foundations`) — input/source boundary + candidate route + feasibility + execution-plan preview + suppression + health | 19 | 72 | `09c7212` |
 | 10 | Transaction-Build-Review Foundation (`transaction-build-review-foundations`) — input/source boundary + candidate descriptor + resource advisory + **serialization-forbidden-surface guard (redacting)** + verdict + suppression + health | 20 | 75 | `5ba9631` |
+| 11 | Signing-Review Foundation (`signing-review-foundations`) — input boundary + signer/custody boundary + candidate signing-review descriptor + custody-readiness advisory + **private-key-forbidden-surface guard (redacting NAME-only)** + verdict + **always-suppressed** suppression + health | 20 | 76 | `a466ed3` |
 
 **حُرّاس قائمة (Gate-A/H ومسبقة):** `send-gate-contract` (85)، `isolated-signer-runtime` (مُفعَّل في ALLOWLIST، skeleton/no-key)، إضافة لحزم Gate B–E السابقة (risk-gates · intent-ledger · position-lifecycle · execution-paper-adapter · decision-engine · exit-manager · paper-portfolio · execution-wallet-* · signer-* · custody-* · real-live-readiness) الموجودة كـ skeletons محوكمة.
 
@@ -52,8 +53,8 @@
 > كل مرحلة أدناه تتبع نموذج §2. التعيين إلى Gates A–E من `10-AGENT-BUILD-PLAN §7` و`06-BUILD §6` (Safety Activation Gates). **لا يُبدأ أي طور تالٍ بلا أمر مستخدم صريح ومنفصل.**
 
 ### الطور A — إكمال أنبوب المراجعة read-only/advisory (بلا تنفيذ) — *Gate A/B*
-- **Stage 11 — Signing-Review Foundation:** مراجعة جاهزية التوقيع وصفياً فقط (signer-profile/custody-readiness descriptors من metadata · `key_custody_mode` advisory · dual-control review · `signer_profile_status` review). **بلا أي private key material · بلا توقيع حقيقي · بلا تفعيل SignerService.** يستهلك `TX_BUILD_REVIEW_PASS_ADVISORY`. كل أعلام readiness/signing = false.
-- **Stage 12 — Send/Broadcast-Review Foundation:** مراجعة شروط الإرسال وصفياً فقط (provider/sender descriptors disabled/read-only · bundle/tip advisory buckets · idempotency/intent review). يتكامل مع `send-gate-contract` القائم (الذي يبقى fail-closed). **بلا send/broadcast حقيقي · `can_send`/`can_broadcast` يبقيان false.**
+- **Stage 11 — Signing-Review Foundation — ✅ DONE (`a466ed3`):** مراجعة جاهزية التوقيع وصفياً فقط (signer-profile/custody-readiness descriptors من metadata · `key_custody_mode` advisory · dual-control review · `signer_profile_status` review) + **Private-Key Forbidden Surface Guard** (يحجب أي اسم مفتاح/seed/keypair/signature ويُرجِع `forbidden_field_ref` = الاسم فقط، والقيمة المزروعة غائبة عن `JSON.stringify`) + verdict + **suppression دائمة الكتم لـ sign/send** (`not_sign/send/execution_authorized` على كل مسار) + health. يستهلك `TX_BUILD_REVIEW_PASS_ADVISORY`. **بلا أي private key material · بلا توقيع حقيقي · بلا تفعيل SignerService.** كل أعلام readiness/signing = false على كل حالة (incl. PASS_ADVISORY/ACCEPTABLE_ADVISORY/REVIEWED_ADVISORY). الحزمة: `signing-review-foundations` · 20 export · 76 اختبار. إغلاق: `reports/E2-STAGE-11-...-CLOSURE-EVIDENCE.md`.
+- **Stage 12 — Send/Broadcast-Review Foundation — ⏭️ التالي (يتطلّب أمراً صريحاً منفصلاً):** مراجعة شروط الإرسال وصفياً فقط (provider/sender descriptors disabled/read-only · bundle/tip advisory buckets · idempotency/intent review). يتكامل مع `send-gate-contract` القائم (الذي يبقى fail-closed). **بلا send/broadcast حقيقي · `can_send`/`can_broadcast` يبقيان false.**
 - **Stage 13 — End-to-End Decision-Trace Orchestrator (read-only):** تركيب المراحل 4–12 في **Decision Trace** واحد deterministic + full-pipeline health/status read-model، يُظهر سبب القبول/الرفض لكل قرار عبر الأنبوب. لا تنفيذ. **Phase-A Gate:** مراجعة تكامل + regression كامل + توقيع حوكمي/أمني.
 
 ### الطور B — المحاكاة والمعايرة (قابل للتنفيذ، بلا مال حقيقي — هنا تُقاس الربحية أوّل مرة) — *Gate B*
