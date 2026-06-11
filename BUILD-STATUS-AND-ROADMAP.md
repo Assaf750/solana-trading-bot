@@ -2,7 +2,7 @@
 
 > **النوع:** وثيقة حالة/تخطيط حيّة غير سلطوية (living status + roadmap). تُقرأ بعد `CLAUDE.md` و`README.md`.
 > **القاعدة الحاكمة:** عند أي تعارض مع `docs/00`–`12` / `CLAUDE.md` / `01-SSOT.md` تُغلَّب الوثيقة المعتمدة ويُصحَّح هذا الملف. لا تضيف أي اسم SSOT/API/CONFIG/DATA جديد. لا تُحوِّل `candidate_*` إلى implemented.
-> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `db37e08`+ · full suite **1854/1854** · mechanism guard `sources=119 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **كل مراحل البناء 2–23 مكتملة ✅ · الأطوار A·B·C·D بوّاباتها PASS · Stage 22 + 23 ✅ — بوّابة الطور E هي الأخيرة، يليها تقرير التسليم النهائي**.
+> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `8abe095`+ · full suite **1854/1854** · mechanism guard `sources=119 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **🏁 البناء مكتمل حتى حدّه الصادق: كل مراحل 2–23 ✅ · كل البوّابات الخمس A·B·C·D·E PASS · تقرير التسليم النهائي `reports/E2-FINAL-DELIVERY-REPORT.md`**. المتبقّي = زرّا المالك الفيزيائيان (مدخلات testnet ثم تفعيل mainnet) — يُبنى حتى الزرّ ولا يُضغط ذاتياً.
 
 ---
 
