@@ -14,24 +14,56 @@
 const UNCONFIGURED = 'unconfigured';
 
 // Is the given input "key-material-shaped"? Used ONLY to REFUSE such input — never to accept/store/return it.
-// Heuristic, conservative: strings that look like PEM, a long base58 blob, or a multi-word mnemonic, or any
-// object that advertises secret/key fields. The contract refuses the whole call rather than inspect deeply.
-function looksLikeKeyMaterial(input) {
-  if (input == null) return false;
-  if (typeof input === 'string') {
-    const s = input.trim();
-    if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(s)) return true;       // PEM private key
-    if (/^[1-9A-HJ-NP-Za-km-z]{64,}$/.test(s)) return true;              // long base58 blob
-    if (s.split(/\s+/).length >= 12) return true;                        // mnemonic-length word list
-    return false;
-  }
-  if (typeof input === 'object') {
-    // refuse any object that exposes a secret/key-bearing field
-    for (const k of Object.keys(input)) {
-      if (/secret|private|seed|mnemonic|keypair|key_material|raw_key/i.test(k)) return true;
-    }
-  }
+// Stage-19 security-review hardening (binding condition, reports/E2-STAGE-19): the detector is DEEP — it
+// recurses into nested objects/arrays for secret-bearing field NAMES and applies the string patterns
+// (PEM / base58 blob / mnemonic-length word list) to string VALUES of properties, not only to a bare string
+// input. Bounded depth + node budget; EXCEEDING the bound, an uninspectable object, or a throwing accessor
+// all count as suspicious (true) — over-refusal is the fail-safe direction (Fail-Safe-Not-Fail-Open).
+const KEY_MATERIAL_NAME_RE = /secret|private|seed|mnemonic|keypair|key_material|raw_key/i;
+const KEY_SCAN_MAX_DEPTH = 6;
+const KEY_SCAN_MAX_NODES = 256;
+
+function keyMaterialString(s) {
+  const t = String(s).trim();
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(t)) return true;       // PEM private key
+  if (/^[1-9A-HJ-NP-Za-km-z]{64,}$/.test(t)) return true;              // long base58 blob
+  if (t.split(/\s+/).length >= 12) return true;                        // mnemonic-length word list
   return false;
+}
+
+function looksLikeKeyMaterial(input) {
+  const budget = { n: 0 };
+  const scan = (v, depth) => {
+    if (v == null) return false;
+    budget.n += 1;
+    if (depth > KEY_SCAN_MAX_DEPTH || budget.n > KEY_SCAN_MAX_NODES) return true; // bound exceeded -> refuse
+    if (typeof v === 'string') return keyMaterialString(v);
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (scan(item, depth + 1)) return true;
+      }
+      return false;
+    }
+    if (typeof v === 'object') {
+      let entries;
+      try {
+        entries = Object.entries(v);
+      } catch {
+        return true; // uninspectable -> suspicious -> refuse
+      }
+      for (const [k, val] of entries) {
+        if (KEY_MATERIAL_NAME_RE.test(String(k))) return true;          // secret-bearing NAME at any depth
+        if (scan(val, depth + 1)) return true;                          // string VALUES + nested objects/arrays
+      }
+      return false;
+    }
+    return false;
+  };
+  try {
+    return scan(input, 0);
+  } catch {
+    return true; // a throwing accessor is suspicious -> refuse (fail-safe)
+  }
 }
 
 // A frozen fail-closed result. `ok` is always false; `status` is always "unconfigured".

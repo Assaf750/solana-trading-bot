@@ -209,3 +209,40 @@ test('C4 guard PASSES with allowlist exactly one path', () => {
   assert.equal(res.ok, true, JSON.stringify(res.violations, null, 2));
   assert.equal(res.counts.allowlist, 1);
 });
+
+// ---------------------------------------------------------------------------
+// Stage-19 security-review HARDENING regression (binding condition,
+// reports/E2-STAGE-19): a THROWING audit.append — in the BEFORE-sign phase OR
+// the AFTER-sign phase — must fail-close the attempt: no signed result escapes,
+// the error is never re-thrown, and nothing leaks.
+// ---------------------------------------------------------------------------
+
+test('S19-hardening: throwing audit.append (before phase) fail-closes the sign', async () => {
+  const pair = await ephemeralPair();
+  const throwingBefore = { append: () => { throw new Error('audit-down-before'); } };
+  const path = runtime.createRealSigningPath({ auditLog: throwingBefore });
+  let r;
+  await assert.doesNotReject(async () => { r = await path.attemptSign({ ...VALID }, pair.privateKey); });
+  assert.equal(r.ok, false, 'audit failure must refuse the sign');
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(JSON.stringify(r).includes('audit-down-before'), false, 'audit error text never echoed');
+});
+
+test('S19-hardening: throwing audit.append (after phase) never lets a signed result escape', async () => {
+  const pair = await ephemeralPair();
+  let calls = 0;
+  const throwingAfter = { append: () => { calls += 1; if (calls >= 2) throw new Error('audit-down-after'); } };
+  const path = runtime.createRealSigningPath({ auditLog: throwingAfter });
+  let r;
+  await assert.doesNotReject(async () => { r = await path.attemptSign({ ...VALID }, pair.privateKey); });
+  // whichever policy holds (refuse, or succeed only if the after-audit landed),
+  // a result claiming signed:true with a FAILED after-audit must be impossible.
+  if (r.signed === true) {
+    assert.equal(calls >= 2, true, 'signed result requires the after-audit to have been attempted');
+    assert.fail('signed:true escaped despite a throwing after-phase audit (fail-close violated)');
+  }
+  assert.equal(r.signed, false);
+  assert.equal(r.signature, null);
+  assert.equal(JSON.stringify(r).includes('audit-down-after'), false);
+});

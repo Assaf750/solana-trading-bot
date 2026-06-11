@@ -348,3 +348,30 @@ test('E2-KMS-10 guard remains allowlist=1; no SDK selected; skeleton stays fail-
   assert.equal(a.isConfigured(), false);
   assert.equal(a.resolveKeyHandle({ request: 'x' }).recommended_signer_profile_status, 'DEGRADED');
 });
+
+// ---------------------------------------------------------------------------
+// Stage-19 security-review HARDENING regressions (binding condition,
+// reports/E2-STAGE-19): the key-material detector must be DEEP.
+// ---------------------------------------------------------------------------
+
+test('S19-hardening: NESTED secret-bearing field name is refused (deep scan)', () => {
+  assert.equal(refusesKeyMaterial({ nested: { secret_key: 'x' } }), true);
+  assert.equal(refusesKeyMaterial({ a: { b: { c: { private_key: 'x' } } } }), true);
+  assert.equal(refusesKeyMaterial({ list: [{ ok: 1 }, { seed_phrase: 'x' }] }), true);
+});
+
+test('S19-hardening: PEM / base58-blob / mnemonic string VALUES under innocuous keys are refused', () => {
+  assert.equal(refusesKeyMaterial({ memo: '-----BEGIN PRIVATE KEY-----\nABC\n-----END PRIVATE KEY-----' }), true);
+  assert.equal(refusesKeyMaterial({ note: '1'.repeat(0) + '5Kb8kLf9zgWQnogidDA76MzPL6TsZZY36hWXMssSzNydYXYB9KF5Kb8kLf9zgWQnogidDA76MzPL6Ts' }), true);
+  assert.equal(refusesKeyMaterial({ comment: 'one two three four five six seven eight nine ten eleven twelve' }), true);
+  // clean nested inputs still pass
+  assert.equal(refusesKeyMaterial({ nested: { label: 'ok', n: 3 }, list: ['a', 'b'] }), false);
+});
+
+test('S19-hardening: depth/budget bound exceeded or throwing accessor -> refused (fail-safe)', () => {
+  let deep = { v: 'leaf' };
+  for (let i = 0; i < 10; i++) deep = { next: deep };
+  assert.equal(refusesKeyMaterial(deep), true, 'beyond max depth -> suspicious -> refused');
+  const hostile = new Proxy({}, { ownKeys() { throw new Error('hostile'); }, getOwnPropertyDescriptor() { throw new Error('hostile'); } });
+  assert.equal(refusesKeyMaterial({ wrap: hostile }), true, 'uninspectable -> refused');
+});

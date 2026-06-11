@@ -59,6 +59,18 @@ const failClosed = (extra) => Object.freeze({ ok: false, signed: false, signatur
 // ephemeral key does it sign the bound digest. Records before/after audit per attempt.
 export function createRealSigningPath({ auditLog } = {}) {
   const audit = auditLog && typeof auditLog.append === 'function' ? auditLog : null;
+  // Stage-19 security-review hardening (binding condition, reports/E2-STAGE-19): a THROWING audit.append must
+  // FAIL-CLOSE the attempt — never propagate, never let an unaudited signed result escape. safeAppend returns
+  // true on a recorded entry, false if the append threw (the caught error is deliberately NOT read/echoed).
+  const safeAppend = (entry) => {
+    if (!audit) return true; // no audit configured -> nothing to record (the audit_actor gate only applies when audit is set)
+    try {
+      audit.append(entry);
+      return true;
+    } catch {
+      return false;
+    }
+  };
   return Object.freeze({
     describe: describeRealSigningPath,
     mode: MODE,
@@ -68,19 +80,22 @@ export function createRealSigningPath({ auditLog } = {}) {
       if (audit && (input == null || typeof input !== 'object' || !isStr(input.audit_actor))) {
         return failClosed({ blockers: Object.freeze(['audit_actor_required']) });
       }
-      if (audit) audit.append(auditEntry(input, `real_sign_before${refSuffix(input)}`));
+      // Pre-audit MUST land before any signing work; a throwing append fail-closes with NO sign.
+      if (audit && !safeAppend(auditEntry(input, `real_sign_before${refSuffix(input)}`))) {
+        return failClosed({ reason: 'audit_unavailable_before' });
+      }
 
       // Evaluate gates (pure; no audit here — this path owns its before/after).
       const result = evaluateSigningPreflight(input);
       if (result.preflight_ok !== true) {
-        if (audit) audit.append(auditEntry(input, `real_sign_after_refused:${result.blockers.join('|')}${refSuffix(input)}`));
+        safeAppend(auditEntry(input, `real_sign_after_refused:${result.blockers.join('|')}${refSuffix(input)}`));
         return Object.freeze({ ...result });
       }
 
       // Preflight clean. Require an explicitly-supplied ephemeral signing key (no KMS/custody key yet).
       const subtle = webcrypto && webcrypto.subtle;
       if (!signerKey || !subtle || typeof subtle.sign !== 'function') {
-        if (audit) audit.append(auditEntry(input, `real_sign_after_refused:no_signing_material${refSuffix(input)}`));
+        safeAppend(auditEntry(input, `real_sign_after_refused:no_signing_material${refSuffix(input)}`));
         return failClosed({ reason: 'no_signing_material' });
       }
 
@@ -91,11 +106,16 @@ export function createRealSigningPath({ auditLog } = {}) {
         const sig = await subtle.sign({ name: 'Ed25519' }, signerKey, bound);
         signature = Buffer.from(new Uint8Array(sig)).toString('base64');
       } catch {
-        if (audit) audit.append(auditEntry(input, `real_sign_after_refused:sign_error${refSuffix(input)}`));
+        safeAppend(auditEntry(input, `real_sign_after_refused:sign_error${refSuffix(input)}`));
         return failClosed({ reason: 'sign_error' });
       }
 
-      if (audit) audit.append(auditEntry(input, `real_sign_after_signed_sign_only_no_send${refSuffix(input)}`));
+      // After-audit MUST land for a signed result to be emitted. If the after-append throws, the signature is
+      // DISCARDED and the attempt fail-closes — no unaudited signature ever escapes. (The local `signature`
+      // goes out of scope unused; it is never returned, logged, or echoed.)
+      if (!safeAppend(auditEntry(input, `real_sign_after_signed_sign_only_no_send${refSuffix(input)}`))) {
+        return failClosed({ reason: 'audit_unavailable_after' });
+      }
       return Object.freeze({
         ok: true,
         signed: true,
