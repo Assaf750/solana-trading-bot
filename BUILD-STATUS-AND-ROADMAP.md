@@ -2,7 +2,7 @@
 
 > **النوع:** وثيقة حالة/تخطيط حيّة غير سلطوية (living status + roadmap). تُقرأ بعد `CLAUDE.md` و`README.md`.
 > **القاعدة الحاكمة:** عند أي تعارض مع `docs/00`–`12` / `CLAUDE.md` / `01-SSOT.md` تُغلَّب الوثيقة المعتمدة ويُصحَّح هذا الملف. لا تضيف أي اسم SSOT/API/CONFIG/DATA جديد. لا تُحوِّل `candidate_*` إلى implemented.
-> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `8abe095`+ · full suite **1854/1854** · mechanism guard `sources=119 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **🏁 البناء مكتمل حتى حدّه الصادق: كل مراحل 2–23 ✅ · كل البوّابات الخمس A·B·C·D·E PASS · تقرير التسليم النهائي `reports/E2-FINAL-DELIVERY-REPORT.md`**. المتبقّي = زرّا المالك الفيزيائيان (مدخلات testnet ثم تفعيل mainnet) — يُبنى حتى الزرّ ولا يُضغط ذاتياً.
+> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `8abe095`+ · full suite **1854/1854** · mechanism guard `sources=119 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **🏁 البناء مكتمل حتى حدّه الصادق: كل مراحل 2–23 ✅ · كل البوّابات الخمس A·B·C·D·E PASS · تقرير التسليم النهائي `reports/E2-FINAL-DELIVERY-REPORT.md`**. المتبقّي = زرّا المالك الفيزيائيان (مدخلات testnet ثم تفعيل mainnet) — يُبنى حتى الزرّ ولا يُضغط ذاتياً. · **واجهة المشغّل القابلة للنقر سُلّمت**: `apps/operator-ui` (Vite+React، 9 صفحات، AR/EN، read-only على محاكاة) — التشغيل: `cd apps/operator-ui && npm install && npm run dev` (تفاصيل: `reports/E2-OPERATOR-UI-DELIVERY.md`).
 
 ---
 

@@ -124,6 +124,12 @@ non-allowlisted package.
    ALLOWLIST governance decisions + dedicated reviews, and the mainnet activation is the owner's physical switch.
    The system is built, tested, and verified right up to that switch — and never throws it autonomously.
 
+## 6. Operator UI (clickable, delivered post-report)
+A runnable **Vite + React 9-page operator interface** at `apps/operator-ui/` (AR/EN, RTL/LTR, design-system
+tokens), strictly **read-only over simulated fixtures** — no real money/keys/network/execution authority.
+Launch: `cd apps/operator-ui && npm install && npm run dev` → http://localhost:5173. Details:
+`reports/E2-OPERATOR-UI-DELIVERY.md`. Backend suite/guards unchanged (1854/1854; guards at baseline).
+
 ---
 
 **Delivered:** a production-grade Solana smart-money copy-trading engine — discovery → ranking → risk → intent →
