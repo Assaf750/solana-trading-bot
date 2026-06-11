@@ -2,7 +2,7 @@
 
 > **النوع:** وثيقة حالة/تخطيط حيّة غير سلطوية (living status + roadmap). تُقرأ بعد `CLAUDE.md` و`README.md`.
 > **القاعدة الحاكمة:** عند أي تعارض مع `docs/00`–`12` / `CLAUDE.md` / `01-SSOT.md` تُغلَّب الوثيقة المعتمدة ويُصحَّح هذا الملف. لا تضيف أي اسم SSOT/API/CONFIG/DATA جديد. لا تُحوِّل `candidate_*` إلى implemented.
-> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `5c2eaa5`+ · full suite **1834/1834** · mechanism guard `sources=117 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **الأطوار A وB وC مكتملة + بوّاباتها PASS** · **مراحل الطور D (19 توقيع · 20 حضانة · 21 حدّ إرسال testnet) ✅ — بوّابة الطور D هي التالية، ثم الطور E (22 جاهزية REAL-LIVE · 23 seam تفعيل mainnet)**.
+> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `e2a1d06`+ · full suite **1834/1834** · mechanism guard `sources=117 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **الأطوار A · B · C · D مكتملة + بوّاباتها الأربع PASS** (`reports/E2-PHASE-D-GATE-EVIDENCE.md`، مسبار sign→send 38/38 من الحَكَم، 8 شروط مُلزِمة للطور E) · **الطور E يُفتح (Stage 22 جاهزية REAL-LIVE · Stage 23 seam تفعيل mainnet — حتى الزرّ، لا تفعيل ذاتي)**.
 
 ---
 
