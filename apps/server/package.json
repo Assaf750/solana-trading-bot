@@ -1,0 +1,11 @@
+{
+  "name": "@soltrade/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local application server — wires the foundation packages into a running engine. Zero runtime dependencies (node:http/node:crypto/node:fs). Localhost-only. Secrets live ONLY in the encrypted vault (data/, gitignored).",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node --test"
+  }
+}

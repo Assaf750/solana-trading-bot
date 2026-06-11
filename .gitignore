@@ -27,6 +27,12 @@ id.json
 secrets/
 **/secrets/
 
+# === App runtime state (apps/server) — NEVER commit: encrypted vault, audit, runtime config ===
+data/
+**/data/
+*.vault
+vault.enc
+
 # === Local data / infra runtime (no Docker/migrations content yet) ===
 *.sqlite
 *.db

@@ -1,0 +1,192 @@
+// config-service.mjs — owner-editable configuration with validation + versioning.
+// SSOT names only. Hard-Risk completeness rule: REAL-LIVE config is invalid unless ALL
+// nine Hard-Risk limits are present and finite (no implicit infinity).
+import { readJson, writeJson, deepFreeze, nowIso } from './util.mjs';
+
+const CONFIG_FILE = 'config.json';
+
+export const HARD_RISK_FIELDS = [
+  'max_daily_loss_pct',
+  'max_daily_loss_usdt',
+  'max_total_drawdown_pct',
+  'max_open_positions',
+  'max_position_size_pct',
+  'max_token_exposure_pct',
+  'max_creator_exposure_pct',
+  'max_cluster_exposure_pct',
+  'max_correlated_meme_exposure_pct',
+];
+
+export const EV_FIELDS = [
+  'minimum_net_expectancy',
+  'minimum_profit_factor',
+  'minimum_lower_confidence_bound',
+  'minimum_sample_size',
+  'minimum_exit_success_rate',
+  'max_expected_drawdown_pct',
+];
+
+const DEFAULTS = {
+  config_version: 1,
+  updated_at: null,
+  // Hard Risk — start UNSET (null). Null means NOT CONFIGURED, which blocks REAL-LIVE.
+  hard_risk: Object.fromEntries(HARD_RISK_FIELDS.map((f) => [f, null])),
+  // EV thresholds — conservative defaults (paper can run with these; owner tunes later).
+  ev: {
+    ev_gate_mode: 'strict',
+    minimum_net_expectancy: 0,
+    minimum_profit_factor: 1.2,
+    minimum_lower_confidence_bound: 0,
+    minimum_sample_size: 20,
+    minimum_exit_success_rate: 0.85,
+    max_expected_drawdown_pct: 30,
+  },
+  execution: {
+    capital_limit: null,           // finite > 0 required for REAL-LIVE
+    sizing_mode: 'fixed_usd',
+    sizing_value: 10,
+    usdc_quote_enabled: false,
+  },
+  copy_defaults: {
+    copy_mode: 'follow_entry_user_exit',  // safe default; full_mirror is per-wallet explicit
+    take_profit_pct: 50,
+    stop_loss_pct: 30,
+    max_entry_slippage_vs_leader: 5,
+    min_mirror_sell_pct: 5,
+  },
+  providers: {
+    // refs only — raw keys live in the vault
+    rpc_url_ref: null,        // e.g. vault:helius_rpc_url
+    stream_ref: null,
+    jupiter_key_ref: null,
+  },
+  signer_session: {
+    // ALL must be explicitly set (non-null) for the signer to be "ready"
+    idle_timeout_ms: null,
+    max_session_ms: null,
+    max_session_notional_usd: null,
+    lock_after_n_risk_rejections: null,
+  },
+  mode: 'paper', // paper | real_live (real_live only via activate_real_live gate)
+};
+
+const NUMERIC_BOUNDS = {
+  max_daily_loss_pct: [0.1, 100], max_daily_loss_usdt: [1, 1e9],
+  max_total_drawdown_pct: [0.1, 100], max_open_positions: [1, 1000],
+  max_position_size_pct: [0.01, 100], max_token_exposure_pct: [0.01, 100],
+  max_creator_exposure_pct: [0.01, 100], max_cluster_exposure_pct: [0.01, 100],
+  max_correlated_meme_exposure_pct: [0.01, 100],
+  minimum_net_expectancy: [-1e9, 1e9], minimum_profit_factor: [0, 100],
+  minimum_lower_confidence_bound: [-1e9, 1e9], minimum_sample_size: [1, 1e6],
+  minimum_exit_success_rate: [0, 1], max_expected_drawdown_pct: [0.1, 100],
+  capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9],
+  take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
+  max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
+  idle_timeout_ms: [10_000, 86_400_000], max_session_ms: [60_000, 86_400_000],
+  max_session_notional_usd: [1, 1e9], lock_after_n_risk_rejections: [1, 100],
+};
+
+function checkNumeric(field, value, errors) {
+  if (value === null) return; // null = explicitly unset (allowed; blocks readiness, not save)
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    errors.push({ field, error: 'must_be_finite_number' });
+    return;
+  }
+  const b = NUMERIC_BOUNDS[field];
+  if (b && (value < b[0] || value > b[1])) {
+    errors.push({ field, error: `out_of_range_${b[0]}_${b[1]}` });
+  }
+}
+
+export function validateConfigPatch(patch) {
+  const errors = [];
+  const sections = {
+    hard_risk: HARD_RISK_FIELDS,
+    ev: [...EV_FIELDS, 'ev_gate_mode'],
+    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled'],
+    copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
+    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref'],
+    signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
+  };
+  for (const [section, value] of Object.entries(patch || {})) {
+    if (!sections[section]) { errors.push({ field: section, error: 'unknown_section' }); continue; }
+    if (!value || typeof value !== 'object') { errors.push({ field: section, error: 'must_be_object' }); continue; }
+    for (const [field, v] of Object.entries(value)) {
+      if (!sections[section].includes(field)) { errors.push({ field: `${section}.${field}`, error: 'unknown_field' }); continue; }
+      if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'usdc_quote_enabled' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
+      else if (field.endsWith('_ref')) {
+        if (v !== null && (typeof v !== 'string' || !/^vault:[a-z0-9_.-]{2,64}$/i.test(v))) {
+          errors.push({ field, error: 'must_be_vault_ref_or_null' });
+        }
+      } else if (NUMERIC_BOUNDS[field] !== undefined) checkNumeric(field, v, errors);
+    }
+  }
+  return { validation_status: errors.length ? 'invalid' : 'valid', errors };
+}
+
+export function createConfigService() {
+  function load() {
+    const { value, corrupt } = readJson(CONFIG_FILE, null);
+    if (corrupt) {
+      // Fail-safe: corrupt config never silently becomes defaults for trading; flag it.
+      return { ...structuredClone(DEFAULTS), corrupt_state_detected: true };
+    }
+    if (!value) return structuredClone(DEFAULTS);
+    // merge over defaults so new fields appear with safe values
+    const merged = structuredClone(DEFAULTS);
+    for (const k of Object.keys(merged)) {
+      if (value[k] !== undefined) {
+        merged[k] = typeof merged[k] === 'object' && merged[k] !== null && !Array.isArray(merged[k])
+          ? { ...merged[k], ...value[k] }
+          : value[k];
+      }
+    }
+    return merged;
+  }
+
+  function get() {
+    return deepFreeze(load());
+  }
+
+  function update(patch) {
+    const result = validateConfigPatch(patch);
+    if (result.validation_status !== 'valid') {
+      return { ok: false, api_error_code: 'CONFIG_VALIDATION_FAILED', ...result };
+    }
+    const cfg = load();
+    // mode is NOT editable via update_config — only via activate_real_live / deactivate path.
+    if ('mode' in (patch || {})) {
+      return { ok: false, api_error_code: 'READ_ONLY_FIELD_REJECTED', errors: [{ field: 'mode', error: 'use_activation_command' }] };
+    }
+    for (const [section, value] of Object.entries(patch)) {
+      cfg[section] = { ...cfg[section], ...value };
+    }
+    cfg.config_version += 1;
+    cfg.updated_at = nowIso();
+    writeJson(CONFIG_FILE, cfg);
+    return { ok: true, config_version: cfg.config_version, validation_status: 'valid' };
+  }
+
+  /** internal: set mode after activation gates pass (never call from HTTP directly) */
+  function setMode(mode) {
+    const cfg = load();
+    cfg.mode = mode;
+    cfg.config_version += 1;
+    cfg.updated_at = nowIso();
+    writeJson(CONFIG_FILE, cfg);
+    return cfg.config_version;
+  }
+
+  return { get, update, setMode };
+}
+
+/** Hard-Risk completeness: every field present AND finite. No implicit infinity. */
+export function hardRiskComplete(cfg) {
+  const missing = HARD_RISK_FIELDS.filter(
+    (f) => typeof cfg.hard_risk?.[f] !== 'number' || !Number.isFinite(cfg.hard_risk[f]),
+  );
+  return { complete: missing.length === 0, missing_limits: missing };
+}
