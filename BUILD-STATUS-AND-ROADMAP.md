@@ -2,7 +2,7 @@
 
 > **النوع:** وثيقة حالة/تخطيط حيّة غير سلطوية (living status + roadmap). تُقرأ بعد `CLAUDE.md` و`README.md`.
 > **القاعدة الحاكمة:** عند أي تعارض مع `docs/00`–`12` / `CLAUDE.md` / `01-SSOT.md` تُغلَّب الوثيقة المعتمدة ويُصحَّح هذا الملف. لا تضيف أي اسم SSOT/API/CONFIG/DATA جديد. لا تُحوِّل `candidate_*` إلى implemented.
-> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `e2a1d06`+ · full suite **1834/1834** · mechanism guard `sources=117 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **الأطوار A · B · C · D مكتملة + بوّاباتها الأربع PASS** (`reports/E2-PHASE-D-GATE-EVIDENCE.md`، مسبار sign→send 38/38 من الحَكَم، 8 شروط مُلزِمة للطور E) · **الطور E يُفتح (Stage 22 جاهزية REAL-LIVE · Stage 23 seam تفعيل mainnet — حتى الزرّ، لا تفعيل ذاتي)**.
+> **آخر تحديث:** 2026-06-11 · **الحالة على main:** `db37e08`+ · full suite **1854/1854** · mechanism guard `sources=119 allowlist=1 violations=0` · SSOT drift baseline ثابت · `can_send:true`/`can_broadcast:true` غائبان repo-wide · ALLOWLIST = `Object.freeze(['packages/isolated-signer-runtime/src/'])` · **كل مراحل البناء 2–23 مكتملة ✅ · الأطوار A·B·C·D بوّاباتها PASS · Stage 22 + 23 ✅ — بوّابة الطور E هي الأخيرة، يليها تقرير التسليم النهائي**.
 
 ---
 
@@ -94,7 +94,7 @@
 **✅ الطور D مكتمل + بوّابته PASS** (`reports/E2-PHASE-D-GATE-EVIDENCE.md`، مسبار sign→send 38/38، 8 شروط مُلزِمة للطور E).
 
 - **Stage 22 — REAL-LIVE Readiness + Hard-Risk Wiring — ✅ DONE (verification, `aa32339`):** `real-live-readiness` + `risk-gates` **مُحقَّقان بمراجعة مخصّصة** (3 مراجعين + حَكَم، 0 blockers، بلا تعديل كود): `real_live_config_valid` يلزمه طقم Hard-Risk **كامل ومنتهٍ بلا لانهائية ضمنية** (حذف/Infinity لأي حدّ → غير صالح → not ready) · readiness fail-safe على 11 إشارة · `activate_real_live` يبقى مبوَّباً ولا يُستدعى هنا · Hard-Risk لا يُضعَف بـ `warning_only` (`HARD_RISK_BYPASS_REJECTED`) · مسارات الـ kill الستة قابلة للتمثيل · لا can_send. مسبار مستقل 8/8. إغلاق: `reports/E2-STAGE-22-...-EVIDENCE.md`.
-- **Stage 23 — Mainnet REAL-LIVE Activation:** التفعيل النهائي خلف كل البوّابات بقرار مستخدم صريح، برأس مال محدود ومراقَب + global kill switch + Emergency Exit. **يبقى Fail-Safe-Not-Fail-Open.** **Phase-E Gate:** توقيع جاهزية نهائي + خطة rollback/incident.
+- **Stage 23 — Mainnet REAL-LIVE Activation Seam — ✅ DONE (`db37e08`):** حزمة `mainnet-activation-seam-foundations` (A–F): **seam تفعيل mainnet لا يجهز أبداً** (`activation_performed`/`real_live_activated`/`seam_ready`/`can_send` false ثابتة · `MAINNET_REQ_SEPARATE_SEND_ADAPTER_ALLOWLIST_DECISION` hardcoded met:false → لا يُفعَّل تحت أي مدخل، أُثبت عبر مسح 896 + 1216 حالة) + kill switch fail-safe + emergency-exit read-models + suppression/guard/health (لا حالة ready/activated، أقصى حالة _SUPPRESSED). يستهلك readiness (ready + 0 blockers) + capital_limit (منتهٍ>0) شكلاً. **بلا primitive شبكي · الأسرار بالمرجع · send-gate يبقى يرفض · ALLOWLIST إدخال واحد دون تغيير.** التفعيل الحقيقي = **زرّ المالك الفيزيائي** بمدخلاته المُوثَّقة + قرار ALLOWLIST منفصل لمحوِّل إرسال mainnet — يُبنى حتى الزرّ ولا يُضغط ذاتياً. إغلاق: `reports/E2-STAGE-23-...-CLOSURE-EVIDENCE.md`. **Phase-E Gate (التالي):** تكامل 22–23 + الشروط + regression + أمان، يليه تقرير التسليم النهائي.
 
 ---
 
