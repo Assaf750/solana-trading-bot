@@ -90,7 +90,10 @@
 - **Stage 21 — Testnet/Devnet Execution — ✅ DONE (`5c2eaa5`، build_seam_descriptors_only):** حزمة `testnet-send-boundary-foundations` (A–H): مسار إرسال fail-closed + **seam تفعيل testnet لا يجهز أبداً داخل الحزمة** + idempotency + failure-class + bundle-observer + suppression/guard/health. **بلا primitive شبكي · رفض mainnet صلب · الأسرار بالمرجع · send-gate يبقى يرفض · ALLOWLIST إدخال واحد دون تغيير.** الإرسال الحقيقي على testnet يحتاج **مدخلات المالك** (نقطة RPC testnet بالمرجع · محفظة testnet مموَّلة · caller خارج المستودع) + **قرار حوكمة/ALLOWLIST منفصل من المالك** لمحوِّل إرسال مخصّص بمراجعته الخاصة. إغلاق: `reports/E2-STAGE-21-...-CLOSURE-EVIDENCE.md`. **Phase-D Gate (التالي):** تكامل 19–21 + الشروط المُلزِمة + regression + أمان.
 
 ### الطور E — تفعيل REAL-LIVE على mainnet (Gate E — قرار المستخدم النهائي) — *Gate E*
-- **Stage 22 — REAL-LIVE Readiness + Hard-Risk Wiring:** ربط `real_live_config_valid` + Hard-Risk limits (daily-loss/drawdown/exposure kills) + Calibration Kill/Pause + Readiness Checklist (priority-fee/Jito-tip cache · protocol constants · RPC green · stream sync · calibration priors · cost pipeline) + `activate_real_live` command path. **config غير صالح لـ REAL-LIVE إن غابت حدود Hard Risk.**
+
+**✅ الطور D مكتمل + بوّابته PASS** (`reports/E2-PHASE-D-GATE-EVIDENCE.md`، مسبار sign→send 38/38، 8 شروط مُلزِمة للطور E).
+
+- **Stage 22 — REAL-LIVE Readiness + Hard-Risk Wiring — ✅ DONE (verification, `aa32339`):** `real-live-readiness` + `risk-gates` **مُحقَّقان بمراجعة مخصّصة** (3 مراجعين + حَكَم، 0 blockers، بلا تعديل كود): `real_live_config_valid` يلزمه طقم Hard-Risk **كامل ومنتهٍ بلا لانهائية ضمنية** (حذف/Infinity لأي حدّ → غير صالح → not ready) · readiness fail-safe على 11 إشارة · `activate_real_live` يبقى مبوَّباً ولا يُستدعى هنا · Hard-Risk لا يُضعَف بـ `warning_only` (`HARD_RISK_BYPASS_REJECTED`) · مسارات الـ kill الستة قابلة للتمثيل · لا can_send. مسبار مستقل 8/8. إغلاق: `reports/E2-STAGE-22-...-EVIDENCE.md`.
 - **Stage 23 — Mainnet REAL-LIVE Activation:** التفعيل النهائي خلف كل البوّابات بقرار مستخدم صريح، برأس مال محدود ومراقَب + global kill switch + Emergency Exit. **يبقى Fail-Safe-Not-Fail-Open.** **Phase-E Gate:** توقيع جاهزية نهائي + خطة rollback/incident.
 
 ---
