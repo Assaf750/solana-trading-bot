@@ -99,3 +99,12 @@ test('no Gate D/E artifacts, no forbidden names, no secrets', () => {
   const fx = readFileSync(join(HERE, '..', 'fixtures', 'signer-profile.json'), 'utf8');
   assert.equal(SECRET.test(fx), false, 'secret-like content in fixture');
 });
+
+test('S20-hardening: register() refuses null/uninspectable input, never throws', () => {
+  const reg = createSignerProfilesRegistry();
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); }, has() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = reg.register(bad, { permission_role: 'signer_control' }); });
+    assert.equal(r.ok, false);
+  }
+});

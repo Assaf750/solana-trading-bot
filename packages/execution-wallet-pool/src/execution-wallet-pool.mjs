@@ -137,17 +137,23 @@ export function createExecutionWalletPool({ walletRegistry } = {}) {
      * Returns { ok, assigned, execution_wallet_id?, wallet_assignment_policy?, reason? }. SELECTION ONLY.
      */
     assign(req = {}) {
-      const p = req.wallet_assignment_policy || policy;
-      if (!WALLET_ASSIGNMENT_POLICY.includes(p)) return reject('invalid_wallet_assignment_policy');
-      const ids = eligibleIds();
-      if (ids.length === 0) return reject('no_eligible_execution_wallet');
-      const r = selectByPolicy(p, ids, req);
-      if (!r.id) return reject(r.reason || 'no_eligible_execution_wallet');
-      // Defense-in-depth: never return a non-eligible wallet.
-      if (!ids.includes(r.id)) return reject('no_eligible_execution_wallet');
-      assignCount.set(r.id, countOf(r.id) + 1);
-      return { ok: true, assigned: true, execution_wallet_id: r.id, wallet_assignment_policy: p };
-      // NOTE: selection only. No open/own/fund/transfer/sign/send happens here.
+      // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+      if (req == null || typeof req !== 'object' || Array.isArray(req)) return reject('invalid_request');
+      try {
+        const p = req.wallet_assignment_policy || policy;
+        if (!WALLET_ASSIGNMENT_POLICY.includes(p)) return reject('invalid_wallet_assignment_policy');
+        const ids = eligibleIds();
+        if (ids.length === 0) return reject('no_eligible_execution_wallet');
+        const r = selectByPolicy(p, ids, req);
+        if (!r.id) return reject(r.reason || 'no_eligible_execution_wallet');
+        // Defense-in-depth: never return a non-eligible wallet.
+        if (!ids.includes(r.id)) return reject('no_eligible_execution_wallet');
+        assignCount.set(r.id, countOf(r.id) + 1);
+        return { ok: true, assigned: true, execution_wallet_id: r.id, wallet_assignment_policy: p };
+        // NOTE: selection only. No open/own/fund/transfer/sign/send happens here.
+      } catch {
+        return reject('invalid_request');
+      }
     },
 
     // No transfer. No rotation. No sweep. No signing/sending. No KeyManager. No keys. No DB. No RPC.

@@ -50,22 +50,30 @@ export function createExecutionWalletRegistry() {
   return Object.freeze({
     /** Register a new execution wallet. Always starts WARMING_UP. No key material accepted. */
     register(input = {}) {
-      if (!isStr(input.execution_wallet_id)) return { ok: false, reason: 'execution_wallet_id_required' };
-      if (byId.has(input.execution_wallet_id)) return { ok: false, reason: 'execution_wallet_exists' };
-      for (const f of FORBIDDEN_FIELDS) {
-        if (Object.prototype.hasOwnProperty.call(input, f)) return { ok: false, reason: 'key_material_not_accepted' };
+      // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+      // The null/array/non-object guard handles those; the try/catch additionally catches a throwing-getter
+      // (uninspectable) object so a thrown property access becomes a structured refusal, never an exception.
+      if (input == null || typeof input !== 'object' || Array.isArray(input)) return { ok: false, reason: 'invalid_request' };
+      try {
+        if (!isStr(input.execution_wallet_id)) return { ok: false, reason: 'execution_wallet_id_required' };
+        if (byId.has(input.execution_wallet_id)) return { ok: false, reason: 'execution_wallet_exists' };
+        for (const f of FORBIDDEN_FIELDS) {
+          if (Object.prototype.hasOwnProperty.call(input, f)) return { ok: false, reason: 'key_material_not_accepted' };
+        }
+        const creation = input.execution_wallet_creation_mode ?? 'manual';
+        if (!EXECUTION_WALLET_CREATION_MODE.includes(creation)) return { ok: false, reason: 'invalid_execution_wallet_creation_mode' };
+        set({
+          execution_wallet_id: input.execution_wallet_id,
+          execution_wallet_address: input.execution_wallet_address ?? null,
+          execution_wallet_status: 'WARMING_UP', // never ACTIVE on registration
+          execution_wallet_creation_mode: creation,
+          funding_wallet_id: input.funding_wallet_id ?? null,
+          settlement_wallet_id: input.settlement_wallet_id ?? null,
+        });
+        return { ok: true, execution_wallet_id: input.execution_wallet_id, execution_wallet_status: 'WARMING_UP' };
+      } catch {
+        return { ok: false, reason: 'invalid_request' };
       }
-      const creation = input.execution_wallet_creation_mode ?? 'manual';
-      if (!EXECUTION_WALLET_CREATION_MODE.includes(creation)) return { ok: false, reason: 'invalid_execution_wallet_creation_mode' };
-      set({
-        execution_wallet_id: input.execution_wallet_id,
-        execution_wallet_address: input.execution_wallet_address ?? null,
-        execution_wallet_status: 'WARMING_UP', // never ACTIVE on registration
-        execution_wallet_creation_mode: creation,
-        funding_wallet_id: input.funding_wallet_id ?? null,
-        settlement_wallet_id: input.settlement_wallet_id ?? null,
-      });
-      return { ok: true, execution_wallet_id: input.execution_wallet_id, execution_wallet_status: 'WARMING_UP' };
     },
 
     /** Explicit state transition. Illegal transitions are rejected (COMMAND_NOT_ALLOWED_IN_STATE). */

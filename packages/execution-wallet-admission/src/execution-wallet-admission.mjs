@@ -33,42 +33,48 @@ export function createAdmissionGate({ walletRegistry, signerRegistry } = {}) {
      *             funded, signer_reachable, key_custody_verified, links_signer_or_custody? }
      */
     activateExecutionWallet(req = {}) {
-      // 1) Permission: admin required; signer_control also required if linking signer / changing custody.
-      const role = req.permission_role;
-      const needsSignerControl = req.links_signer_or_custody === true;
-      const permitted = role === 'admin' || role === 'signer_control';
-      if (!permitted) return reject('admin_required', PERM_ERR);
-      if (needsSignerControl && role !== 'signer_control') return reject('signer_control_required', PERM_ERR);
+      // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+      if (req == null || typeof req !== 'object' || Array.isArray(req)) return reject('invalid_request');
+      try {
+        // 1) Permission: admin required; signer_control also required if linking signer / changing custody.
+        const role = req.permission_role;
+        const needsSignerControl = req.links_signer_or_custody === true;
+        const permitted = role === 'admin' || role === 'signer_control';
+        if (!permitted) return reject('admin_required', PERM_ERR);
+        if (needsSignerControl && role !== 'signer_control') return reject('signer_control_required', PERM_ERR);
 
-      // 2) Wallet must be registered and WARMING_UP.
-      const wallet = walletRegistry.get(req.execution_wallet_id);
-      if (!wallet) return reject('execution_wallet_not_found');
-      if (wallet.execution_wallet_status !== 'WARMING_UP') {
-        return reject('wallet_not_warming_up', STATE_ERR);
+        // 2) Wallet must be registered and WARMING_UP.
+        const wallet = walletRegistry.get(req.execution_wallet_id);
+        if (!wallet) return reject('execution_wallet_not_found');
+        if (wallet.execution_wallet_status !== 'WARMING_UP') {
+          return reject('wallet_not_warming_up', STATE_ERR);
+        }
+
+        // 3) Signer profile must be registered and ACTIVE.
+        const signer = signerRegistry.get(req.signer_profile_id);
+        if (!signer) return reject('signer_profile_not_found');
+        if (signer.signer_profile_status !== 'ACTIVE') return reject('signer_profile_not_active', STATE_ERR);
+
+        // 4) Mock readiness predicates — any false/missing => reject (fail-safe).
+        if (signer.key_custody_mode == null) return reject('key_custody_mode_missing');
+        if (req.key_custody_verified !== true) return reject('key_custody_not_verified', STATE_ERR);
+        if (req.funded !== true) return reject('wallet_not_funded', STATE_ERR);
+        if (req.signer_reachable !== true) return reject('signer_not_reachable', STATE_ERR);
+
+        // 5) Hard Risk completeness — real_live_config_valid must be true (no implicit infinity).
+        const validation = validateConfig({ risk_config: req.risk_config });
+        if (validation.real_live_config_valid !== true) {
+          return reject('hard_risk_incomplete', LIVE_ERR);
+        }
+
+        // All checks passed -> admit (WARMING_UP -> ACTIVE) via the C0 registry.
+        const t = walletRegistry.transition(req.execution_wallet_id, 'ACTIVE');
+        if (!t.ok) return reject(t.reason || 'transition_failed', t.api_error_code);
+        return { ok: true, admitted: true, command: COMMAND, execution_wallet_status: 'ACTIVE' };
+        // NOTE: admission != signing and != sending. No tx is built/signed/sent here.
+      } catch {
+        return reject('invalid_request');
       }
-
-      // 3) Signer profile must be registered and ACTIVE.
-      const signer = signerRegistry.get(req.signer_profile_id);
-      if (!signer) return reject('signer_profile_not_found');
-      if (signer.signer_profile_status !== 'ACTIVE') return reject('signer_profile_not_active', STATE_ERR);
-
-      // 4) Mock readiness predicates — any false/missing => reject (fail-safe).
-      if (signer.key_custody_mode == null) return reject('key_custody_mode_missing');
-      if (req.key_custody_verified !== true) return reject('key_custody_not_verified', STATE_ERR);
-      if (req.funded !== true) return reject('wallet_not_funded', STATE_ERR);
-      if (req.signer_reachable !== true) return reject('signer_not_reachable', STATE_ERR);
-
-      // 5) Hard Risk completeness — real_live_config_valid must be true (no implicit infinity).
-      const validation = validateConfig({ risk_config: req.risk_config });
-      if (validation.real_live_config_valid !== true) {
-        return reject('hard_risk_incomplete', LIVE_ERR);
-      }
-
-      // All checks passed -> admit (WARMING_UP -> ACTIVE) via the C0 registry.
-      const t = walletRegistry.transition(req.execution_wallet_id, 'ACTIVE');
-      if (!t.ok) return reject(t.reason || 'transition_failed', t.api_error_code);
-      return { ok: true, admitted: true, command: COMMAND, execution_wallet_status: 'ACTIVE' };
-      // NOTE: admission != signing and != sending. No tx is built/signed/sent here.
     },
   });
 }

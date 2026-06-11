@@ -42,20 +42,26 @@ export function createSignerProfilesRegistry() {
   return Object.freeze({
     /** Register a signer profile (reference). Requires signer_control. Starts DISABLED. No key material. */
     register(input = {}, { permission_role } = {}) {
+      // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+      if (input == null || typeof input !== 'object' || Array.isArray(input)) return { ok: false, reason: 'invalid_request' };
       if (!hasSignerControl(permission_role)) return { ok: false, api_error_code: PERM_ERR, reason: 'signer_control_required' };
-      if (!isStr(input.signer_profile_id)) return { ok: false, reason: 'signer_profile_id_required' };
-      if (byId.has(input.signer_profile_id)) return { ok: false, reason: 'signer_profile_exists' };
-      for (const f of FORBIDDEN_FIELDS) {
-        if (Object.prototype.hasOwnProperty.call(input, f)) return { ok: false, reason: 'key_material_not_accepted' };
+      try {
+        if (!isStr(input.signer_profile_id)) return { ok: false, reason: 'signer_profile_id_required' };
+        if (byId.has(input.signer_profile_id)) return { ok: false, reason: 'signer_profile_exists' };
+        for (const f of FORBIDDEN_FIELDS) {
+          if (Object.prototype.hasOwnProperty.call(input, f)) return { ok: false, reason: 'key_material_not_accepted' };
+        }
+        const custody = input.key_custody_mode;
+        if (custody != null && !KEY_CUSTODY_MODE.includes(custody)) return { ok: false, reason: 'invalid_key_custody_mode' };
+        set({
+          signer_profile_id: input.signer_profile_id,
+          signer_profile_status: 'DISABLED', // never auto-ACTIVE
+          key_custody_mode: custody ?? null,
+        });
+        return { ok: true, signer_profile_id: input.signer_profile_id, signer_profile_status: 'DISABLED' };
+      } catch {
+        return { ok: false, reason: 'invalid_request' };
       }
-      const custody = input.key_custody_mode;
-      if (custody != null && !KEY_CUSTODY_MODE.includes(custody)) return { ok: false, reason: 'invalid_key_custody_mode' };
-      set({
-        signer_profile_id: input.signer_profile_id,
-        signer_profile_status: 'DISABLED', // never auto-ACTIVE
-        key_custody_mode: custody ?? null,
-      });
-      return { ok: true, signer_profile_id: input.signer_profile_id, signer_profile_status: 'DISABLED' };
     },
 
     /** Explicit status transition. Sensitive targets (DISABLED/REVOKED) require signer_control. */

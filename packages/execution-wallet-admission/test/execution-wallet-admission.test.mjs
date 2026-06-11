@@ -182,3 +182,12 @@ test('CODE: no candidate_* promotion to implemented names introduced here', () =
     assert.equal(/candidate_/.test(code), false, `unexpected candidate_* reference in ${fn}`);
   }
 });
+
+test('S20-hardening: activateExecutionWallet() refuses null/uninspectable input, never throws', () => {
+  const gate = createAdmissionGate({ walletRegistry: createExecutionWalletRegistry(), signerRegistry: createSignerProfilesRegistry() });
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = gate.activateExecutionWallet(bad); });
+    assert.equal(r.ok, false);
+  }
+});

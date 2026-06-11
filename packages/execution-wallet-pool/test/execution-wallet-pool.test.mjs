@@ -171,3 +171,12 @@ test('CODE: no candidate_*; no forbidden SSOT names; no secrets in fixture', () 
     assert.equal(fx.includes(k), false, `fixture must not contain ${k}`);
   }
 });
+
+test('S20-hardening: assign() refuses null/uninspectable input, never throws', () => {
+  const pool = createExecutionWalletPool({ walletRegistry: createExecutionWalletRegistry() });
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = pool.assign(bad); });
+    assert.equal(r.ok, false);
+  }
+});

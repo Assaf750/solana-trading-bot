@@ -114,3 +114,12 @@ test('no Gate D/E artifacts and no forbidden names; no secrets', () => {
   assert.equal(SECRET.test(fixtureRaw), false, 'secret-like content in fixture');
   for (const n of forbidden) assert.equal(new RegExp(`\\b${n}\\b`).test(fixtureRaw), false, `forbidden ${n} in fixture`);
 });
+
+test('S20-hardening: register() refuses null/uninspectable input, never throws', () => {
+  const reg = createExecutionWalletRegistry();
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); }, has() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = reg.register(bad); });
+    assert.equal(r.ok, false);
+  }
+});

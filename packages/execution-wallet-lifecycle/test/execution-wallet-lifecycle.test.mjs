@@ -188,3 +188,12 @@ test('CODE: no REAL-LIVE / Gate-D-E, no forbidden SSOT names, no candidate_*, no
     assert.equal(fx.includes(k), false, `fixture must not contain ${k}`);
   }
 });
+
+test('S20-hardening: lifecycle commands refuse null/uninspectable input, never throw', () => {
+  const lc = createExecutionWalletLifecycle({ walletRegistry: createExecutionWalletRegistry(), auditLog: createAuditLog() });
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = lc.drainExecutionWallet(bad); });
+    assert.equal(r.ok, false);
+  }
+});

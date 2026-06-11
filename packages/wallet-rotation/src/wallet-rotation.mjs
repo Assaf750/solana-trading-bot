@@ -60,33 +60,39 @@ export function createWalletRotation({ walletRegistry, lifecycle, transfers, swe
 
   // rotate_execution_wallet (command, admin): create rotation event at PENDING. Validates from/to.
   function rotateExecutionWallet(req = {}) {
-    if (!isStr(req.audit_actor)) return { ok: false, reason: 'audit_actor_required' };
-    if (req.permission_role !== 'admin') { record(ROTATE, req, 'denied: admin_required', PERM_ERR); return { ok: false, api_error_code: PERM_ERR, reason: 'admin_required' }; }
-    if (!ROTATION_TRIGGER.includes(req.rotation_trigger)) { record(ROTATE, req, 'invalid_rotation_trigger'); return { ok: false, reason: 'invalid_rotation_trigger' }; }
-    const from = req.rotation_from_execution_wallet_id;
-    const to = req.rotation_to_execution_wallet_id;
-    if (!isStr(from) || !isStr(to)) { record(ROTATE, req, 'rotation_wallet_not_found'); return { ok: false, reason: 'rotation_wallet_not_found' }; }
-    if (from === to) { record(ROTATE, req, 'rotation_from_equals_to'); return { ok: false, reason: 'rotation_from_equals_to' }; }
-    const fromStatus = statusOf(from);
-    const toStatus = statusOf(to);
-    if (!fromStatus || !toStatus) { record(ROTATE, req, 'rotation_wallet_not_found'); return { ok: false, reason: 'rotation_wallet_not_found' }; }
-    if (fromStatus === 'REVOKED' || toStatus === 'REVOKED') { record(ROTATE, req, 'rotation_wallet_revoked'); return { ok: false, reason: 'rotation_wallet_revoked' }; }
-    // new wallet must already be admitted/ACTIVE (admission is C2, not here).
-    if (toStatus !== 'ACTIVE') { record(ROTATE, req, `rotation_to_not_active:${toStatus}`); return { ok: false, reason: 'rotation_to_not_active' }; }
-    if (fromStatus !== 'ACTIVE') { record(ROTATE, req, `rotation_from_not_active:${fromStatus}`); return { ok: false, reason: 'rotation_from_not_active' }; }
+    // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+    if (req == null || typeof req !== 'object' || Array.isArray(req)) return { ok: false, reason: 'invalid_request' };
+    try {
+      if (!isStr(req.audit_actor)) return { ok: false, reason: 'audit_actor_required' };
+      if (req.permission_role !== 'admin') { record(ROTATE, req, 'denied: admin_required', PERM_ERR); return { ok: false, api_error_code: PERM_ERR, reason: 'admin_required' }; }
+      if (!ROTATION_TRIGGER.includes(req.rotation_trigger)) { record(ROTATE, req, 'invalid_rotation_trigger'); return { ok: false, reason: 'invalid_rotation_trigger' }; }
+      const from = req.rotation_from_execution_wallet_id;
+      const to = req.rotation_to_execution_wallet_id;
+      if (!isStr(from) || !isStr(to)) { record(ROTATE, req, 'rotation_wallet_not_found'); return { ok: false, reason: 'rotation_wallet_not_found' }; }
+      if (from === to) { record(ROTATE, req, 'rotation_from_equals_to'); return { ok: false, reason: 'rotation_from_equals_to' }; }
+      const fromStatus = statusOf(from);
+      const toStatus = statusOf(to);
+      if (!fromStatus || !toStatus) { record(ROTATE, req, 'rotation_wallet_not_found'); return { ok: false, reason: 'rotation_wallet_not_found' }; }
+      if (fromStatus === 'REVOKED' || toStatus === 'REVOKED') { record(ROTATE, req, 'rotation_wallet_revoked'); return { ok: false, reason: 'rotation_wallet_revoked' }; }
+      // new wallet must already be admitted/ACTIVE (admission is C2, not here).
+      if (toStatus !== 'ACTIVE') { record(ROTATE, req, `rotation_to_not_active:${toStatus}`); return { ok: false, reason: 'rotation_to_not_active' }; }
+      if (fromStatus !== 'ACTIVE') { record(ROTATE, req, `rotation_from_not_active:${fromStatus}`); return { ok: false, reason: 'rotation_from_not_active' }; }
 
-    const id = `rot-${++seq}`;
-    set({
-      id, // storage-only PK convention
-      resource_type: RESOURCE,
-      wallet_rotation_status: 'PENDING',
-      rotation_trigger: req.rotation_trigger,
-      rotation_from_execution_wallet_id: from,
-      rotation_to_execution_wallet_id: to,
-      asset_transfer_intent_id: null, // recorded at start
-    });
-    record(ROTATE, req, `${ROTATE}:PENDING:${id}`);
-    return { ok: true, id, wallet_rotation_status: 'PENDING', rotation_from_execution_wallet_id: from, rotation_to_execution_wallet_id: to };
+      const id = `rot-${++seq}`;
+      set({
+        id, // storage-only PK convention
+        resource_type: RESOURCE,
+        wallet_rotation_status: 'PENDING',
+        rotation_trigger: req.rotation_trigger,
+        rotation_from_execution_wallet_id: from,
+        rotation_to_execution_wallet_id: to,
+        asset_transfer_intent_id: null, // recorded at start
+      });
+      record(ROTATE, req, `${ROTATE}:PENDING:${id}`);
+      return { ok: true, id, wallet_rotation_status: 'PENDING', rotation_from_execution_wallet_id: from, rotation_to_execution_wallet_id: to };
+    } catch {
+      return { ok: false, reason: 'invalid_request' };
+    }
   }
 
   /**

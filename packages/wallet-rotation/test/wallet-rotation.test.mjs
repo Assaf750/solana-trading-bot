@@ -232,3 +232,12 @@ test('CODE: no candidate_*; no forbidden SSOT names; no secrets in fixture', () 
   const fx = readFileSync(join(HERE, '..', 'fixtures', 'rotation-scenario.json'), 'utf8');
   assert.equal(/(BEGIN .*PRIVATE KEY|seed phrase|\bmnemonic\b)/i.test(fx), false, 'secret-like content in fixture');
 });
+
+test('S20-hardening: rotateExecutionWallet() refuses null/uninspectable input, never throws', () => {
+  const { rot } = harness();
+  const hostile = new Proxy({}, { get() { throw new Error('boom'); } });
+  for (const bad of [null, undefined, 42, 'x', [], hostile]) {
+    let r; assert.doesNotThrow(() => { r = rot.rotateExecutionWallet(bad); });
+    assert.equal(r.ok, false);
+  }
+});

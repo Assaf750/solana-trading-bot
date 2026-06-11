@@ -64,34 +64,40 @@ export function createExecutionWalletLifecycle({ walletRegistry, auditLog } = {}
 
   function run(command_type, req = {}) {
     const spec = COMMANDS[command_type];
-    // 0) Actor is required to attribute the audit entry (no anonymous lifecycle command).
-    if (!isStr(req.audit_actor)) return { ok: false, reason: 'audit_actor_required' };
+    // Stage-20 hardening (reports/E2-STAGE-20): hostile/uninspectable input -> refuse, never throw.
+    if (req == null || typeof req !== 'object' || Array.isArray(req)) return { ok: false, reason: 'invalid_request' };
+    try {
+      // 0) Actor is required to attribute the audit entry (no anonymous lifecycle command).
+      if (!isStr(req.audit_actor)) return { ok: false, reason: 'audit_actor_required' };
 
-    // 1) Permission (security command).
-    if (!permitted(req.permission_role, spec.requireSignerControl)) {
-      const reason = spec.requireSignerControl ? 'signer_control_required' : 'insufficient_permission';
-      record(command_type, req, `denied: ${reason}`, PERM_ERR);
-      return { ok: false, api_error_code: PERM_ERR, reason };
+      // 1) Permission (security command).
+      if (!permitted(req.permission_role, spec.requireSignerControl)) {
+        const reason = spec.requireSignerControl ? 'signer_control_required' : 'insufficient_permission';
+        record(command_type, req, `denied: ${reason}`, PERM_ERR);
+        return { ok: false, api_error_code: PERM_ERR, reason };
+      }
+
+      // 2) Wallet must exist.
+      const wallet = walletRegistry.get(req.execution_wallet_id);
+      if (!wallet) {
+        record(command_type, req, 'execution_wallet_not_found');
+        return { ok: false, reason: 'execution_wallet_not_found' };
+      }
+
+      // 3) State transition only — the C0 graph is the single source of transition truth.
+      const t = walletRegistry.transition(req.execution_wallet_id, spec.toStatus);
+      if (!t.ok) {
+        record(command_type, req, `illegal_transition:${wallet.execution_wallet_status}->${spec.toStatus}`, t.api_error_code);
+        return { ok: false, api_error_code: t.api_error_code, reason: t.reason, from: t.from, to: t.to };
+      }
+
+      // 4) Mandatory audit of the successful transition (append-only).
+      record(command_type, req, `${command_type}:${wallet.execution_wallet_status}->${spec.toStatus}`);
+      return { ok: true, execution_wallet_status: spec.toStatus, command: command_type };
+      // NOTE: no assets moved. drain == status flip only. revoke is terminal (C0 has no edge out of REVOKED).
+    } catch {
+      return { ok: false, reason: 'invalid_request' };
     }
-
-    // 2) Wallet must exist.
-    const wallet = walletRegistry.get(req.execution_wallet_id);
-    if (!wallet) {
-      record(command_type, req, 'execution_wallet_not_found');
-      return { ok: false, reason: 'execution_wallet_not_found' };
-    }
-
-    // 3) State transition only — the C0 graph is the single source of transition truth.
-    const t = walletRegistry.transition(req.execution_wallet_id, spec.toStatus);
-    if (!t.ok) {
-      record(command_type, req, `illegal_transition:${wallet.execution_wallet_status}->${spec.toStatus}`, t.api_error_code);
-      return { ok: false, api_error_code: t.api_error_code, reason: t.reason, from: t.from, to: t.to };
-    }
-
-    // 4) Mandatory audit of the successful transition (append-only).
-    record(command_type, req, `${command_type}:${wallet.execution_wallet_status}->${spec.toStatus}`);
-    return { ok: true, execution_wallet_status: spec.toStatus, command: command_type };
-    // NOTE: no assets moved. drain == status flip only. revoke is terminal (C0 has no edge out of REVOKED).
   }
 
   return Object.freeze({
