@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom';
 import { useI18n } from './i18n/index.jsx';
 import { Badge } from './components/index.jsx';
-import { SYSTEM } from './fixtures/index.js';
+import { useBackend } from './api/useBackend.jsx';
 
 import CommandCenter from './pages/CommandCenter.jsx';
 import TradingWorkspace from './pages/TradingWorkspace.jsx';
@@ -28,6 +28,7 @@ const NAV = [
 
 function TopBar() {
   const { t, lang, setLang } = useI18n();
+  const { status, connected } = useBackend();
   const [density, setDensity] = useState('comfortable');
   const [theme, setTheme] = useState('dark');
 
@@ -38,25 +39,46 @@ function TopBar() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  const opState = connected ? status?.operating_state?.operating_state || '—' : 'OFFLINE';
+  const mode = connected ? status?.mode : null;
+  const ar = lang === 'ar';
+
   return (
     <div className="topbar">
       <div className="topbar-row">
         <div className="global-banner" role="status">
-          <span aria-hidden>🧪</span>
-          <span>{t('app.bannerMain')}</span>
-          <span className="sep">·</span>
-          <span style={{ fontWeight: 400 }}>{t('app.bannerSub')}</span>
+          {connected ? (
+            <>
+              <span aria-hidden>{mode === 'real_live' ? '🔴' : '🟠'}</span>
+              <span>{mode === 'real_live'
+                ? (ar ? 'وضع حقيقي — أموال حقيقية' : 'REAL-LIVE MODE — real funds')
+                : (ar ? 'وضع ورقي (PAPER) — لا أموال حقيقية' : 'PAPER MODE — no real funds')}</span>
+              <span className="sep">·</span>
+              <span style={{ fontWeight: 400 }}>
+                {ar ? 'الخادم المحلي متصل' : 'local server connected'}
+              </span>
+            </>
+          ) : (
+            <>
+              <span aria-hidden>⚠️</span>
+              <span>{ar ? 'الخادم غير متصل — شغّل START.bat' : 'SERVER OFFLINE — run START.bat'}</span>
+              <span className="sep">·</span>
+              <span style={{ fontWeight: 400 }}>{ar ? 'لا بيانات حيّة بدون الخادم' : 'no live data without the server'}</span>
+            </>
+          )}
         </div>
         <span className="topbar-spacer" />
         <span className="status-chip">
           <span className="muted">{t('app.operatingState')}:</span>
-          <Badge tone={SYSTEM.operating_state === 'ACTIVE' ? 'ok' : SYSTEM.operating_state === 'KILLED' ? 'danger' : 'warn'}>
-            {SYSTEM.operating_state}
+          <Badge tone={opState === 'ACTIVE' ? 'ok' : opState === 'KILLED' || opState === 'OFFLINE' ? 'danger' : 'warn'}>
+            {opState}
           </Badge>
         </span>
         <span className="status-chip">
           <span className="muted">{t('app.realLive')}:</span>
-          <Badge tone="danger">{t('app.blocked')}</Badge>
+          {mode === 'real_live'
+            ? <Badge tone="danger">{ar ? 'مفعّل' : 'ACTIVE'}</Badge>
+            : <Badge tone="danger">{t('app.blocked')}</Badge>}
         </span>
       </div>
       <div className="topbar-row">
