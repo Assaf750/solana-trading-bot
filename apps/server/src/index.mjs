@@ -13,6 +13,7 @@ import { createPaperPortfolio } from './engine/paper-portfolio.mjs';
 import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
+import { createLiveExecutor } from './engine/live-executor.mjs';
 
 ensureDataDir();
 
@@ -43,8 +44,18 @@ const jupiter = createJupiterClient({
 });
 
 let broadcastRef = () => {};
+
+// LIVE book + executor — real money path, fully gated (mode + signer session + kill
+// switch + readiness); separate file from the paper book, never mixed
+const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false });
+const liveExecutor = createLiveExecutor({
+  config, vault, signer, killSwitch, operatingState, rpc, jupiter,
+  audit: appendAudit, broadcast: (p) => broadcastRef(p),
+});
+
 const paperEngine = createPaperEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
+  livePortfolio, liveExecutor,
   rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p),
 });
 
@@ -52,7 +63,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio,
+  paperEngine, portfolio, livePortfolio, liveExecutor,
 });
 
 const port = Number(process.env.SOLTRADE_PORT) || 8787;

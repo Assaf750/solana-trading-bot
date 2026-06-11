@@ -4,7 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
 
   function readiness() {
@@ -23,7 +23,9 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       kill_switch: killSwitch.status(),
       engine: {
         ...(paperEngine ? paperEngine.status() : { paper_engine: 'not_started' }),
-        live_engine: 'not_built', // honest until M4
+        live_engine: !liveExecutor ? 'not_built'
+          : cfg.mode === 'real_live' ? 'armed_real_money'
+          : 'ready_gated_by_owner_activation',
       },
     };
   }
@@ -102,10 +104,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       return { status: res.ok ? 200 : 400, body: res };
     },
     activate_real_live(p) {
+      // THE OWNER'S SWITCH. Every readiness blocker must be gone AND the owner must
+      // type the exact confirmation. Anything missing => refusal with the honest list.
       const r = readiness();
       const blockers = [...r.blockers];
-      // Honest M1/M3 blocker: the live execution engine ships in M4.
-      blockers.push({ blocker: 'live_engine_not_built_yet' });
       if (p?.confirm !== 'ACTIVATE-REAL-LIVE') {
         blockers.push({ blocker: 'explicit_confirmation_required', expected: 'confirm: ACTIVATE-REAL-LIVE' });
       }
@@ -113,8 +115,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         audit({ audit_scope: 'config', audit_reason: 'real_live_activation_refused', command_type: 'activate_real_live', detail: { blockers } });
         return { status: 409, body: { ok: false, api_error_code: 'REAL_LIVE_CONFIG_INVALID', blockers, readiness: r } };
       }
-      // unreachable in M1 by construction (live_engine blocker above) — M4 replaces this path
-      return { status: 409, body: { ok: false, api_error_code: 'REAL_LIVE_CONFIG_INVALID', blockers } };
+      const v = config.setMode('real_live');
+      audit({ audit_scope: 'config', audit_reason: 'REAL_LIVE_ACTIVATED_BY_OWNER', command_type: 'activate_real_live', detail: { config_version: v } });
+      emit({ event_type: 'config_update', mode: 'real_live' });
+      return { status: 200, body: { ok: true, mode: 'real_live', config_version: v, warning: 'REAL MONEY IS NOW AT RISK. The kill switch on the Alerts page stops everything instantly.' } };
     },
   };
 
@@ -149,9 +153,15 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           return { status: 200, body: { simulated: true, trades: (s.trades || []).slice(-200) } };
         }
         if (path === '/api/engine-events') {
-          return { status: 200, body: { simulated: true, events: paperEngine ? paperEngine.events(80) : [] } };
+          return { status: 200, body: { events: paperEngine ? paperEngine.events(80) : [] } };
         }
-        if (path === '/api/intents') return { status: 200, body: { intents: [], note: 'intent ledger surfaces with the live engine (M4)' } };
+        if (path === '/api/live-positions') {
+          const s = livePortfolio ? livePortfolio.state() : { positions: [], trades: [] };
+          return { status: 200, body: { simulated: false, positions: s.positions, trades: (s.trades || []).slice(-100), summary: livePortfolio ? livePortfolio.summary() : null } };
+        }
+        if (path === '/api/intents') {
+          return { status: 200, body: { intents: liveExecutor ? liveExecutor.intents(80) : [] } };
+        }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }
 
@@ -200,6 +210,13 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         }
         if (path === '/api/signer/lock') {
           return { status: 200, body: signer.lockSession('manual') };
+        }
+        if (path === '/api/real-live/deactivate') {
+          // back to paper — always allowed, never blocked (de-risking direction)
+          const v = config.setMode('paper');
+          audit({ audit_scope: 'config', audit_reason: 'real_live_deactivated_back_to_paper', command_type: null, detail: { config_version: v } });
+          emit({ event_type: 'config_update', mode: 'paper' });
+          return { status: 200, body: { ok: true, mode: 'paper', config_version: v } };
         }
         if (path === '/api/kill-switch/disengage') {
           // explicit human action; global disengage requires typed confirmation

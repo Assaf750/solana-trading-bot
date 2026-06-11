@@ -2,7 +2,7 @@
 // P&L, daily loss tracking. ALWAYS labeled simulated. Persisted (atomic writes).
 import { readJson, writeJson, newId, nowIso } from '../util.mjs';
 
-const FILE = 'paper-portfolio.json';
+const DEFAULT_FILE = 'paper-portfolio.json';
 
 const EMPTY = {
   simulated: true,
@@ -12,9 +12,11 @@ const EMPTY = {
   daily: { date: null, realized_pnl_usd: 0, entries_blocked: false },
 };
 
-export function createPaperPortfolio() {
+export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } = {}) {
+  const FILE = file;
   function load() {
-    const v = readJson(FILE, null).value || structuredClone(EMPTY);
+    const v = readJson(FILE, null).value || { ...structuredClone(EMPTY), simulated };
+    v.simulated = simulated;
     const today = new Date().toISOString().slice(0, 10);
     if (v.daily?.date !== today) v.daily = { date: today, realized_pnl_usd: 0, entries_blocked: false };
     return v;
@@ -45,13 +47,13 @@ export function createPaperPortfolio() {
       position_state: 'OPEN',
       copy_mode, tp_pct, sl_pct,
       mark_usd: cost_usd, mark_ts: nowIso(), mark_status: 'valid',
-      simulated: true,
+      simulated,
     };
     s.positions.push(position);
     s.trades.push({
       trade_id: newId('trd'), position_id: position.position_id, side: 'buy', token_mint,
       qty_ui, price_usd: position.entry_price_usd, value_usd: cost_usd,
-      fee_usd_est, price_impact_pct, ts: nowIso(), reason: 'leader_buy_copied', simulated: true,
+      fee_usd_est, price_impact_pct, ts: nowIso(), reason: 'leader_buy_copied', simulated,
     });
     save(s);
     return position;
@@ -77,7 +79,7 @@ export function createPaperPortfolio() {
     s.trades.push({
       trade_id: newId('trd'), position_id, side: 'sell', token_mint: p.token_mint,
       qty_ui: qtySold, price_usd: qtySold > 0 ? proceeds_usd / qtySold : 0, value_usd: proceeds_usd,
-      fee_usd_est, price_impact_pct, ts: nowIso(), reason, simulated: true,
+      fee_usd_est, price_impact_pct, ts: nowIso(), reason, simulated,
     });
     save(s);
     return { ok: true, realized_usd: realized, closed: p.position_state === 'CLOSED' };
@@ -104,7 +106,7 @@ export function createPaperPortfolio() {
     const open = s.positions.filter((p) => p.position_state === 'OPEN');
     const unrealized = open.reduce((a, p) => a + ((p.mark_status === 'valid' ? p.mark_usd : p.cost_usd) - p.cost_usd), 0);
     return {
-      simulated: true,
+      simulated,
       open_positions: open.length,
       realized_pnl_usd: round2(s.realized_pnl_usd),
       unrealized_pnl_usd: round2(unrealized),

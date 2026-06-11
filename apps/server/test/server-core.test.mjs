@@ -197,12 +197,18 @@ test('api: forbidden opportunity commands are NOT part of the command surface', 
   }
 });
 
-test('api: activate_real_live refuses with honest blocker list (live engine not built; readiness gaps listed)', async () => {
+test('api: activate_real_live refuses while ANY readiness blocker remains (honest list, no silent pass)', async () => {
   const r = await S.api.handle({ method: 'POST', path: '/api/commands', body: { command_type: 'activate_real_live', confirm: 'ACTIVATE-REAL-LIVE' } });
   assert.equal(r.status, 409);
   assert.equal(r.body.api_error_code, 'REAL_LIVE_CONFIG_INVALID');
   const blockers = r.body.blockers.map((b) => b.blocker);
-  assert.ok(blockers.includes('live_engine_not_built_yet'));
+  assert.ok(blockers.length > 0, 'must list real blockers');
+  assert.ok(blockers.some((b) => ['rpc_provider_not_configured', 'jupiter_key_not_configured', 'signer_not_ready', 'capital_limit_missing_or_invalid'].includes(b)),
+    `expected real readiness blockers, got: ${blockers.join(',')}`);
+  // and without the typed confirmation it must also refuse even if config were ready
+  const r2 = await S.api.handle({ method: 'POST', path: '/api/commands', body: { command_type: 'activate_real_live' } });
+  assert.equal(r2.status, 409);
+  assert.ok(r2.body.blockers.some((b) => b.blocker === 'explicit_confirmation_required'));
 });
 
 test('api: trigger_kill_switch (global) => KILLED + signer locked; resume blocked until disengage', async () => {

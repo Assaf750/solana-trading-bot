@@ -36,6 +36,7 @@ export const api = {
   resumeSystem: () => call('POST', '/api/commands', { command_type: 'resume_system' }),
   triggerKill: (level = 'global', key = null, reason = 'manual') => call('POST', '/api/commands', { command_type: 'trigger_kill_switch', level, key, reason }),
   activateRealLive: (confirm) => call('POST', '/api/commands', { command_type: 'activate_real_live', confirm }),
+  deactivateRealLive: () => call('POST', '/api/real-live/deactivate', {}),
 
   // vault / secrets / signer (local ops surfaces)
   vaultCreate: (passphrase) => call('POST', '/api/vault/create', { passphrase }),

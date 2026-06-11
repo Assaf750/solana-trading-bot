@@ -42,6 +42,7 @@ export function createJupiterClient({ getApiKey }) {
             outAmount: Number(j.outAmount),
             priceImpactPct: Number(j.priceImpactPct ?? 0) * 100,
             routePlan: Array.isArray(j.routePlan) ? j.routePlan.length : 0,
+            raw: j, // full quoteResponse — required by /swap when executing live
           };
         } catch (e) {
           if (attempt >= 3) return { ok: false, error: `quote_failed_${String(e?.name || 'err')}` };
@@ -69,5 +70,33 @@ export function createJupiterClient({ getApiKey }) {
     return { ok: true, outAmountBase: q.outAmount, priceImpactPct: q.priceImpactPct };
   }
 
-  return { quote, usdValueOf, paperBuy };
+  /** Build a swap transaction for a quote (LIVE path; returns base64 unsigned tx). */
+  async function swapTransaction({ quoteRaw, userPublicKey }) {
+    return throttled(async () => {
+      const key = typeof getApiKey === 'function' ? getApiKey() : null;
+      const base = key ? PRO_BASE : LITE_BASE;
+      try {
+        const res = await fetch(`${base}/swap`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', ...(key ? { 'x-api-key': key } : {}) },
+          body: JSON.stringify({
+            quoteResponse: quoteRaw,
+            userPublicKey,
+            wrapAndUnwrapSol: true,
+            dynamicComputeUnitLimit: true,
+            prioritizationFeeLamports: 'auto',
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!res.ok) return { ok: false, error: `swap_http_${res.status}` };
+        const j = await res.json();
+        if (!j?.swapTransaction) return { ok: false, error: 'swap_no_transaction' };
+        return { ok: true, txBase64: j.swapTransaction };
+      } catch (e) {
+        return { ok: false, error: `swap_failed_${String(e?.name || 'err')}` };
+      }
+    });
+  }
+
+  return { quote, usdValueOf, paperBuy, swapTransaction };
 }

@@ -190,23 +190,35 @@ export default function SettingsSafety() {
 
         <DangerNote tone="danger" locked>
           {ar
-            ? 'التفعيل الحقيقي قرارك أنت وحدك: يتطلب كتابة ACTIVATE-REAL-LIVE حرفياً. المحرك الحي (M4) يُرفض حتى اكتماله.'
-            : 'Real activation is YOUR decision alone: requires typing ACTIVATE-REAL-LIVE literally. Refused until the live engine (M4) ships.'}
+            ? 'التفعيل الحقيقي قرارك أنت وحدك ويعرّض أموالاً حقيقية للخسارة. يتطلب: اكتمال كل الشروط أعلاه + كتابة ACTIVATE-REAL-LIVE حرفياً. زر الإيقاف في صفحة التنبيهات يوقف كل شيء فوراً. للرجوع للوضع الورقي: زر «إلغاء التفعيل» يظهر بعد التفعيل.'
+            : 'Real activation is YOUR decision alone and puts real money at risk. Requires: every condition above met + typing ACTIVATE-REAL-LIVE literally. The kill switch on Alerts stops everything instantly. To return to paper: a deactivate button appears after activation.'}
         </DangerNote>
         <div className="row" style={{ marginBlockStart: 'var(--s-3)' }}>
-          <input
-            className="search" style={{ width: 220 }} dir="ltr"
-            placeholder="ACTIVATE-REAL-LIVE"
-            value={confirmLive}
-            onChange={(e) => setConfirmLive(e.target.value)}
-          />
-          <button className="btn" onClick={tryActivate} disabled={confirmLive !== 'ACTIVATE-REAL-LIVE'}>
-            {ar ? 'طلب تفعيل حقيقي' : 'Request REAL-LIVE'}
-          </button>
+          {status?.mode !== 'real_live' ? (
+            <>
+              <input
+                className="search" style={{ width: 220 }} dir="ltr"
+                placeholder="ACTIVATE-REAL-LIVE"
+                value={confirmLive}
+                onChange={(e) => setConfirmLive(e.target.value)}
+              />
+              <button className="btn" onClick={tryActivate} disabled={confirmLive !== 'ACTIVATE-REAL-LIVE'}>
+                {ar ? '🔴 تفعيل التداول الحقيقي' : '🔴 Activate REAL-LIVE'}
+              </button>
+            </>
+          ) : (
+            <button className="btn" onClick={async () => {
+              await api.deactivateRealLive();
+              setLiveResult(null); setConfirmLive(''); refresh();
+            }}>
+              {ar ? '↩ إلغاء التفعيل — عودة للوضع الورقي' : '↩ Deactivate — back to paper'}
+            </button>
+          )}
         </div>
         {liveResult && (
           <div style={{ marginBlockStart: 'var(--s-3)' }}>
-            <Badge tone="danger">{liveResult.api_error_code || 'refused'}</Badge>
+            <Badge tone={liveResult.ok ? 'warn' : 'danger'}>{liveResult.ok ? (ar ? 'مُفعَّل — أموال حقيقية' : 'ACTIVATED — real money') : liveResult.api_error_code || 'refused'}</Badge>
+            {liveResult.warning && <p className="muted" style={{ marginBlockStart: 6 }}>{liveResult.warning}</p>}
             <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
               {(liveResult.blockers || []).map((b, i) => (
                 <li key={i} className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{b.blocker}</li>
