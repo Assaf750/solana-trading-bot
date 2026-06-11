@@ -23,6 +23,8 @@ export const api = {
   secrets: () => call('GET', '/api/secrets'),
   audit: (limit = 50) => call('GET', `/api/audit?limit=${limit}`),
   positions: () => call('GET', '/api/positions'),
+  trades: () => call('GET', '/api/trades'),
+  engineEvents: () => call('GET', '/api/engine-events'),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),

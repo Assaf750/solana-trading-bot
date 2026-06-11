@@ -4,7 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
 
   function readiness() {
@@ -21,7 +21,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       vault: vault.status(),
       signer: signer.publicState(),
       kill_switch: killSwitch.status(),
-      engine: { paper_engine: 'not_started', live_engine: 'not_built' }, // honest M1 state
+      engine: {
+        ...(paperEngine ? paperEngine.status() : { paper_engine: 'not_started' }),
+        live_engine: 'not_built', // honest until M4
+      },
     };
   }
 
@@ -137,8 +140,18 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const { readAuditTail } = await import('./audit-log.mjs');
           return { status: 200, body: { audit: readAuditTail(limit) } };
         }
-        if (path === '/api/positions') return { status: 200, body: { positions: [], note: 'paper_engine_starts_in_M3' } };
-        if (path === '/api/intents') return { status: 200, body: { intents: [], note: 'paper_engine_starts_in_M3' } };
+        if (path === '/api/positions') {
+          const s = portfolio ? portfolio.state() : { positions: [] };
+          return { status: 200, body: { simulated: true, positions: s.positions, summary: portfolio ? portfolio.summary() : null } };
+        }
+        if (path === '/api/trades') {
+          const s = portfolio ? portfolio.state() : { trades: [] };
+          return { status: 200, body: { simulated: true, trades: (s.trades || []).slice(-200) } };
+        }
+        if (path === '/api/engine-events') {
+          return { status: 200, body: { simulated: true, events: paperEngine ? paperEngine.events(80) : [] } };
+        }
+        if (path === '/api/intents') return { status: 200, body: { intents: [], note: 'intent ledger surfaces with the live engine (M4)' } };
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }
 
