@@ -163,6 +163,16 @@ test('signer: notional cap + consecutive risk rejections lock the session', () =
   assert.equal(S.signer.status(), 'locked');
 });
 
+test('signer: deriveAddress returns a public base58 address (never the private key)', () => {
+  const r = S.signer.deriveAddress();
+  assert.equal(r.ok, true);
+  assert.match(r.address, /^[1-9A-HJ-NP-Za-km-z]{32,44}$/);
+  // publicState exposes the public address but never key material
+  const st = S.signer.publicState();
+  assert.equal(st.wallet_address, r.address);
+  assert.ok(!JSON.stringify(st).match(/"[0-9]+,[0-9]+,[0-9]+/), 'no raw key bytes in public state');
+});
+
 test('signer: kill switch locks signer immediately', () => {
   S.signer.openSession();
   assert.equal(S.signer.status(), 'ready');

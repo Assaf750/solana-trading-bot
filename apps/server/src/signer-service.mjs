@@ -6,6 +6,7 @@
 //
 // Status surface (UI): missing | locked | ready | degraded | failed
 import { nowIso } from './util.mjs';
+import { seedFromStoredSecret, keypairFromSeed } from './engine/tx-signer.mjs';
 
 const SIGNER_SECRET_NAME = 'signer_keypair';
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{43,90}$/;
@@ -133,12 +134,28 @@ export function createSignerService({ vault, config, killSwitch, audit }) {
     return session ? 'ready' : 'locked';
   }
 
+  /** Derive the PUBLIC address of the imported signer (no private key exposed). */
+  function deriveAddress() {
+    if (!keyImported()) return { ok: false, error: 'signer_key_missing' };
+    if (!vault.isUnlocked()) return { ok: false, error: 'vault_locked' };
+    const r = vault.getSecretForUse(SIGNER_SECRET_NAME);
+    if (!r.ok) return { ok: false, error: r.error };
+    try {
+      const seed = seedFromStoredSecret(r.value);
+      return { ok: true, address: keypairFromSeed(seed).address };
+    } catch {
+      return { ok: false, error: 'key_parse_failed' };
+    }
+  }
+
   function publicState() {
     enforceSessionExpiry();
     const b = bounds();
+    const addr = deriveAddress();
     return {
       signer_status: status(),
       key_imported: keyImported(),
+      wallet_address: addr.ok ? addr.address : null, // public address only
       vault_unlocked: vault.isUnlocked(),
       session_active: Boolean(session),
       session_opened_at: session ? new Date(session.opened_at).toISOString() : null,
@@ -150,7 +167,7 @@ export function createSignerService({ vault, config, killSwitch, audit }) {
 
   return {
     importKey, deleteKey, openSession, lockSession,
-    canSignNow, recordSigned, recordRiskRejection, status, publicState,
+    canSignNow, recordSigned, recordRiskRejection, status, publicState, deriveAddress,
     SIGNER_SECRET_NAME,
   };
 }

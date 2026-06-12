@@ -48,6 +48,7 @@ export const api = {
   analyzeWallet: (address) => call('POST', '/api/wallets/analyze', { address }),
   discoverTokenTraders: (mint) => call('POST', '/api/discover/token-traders', { mint }),
   signerImportKey: (secret) => call('POST', '/api/signer/import-key', { secret }),
+  signerWallet: () => call('POST', '/api/signer/wallet', {}),
   signerOpenSession: () => call('POST', '/api/signer/open-session', {}),
   signerLock: () => call('POST', '/api/signer/lock', {}),
   killDisengage: (level = 'global', key = null, confirm) => call('POST', '/api/kill-switch/disengage', { level, key, confirm }),

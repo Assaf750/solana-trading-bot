@@ -22,6 +22,7 @@ export default function MyWalletsFunds() {
   const [signerKey, setSignerKey] = useState('');
   const [bounds, setBounds] = useState({ idle_timeout_ms: '', max_session_ms: '', max_session_notional_usd: '', lock_after_n_risk_rejections: '' });
   const [connTest, setConnTest] = useState(null);
+  const [walletInfo, setWalletInfo] = useState(null);
 
   async function loadSecrets() {
     const r = await api.secrets();
@@ -72,6 +73,14 @@ export default function MyWalletsFunds() {
     const r = await api.testProviderConnection();
     setConnTest(r.data);
   }
+
+  async function checkWallet() {
+    setWalletInfo({ checking: true });
+    const r = await api.signerWallet();
+    setWalletInfo(r.data);
+  }
+  // auto-check when a signer key is present
+  useEffect(() => { if (connected && status?.signer?.key_imported) checkWallet(); }, [connected, status?.signer?.key_imported, status?.signer?.session_active]);
 
   async function importSigner() {
     setMsg(null);
@@ -191,6 +200,30 @@ export default function MyWalletsFunds() {
       </Card>
 
       <Card title={ar ? '✍️ مفتاح التوقيع (Signer)' : '✍️ Signer key'} right={<Badge tone={signerTone}>{signer.signer_status || '—'}</Badge>}>
+        {/* Execution wallet status — confirm a wallet exists & is connected */}
+        <div className="stattile" style={{ marginBlockEnd: 'var(--s-3)', flexDirection: 'row', alignItems: 'center', gap: 'var(--s-3)', flexWrap: 'wrap' }}>
+          {!signer.key_imported ? (
+            <Badge tone="danger">{ar ? '⛔ لا توجد محفظة — لم يُستورد مفتاح' : '⛔ No wallet — no key imported'}</Badge>
+          ) : walletInfo?.checking ? (
+            <span className="muted">{ar ? 'جارٍ التحقّق…' : 'checking…'}</span>
+          ) : walletInfo?.connected ? (
+            <>
+              <Badge tone="ok">{ar ? '✓ محفظة متصلة' : '✓ Wallet connected'}</Badge>
+              <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{walletInfo.address?.slice(0, 6)}…{walletInfo.address?.slice(-6)}</span>
+              <span className="mono" style={{ fontWeight: 700, color: (walletInfo.balance_sol ?? 0) > 0 ? 'var(--c-ok)' : 'var(--c-warn)' }}>
+                {walletInfo.balance_sol != null ? `${walletInfo.balance_sol.toFixed(4)} SOL` : (ar ? 'الرصيد غير متوفّر' : 'balance n/a')}
+              </span>
+              {(walletInfo.balance_sol ?? 0) === 0 && <Badge tone="warn">{ar ? 'غير مموّلة' : 'unfunded'}</Badge>}
+            </>
+          ) : walletInfo ? (
+            <Badge tone="warn">{ar ? `محفظة موجودة لكن غير متصلة (${walletInfo.reason || 'تحقّق RPC'})` : `wallet present but not connected (${walletInfo.reason || 'check RPC'})`}</Badge>
+          ) : (
+            <Badge tone="neutral">{ar ? 'اضغط «تحقّق من المحفظة»' : 'press “Check wallet”'}</Badge>
+          )}
+          <span className="topbar-spacer" />
+          <button className="btn" onClick={checkWallet} disabled={!signer.key_imported}>{ar ? '🔄 تحقّق من المحفظة' : '🔄 Check wallet'}</button>
+        </div>
+
         <DangerNote tone="warn" locked>
           {ar
             ? 'يقبل base58 أو مصفوفة JSON. يُستورد مرة واحدة إلى الخزنة ولا يُعرض مرة أخرى أبداً. لا تستخدم محفظتك الرئيسية — أنشئ محفظة تنفيذ مخصصة وموّلها بما تحتمل خسارته فقط.'

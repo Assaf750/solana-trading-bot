@@ -230,6 +230,17 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           audit({ audit_scope: 'config', audit_reason: r.ok ? 'provider_connection_test_ok' : 'provider_connection_test_failed', command_type: null, detail: { ok: r.ok, provider: r.provider, latency_ms: r.latency_ms, error: r.error } });
           return { status: r.ok ? 200 : 502, body: r };
         }
+        if (path === '/api/signer/wallet') {
+          // confirm the execution wallet: public address + live SOL balance + connected.
+          const d = signer.deriveAddress();
+          if (!d.ok) return { status: 200, body: { connected: false, key_imported: signer.status() !== 'missing', reason: d.error } };
+          let balance_sol = null; let connected = false;
+          if (rpc) {
+            const bal = await rpc.rpc('getBalance', [d.address, { commitment: 'confirmed' }]);
+            if (bal.ok) { balance_sol = Number(bal.result?.value ?? 0) / 1e9; connected = true; }
+          }
+          return { status: 200, body: { connected, key_imported: true, address: d.address, balance_sol } };
+        }
         if (path === '/api/signer/import-key') {
           const res = signer.importKey(body?.secret);
           return { status: res.ok ? 200 : 400, body: res };
