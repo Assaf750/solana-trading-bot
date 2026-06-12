@@ -196,6 +196,28 @@ export default function MyWalletsFunds() {
             ? 'يقبل base58 أو مصفوفة JSON. يُستورد مرة واحدة إلى الخزنة ولا يُعرض مرة أخرى أبداً. لا تستخدم محفظتك الرئيسية — أنشئ محفظة تنفيذ مخصصة وموّلها بما تحتمل خسارته فقط.'
             : 'Accepts base58 or JSON array. Imported once into the vault and NEVER displayed again. Do not use your main wallet — create a dedicated execution wallet funded only with what you can afford to lose.'}
         </DangerNote>
+        <details style={{ marginBlockStart: 8 }}>
+          <summary style={{ cursor: 'pointer', color: 'var(--c-info, #4493f8)' }}>
+            {ar ? '❔ من أين أجلب هذا المفتاح؟' : '❔ Where do I get this key?'}
+          </summary>
+          <div className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockStart: 8, lineHeight: 1.8 }}>
+            <b>{ar ? 'الأسهل — محفظة Phantom:' : 'Easiest — Phantom wallet:'}</b>
+            <ol style={{ margin: '4px 0', paddingInlineStart: 20 }}>
+              <li>{ar ? 'ثبّت إضافة Phantom (phantom.app) في متصفّحك.' : 'Install the Phantom extension (phantom.app).'}</li>
+              <li>{ar ? 'أنشئ حساباً جديداً مخصّصاً للبوت (Add / Create Account) — ليس محفظتك الرئيسية.' : 'Create a NEW account for the bot (Add / Create Account) — not your main wallet.'}</li>
+              <li>{ar ? 'أرسل إليه SOL يحتمل خسارته (مثلاً 0.5–1 SOL) — هذا «الإيداع».' : 'Send it SOL you can lose (e.g. 0.5–1 SOL) — this is the "deposit".'}</li>
+              <li>{ar ? 'Settings → Security & Privacy → Export Private Key → انسخ النص (base58) والصقه أدناه.' : 'Settings → Security & Privacy → Export Private Key → copy the base58 string and paste below.'}</li>
+            </ol>
+            <b>{ar ? 'أو عبر Solana CLI:' : 'Or via Solana CLI:'}</b>{' '}
+            <code>solana-keygen new --outfile bot.json</code>{' '}
+            {ar ? '→ انسخ مصفوفة الأرقام الـ64 من الملف والصقها (العنوان للتمويل: ' : '→ paste the 64-number array from the file (funding address: '}
+            <code>solana-keygen pubkey bot.json</code>{ar ? ').' : ').'}
+            <br />
+            <span style={{ color: 'var(--c-danger, #e5484d)' }}>
+              {ar ? '⚠ الصق المفتاح هنا فقط — لا ترسله لأحد. وتأكّد أن المحفظة فيها SOL كافٍ للصفقات والرسوم.' : '⚠ Paste the key here only — never send it to anyone. Ensure the wallet holds enough SOL for trades and fees.'}
+            </span>
+          </div>
+        </details>
         <div className="row" style={{ marginBlockStart: 8 }}>
           <input
             className="search" type="password" dir="ltr" style={{ flex: '1 1 300px' }}
