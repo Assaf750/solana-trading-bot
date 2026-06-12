@@ -16,9 +16,11 @@ export default function CommandCenter() {
   const [events, setEvents] = useState([]);
   const [summary, setSummary] = useState(null);
 
+  const live = status?.mode === 'real_live';
   async function load() {
-    const [ev, p] = await Promise.all([api.engineEvents(), api.positions()]);
+    const ev = await api.engineEvents();
     if (ev.ok) setEvents((ev.data.events || []).slice().reverse());
+    const p = live ? await api.livePositions() : await api.positions();
     if (p.ok) setSummary(p.data.summary || null);
   }
   useEffect(() => {
@@ -26,7 +28,7 @@ export default function CommandCenter() {
     load();
     const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
-  }, [connected]);
+  }, [connected, live]);
 
   if (!connected) {
     return (

@@ -27,8 +27,26 @@ export default function TradingWorkspace() {
   const [selectedId, setSelectedId] = useState(null);
   const [posFilter, setPosFilter] = useState('open'); // open | closed | all
 
+  const live = status?.mode === 'real_live';
+
   async function load() {
-    const [p, tr, ev] = await Promise.all([api.positions(), api.trades(), api.engineEvents()]);
+    const ev = await api.engineEvents();
+    if (ev.ok) setEvents((ev.data.events || []).slice().reverse());
+    // REAL-LIVE -> show the real book; PAPER -> the simulated book
+    if (live) {
+      const lp = await api.livePositions();
+      if (lp.ok) {
+        setPositions(lp.data.positions || []);
+        setSummary(lp.data.summary || null);
+        setTrades((lp.data.trades || []).slice().reverse());
+        if (!selectedId) {
+          const open = (lp.data.positions || []).filter((x) => x.position_state === 'OPEN');
+          if (open.length) setSelectedId(open[open.length - 1].position_id);
+        }
+      }
+      return;
+    }
+    const [p, tr] = await Promise.all([api.positions(), api.trades()]);
     if (p.ok) {
       setPositions(p.data.positions || []);
       setSummary(p.data.summary || null);
@@ -38,14 +56,14 @@ export default function TradingWorkspace() {
       }
     }
     if (tr.ok) setTrades((tr.data.trades || []).slice().reverse());
-    if (ev.ok) setEvents((ev.data.events || []).slice().reverse());
   }
   useEffect(() => {
     if (!connected) return undefined;
+    setSelectedId(null);
     load();
     const iv = setInterval(load, 8000);
     return () => clearInterval(iv);
-  }, [connected]);
+  }, [connected, live]);
 
   const view = useMemo(() => {
     let list = positions.slice().reverse();
@@ -86,8 +104,8 @@ export default function TradingWorkspace() {
       <div className="kpi-strip">
         <div className="stattile"><span className="lbl">{ar ? 'المحرّك' : 'Engine'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={engineTone}>{engine.paper_engine || '—'}</Badge></span></div>
         <div className="stattile"><span className="lbl">{ar ? 'مراكز مفتوحة' : 'Open positions'}</span><span className="val">{openCount}</span></div>
-        <div className="stattile"><span className="lbl">{ar ? 'محقّق' : 'Realized'} <SimulatedBadge /></span><span className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.realized_pnl_usd)}</span></div>
-        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} <SimulatedBadge /></span><span className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.unrealized_pnl_usd)}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'محقّق' : 'Realized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.realized_pnl_usd)}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.unrealized_pnl_usd)}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'اليوم' : 'Today'}</span><span className={`val ${(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.daily_realized_pnl_usd)}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'صفقات' : 'Trades'}</span><span className="val">{summary?.trade_count ?? 0}</span></div>
       </div>
@@ -199,7 +217,7 @@ export default function TradingWorkspace() {
                 </dl>
               </Card>
 
-              <Card title={ar ? `صفقات المركز (${selTrades.length})` : `Position trades (${selTrades.length})`} right={<SimulatedBadge />}>
+              <Card title={ar ? `صفقات المركز (${selTrades.length})` : `Position trades (${selTrades.length})`} right={!live && <SimulatedBadge />}>
                 {selTrades.length === 0 ? <p className="muted">{ar ? 'لا صفقات' : 'No trades'}</p> : (
                   <table className="data"><tbody>
                     {selTrades.map((tr) => (
@@ -218,10 +236,12 @@ export default function TradingWorkspace() {
         </div>
       </div>
 
-      <DangerNote tone="info">
-        {ar
-          ? 'كل الأرقام من أسعار سوق حقيقية (Jupiter) — الأموال محاكاة في وضع الورق، ولا يُرسل شيء على السلسلة.'
-          : 'All numbers come from real market prices (Jupiter) — money is simulated in paper mode; nothing is sent on-chain.'}
+      <DangerNote tone={live ? 'danger' : 'info'}>
+        {live
+          ? (ar ? '🔴 وضع حقيقي — هذه مراكز وصفقات بمالك الحقيقي على السلسلة. زر الإيقاف في التنبيهات يوقف كل شيء فوراً.'
+                : '🔴 REAL-LIVE — these are real positions/trades with your funds on-chain. The kill switch on Alerts stops everything instantly.')
+          : (ar ? 'كل الأرقام من أسعار سوق حقيقية (Jupiter) — الأموال محاكاة في وضع الورق، ولا يُرسل شيء على السلسلة.'
+                : 'All numbers come from real market prices (Jupiter) — money is simulated in paper mode; nothing is sent on-chain.')}
       </DangerNote>
     </div>
   );

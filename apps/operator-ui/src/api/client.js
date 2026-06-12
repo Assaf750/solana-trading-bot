@@ -24,6 +24,7 @@ export const api = {
   audit: (limit = 50) => call('GET', `/api/audit?limit=${limit}`),
   positions: () => call('GET', '/api/positions'),
   trades: () => call('GET', '/api/trades'),
+  livePositions: () => call('GET', '/api/live-positions'),
   engineEvents: () => call('GET', '/api/engine-events'),
 
   // SSOT commands

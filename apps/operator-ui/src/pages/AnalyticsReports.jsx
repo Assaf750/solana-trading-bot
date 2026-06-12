@@ -11,12 +11,18 @@ const shortMint = (m) => `${String(m).slice(0, 4)}…${String(m).slice(-4)}`;
 export default function AnalyticsReports() {
   const { t, lang } = useI18n();
   const ar = lang === 'ar';
-  const { connected } = useBackend();
+  const { status, connected } = useBackend();
+  const live = status?.mode === 'real_live';
   const [summary, setSummary] = useState(null);
   const [trades, setTrades] = useState([]);
   const [positions, setPositions] = useState([]);
 
   async function load() {
+    if (live) {
+      const lp = await api.livePositions();
+      if (lp.ok) { setSummary(lp.data.summary || null); setPositions(lp.data.positions || []); setTrades(lp.data.trades || []); }
+      return;
+    }
     const [p, tr] = await Promise.all([api.positions(), api.trades()]);
     if (p.ok) { setSummary(p.data.summary || null); setPositions(p.data.positions || []); }
     if (tr.ok) setTrades(tr.data.trades || []);
@@ -26,7 +32,7 @@ export default function AnalyticsReports() {
     load();
     const iv = setInterval(load, 10000);
     return () => clearInterval(iv);
-  }, [connected]);
+  }, [connected, live]);
 
   const byToken = useMemo(() => {
     const m = new Map();
@@ -54,23 +60,25 @@ export default function AnalyticsReports() {
 
   return (
     <div className="stack">
-      <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={ar ? 'أداء التداول الورقي من بيانات حقيقية — لا أرقام مختلقة' : 'Paper performance from real data — no fabricated numbers'} />
+      <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={live ? (ar ? 'أداء حقيقي من بيانات السلسلة' : 'Real-live performance from on-chain data') : (ar ? 'أداء التداول الورقي من بيانات حقيقية — لا أرقام مختلقة' : 'Paper performance from real data — no fabricated numbers')} />
 
       <div className="kpi-strip">
-        <div className="stattile"><span className="lbl">{ar ? 'محقّق' : 'Realized'} <SimulatedBadge /></span><span className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.realized_pnl_usd)}</span></div>
-        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} <SimulatedBadge /></span><span className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.unrealized_pnl_usd)}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'محقّق' : 'Realized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.realized_pnl_usd)}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.unrealized_pnl_usd)}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'مراكز مغلقة' : 'Closed'}</span><span className="val">{closed.length}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'صفقات' : 'Trades'}</span><span className="val">{trades.length}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'توكنات' : 'Tokens'}</span><span className="val">{byToken.length}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'خروج رابح' : 'Winning exits'}</span><span className="val pos">{wins}</span></div>
       </div>
 
-      <DangerNote tone="sim">
-        {ar ? 'كل الأرقام محاكاة (paper) بأسعار سوق حقيقية — لا تُخلط بنتائج حقيقية، ولا تُختلق المقاييس غير المتوفّرة.' : 'All numbers are simulated (paper) at real prices — never mixed with live results; unavailable metrics are never fabricated.'}
+      <DangerNote tone={live ? 'danger' : 'sim'}>
+        {live
+          ? (ar ? '🔴 وضع حقيقي — هذه نتائج تداول فعلي بمالك على السلسلة. المقياس غير المتوفّر يُعرض «غير متوفّر» لا يُختلق.' : '🔴 REAL-LIVE — these are actual on-chain trading results with your funds. Unavailable metrics are shown as “unavailable”, never fabricated.')
+          : (ar ? 'كل الأرقام محاكاة (paper) بأسعار سوق حقيقية — لا تُخلط بنتائج حقيقية، ولا تُختلق المقاييس غير المتوفّرة.' : 'All numbers are simulated (paper) at real prices — never mixed with live results; unavailable metrics are never fabricated.')}
       </DangerNote>
 
       <div className="workspace">
-        <Card title={<span>{ar ? 'الأداء حسب التوكن' : 'Performance by token'} <SimulatedBadge /></span>}>
+        <Card title={<span>{ar ? 'الأداء حسب التوكن' : 'Performance by token'} {!live && <SimulatedBadge />}</span>}>
           {byToken.length === 0 ? (
             <EmptyState message={ar ? 'لا صفقات بعد — تتراكم البيانات مع نشاط القادة المتابَعين' : 'No trades yet — data accumulates as followed leaders act'} />
           ) : (
@@ -113,7 +121,7 @@ export default function AnalyticsReports() {
             </p>
           </Card>
 
-          <Card title={<span>{ar ? 'آخر الصفقات' : 'Recent trades'} <SimulatedBadge /></span>}>
+          <Card title={<span>{ar ? 'آخر الصفقات' : 'Recent trades'} {!live && <SimulatedBadge />}</span>}>
             {trades.length === 0 ? <p className="muted">{ar ? 'لا صفقات' : 'No trades'}</p> : (
               <table className="data"><tbody>
                 {trades.slice(-12).reverse().map((tr) => (
