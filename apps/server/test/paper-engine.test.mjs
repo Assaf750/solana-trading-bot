@@ -11,6 +11,7 @@ process.env.SOLTRADE_DATA_DIR = process.env.SOLTRADE_DATA_DIR || mkdtempSync(joi
 const { detectLeaderSwap, WSOL_MINT } = await import('../src/engine/swap-detector.mjs');
 const { isHeliusHost, buildWalletSubscriptions, parseStreamNotification } = await import('../src/engine/rpc-client.mjs');
 const { computeWalletStats } = await import('../src/engine/wallet-analyzer.mjs');
+const { extractTradersFromTx } = await import('../src/engine/wallet-discovery.mjs');
 const { createPaperPortfolio } = await import('../src/engine/paper-portfolio.mjs');
 const { checkEntryGates } = await import('../src/engine/risk-gates.mjs');
 const { createPaperEngine } = await import('../src/engine/paper-engine.mjs');
@@ -70,16 +71,17 @@ test('rpc-client: Helius host detected; generic host not', () => {
   assert.equal(isHeliusHost('not a url'), false);
 });
 
-test('rpc-client: Helius builds ONE transactionSubscribe with accountInclude; generic builds per-wallet logsSubscribe', () => {
+test('rpc-client: default subscription is per-wallet logsSubscribe (reliable on every plan)', () => {
   const addrs = ['Aaa', 'Bbb', 'Ccc'];
-  const helius = buildWalletSubscriptions({ addresses: addrs, helius: true });
-  assert.equal(helius.length, 1);
-  assert.equal(helius[0].method, 'transactionSubscribe');
-  assert.deepEqual(helius[0].params[0].accountInclude, addrs);
-  assert.equal(helius[0].params[1].transactionDetails, 'full');
-  const generic = buildWalletSubscriptions({ addresses: addrs, helius: false });
-  assert.equal(generic.length, 3);
-  assert.ok(generic.every((s) => s.method === 'logsSubscribe'));
+  const def = buildWalletSubscriptions({ addresses: addrs });
+  assert.equal(def.length, 3);
+  assert.ok(def.every((s) => s.method === 'logsSubscribe'));
+  assert.deepEqual(def[0].params[0].mentions, ['Aaa']);
+  // enhanced is opt-in only (Helius paid Atlas endpoint)
+  const enhanced = buildWalletSubscriptions({ addresses: addrs, enhanced: true });
+  assert.equal(enhanced.length, 1);
+  assert.equal(enhanced[0].method, 'transactionSubscribe');
+  assert.deepEqual(enhanced[0].params[0].accountInclude, addrs);
 });
 
 test('rpc-client: parseStreamNotification extracts inline tx (Helius) and signature-only (logs), drops failed/garbage', () => {
@@ -132,6 +134,26 @@ test('wallet-analyzer: partial FIFO sell + rapid-flip + sold>bought bot signals'
   assert.equal(s.trades_closed, 1, 'only the matched Z sell closes');
   assert.equal(s.bot_signals.rapid_buy_sell_within_5s, 1);
   assert.equal(s.bot_signals.sold_more_than_bought_tokens, 1);
+});
+
+// ---------- wallet discovery (pure extractor) ----------
+test('wallet-discovery: extracts distinct trader owners for the mint, ignores other mints + failed tx', () => {
+  const MINT = 'MemeMint1111111111111111111111111111111111';
+  const tx = {
+    meta: {
+      err: null,
+      preTokenBalances: [{ owner: 'WALLET_A', mint: MINT, uiTokenAmount: { uiAmount: 0 } }],
+      postTokenBalances: [
+        { owner: 'WALLET_A', mint: MINT, uiTokenAmount: { uiAmount: 100 } }, // bought
+        { owner: 'WALLET_B', mint: MINT, uiTokenAmount: { uiAmount: 50 } },  // appeared (bought)
+        { owner: 'WALLET_C', mint: 'OtherMint', uiTokenAmount: { uiAmount: 9 } }, // different mint -> ignored
+      ],
+    },
+  };
+  const traders = extractTradersFromTx(tx, MINT).sort();
+  assert.deepEqual(traders, ['WALLET_A', 'WALLET_B']);
+  assert.deepEqual(extractTradersFromTx({ meta: { err: { x: 1 } } }, MINT), []);
+  assert.deepEqual(extractTradersFromTx(null, MINT), []);
 });
 
 // ---------- portfolio ----------

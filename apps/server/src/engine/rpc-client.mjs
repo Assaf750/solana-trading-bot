@@ -13,9 +13,15 @@ export function isHeliusHost(url) {
   try { return new URL(url).hostname.toLowerCase().includes('helius'); } catch { return false; }
 }
 
-/** Pure: build the subscription JSON-RPC message(s) for a provider + wallet set. */
-export function buildWalletSubscriptions({ addresses, helius }) {
-  if (helius) {
+/**
+ * Pure: build the subscription JSON-RPC message(s) for a wallet set.
+ * Default = logsSubscribe (one per address) — universally supported on every Solana
+ * RPC incl. the standard Helius endpoint / free plan, so signals actually flow.
+ * Helius `transactionSubscribe` (enhanced/Atlas WS) only delivers on the dedicated
+ * atlas endpoint + paid plan, so it is opt-in via `enhanced:true`, not the default.
+ */
+export function buildWalletSubscriptions({ addresses, enhanced = false }) {
+  if (enhanced) {
     return [{
       jsonrpc: '2.0', id: 1, method: 'transactionSubscribe',
       params: [
@@ -135,7 +141,9 @@ export function createRpcClient({ getRpcUrl }) {
         backoff = 1000;
         downSince = null;
         if (gapTimer) { clearTimeout(gapTimer); gapTimer = null; }
-        for (const sub of buildWalletSubscriptions({ addresses, helius })) {
+        // logsSubscribe by default (reliable on every plan); transactionSubscribe is
+        // opt-in only and requires Helius' paid Atlas endpoint.
+        for (const sub of buildWalletSubscriptions({ addresses, enhanced: false })) {
           try { ws.send(JSON.stringify(sub)); } catch { /* will reconnect */ }
         }
         // keepalive: a lightweight frame every 60s (Helius idle close at 10 min)
