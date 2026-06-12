@@ -129,7 +129,11 @@ export default function TradingWorkspace() {
               const pnl = (mark ?? p.cost_usd) - p.cost_usd;
               const pnlPct = p.cost_usd > 0 ? (pnl / p.cost_usd) * 100 : 0;
               return (
-                <div key={p.position_id} className={`wrow ${selectedId === p.position_id ? 'sel' : ''}`} onClick={() => setSelectedId(p.position_id)}>
+                <div key={p.position_id} className={`wrow ${selectedId === p.position_id ? 'sel' : ''}`}
+                  role="button" tabIndex={0} aria-pressed={selectedId === p.position_id}
+                  aria-label={`${ar ? 'افحص مركز' : 'inspect position'} ${shortMint(p.token_mint)}`}
+                  onClick={() => setSelectedId(p.position_id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(p.position_id); } }}>
                   <span className="wname">
                     <span className="lab mono" dir="ltr">{shortMint(p.token_mint)}</span>
                     <span className="addr" dir="ltr">{ar ? 'قائد' : 'leader'} {shortMint(p.leader_address)} · {ago(p.entry_ts)}</span>

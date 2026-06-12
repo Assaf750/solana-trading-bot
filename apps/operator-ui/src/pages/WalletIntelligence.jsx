@@ -149,7 +149,11 @@ export default function WalletIntelligence() {
             {view.map((w) => {
               const s = statsOf(w);
               return (
-                <div key={w.wallet_id} className={`wrow ${selectedId === w.wallet_id ? 'sel' : ''}`} onClick={() => setSelectedId(w.wallet_id)}>
+                <div key={w.wallet_id} className={`wrow ${selectedId === w.wallet_id ? 'sel' : ''}`}
+                  role="button" tabIndex={0} aria-pressed={selectedId === w.wallet_id}
+                  aria-label={`${ar ? 'اختر محفظة' : 'select wallet'} ${w.label || short(w.tracked_wallet_address)}`}
+                  onClick={() => setSelectedId(w.wallet_id)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(w.wallet_id); } }}>
                   <span className="wname"><span className="lab">{w.label || short(w.tracked_wallet_address)}</span><span className="addr" dir="ltr">{short(w.tracked_wallet_address)}</span></span>
                   <span><Badge tone={w.copy_mode === 'full_mirror' ? 'warn' : 'info'}>{w.copy_mode === 'full_mirror' ? 'mirror' : 'follow'}</Badge></span>
                   <span className="num" style={{ color: s ? (s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? (s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—') : '·'}</span>

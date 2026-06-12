@@ -66,10 +66,7 @@ export default function Alerts() {
                 ? 'زر واحد يوقف كل شيء فوراً: يقفل الموقّع، يمنع أي توقيع/إرسال، وينقل النظام إلى KILLED. حالته محفوظة — إعادة تشغيل البرنامج لا تلغيه.'
                 : 'One button halts everything instantly: locks the signer, blocks all signing/sending, moves the system to KILLED. Persisted — restarting the app does not clear it.'}
             </p>
-            <button
-              className="btn" onClick={killNow}
-              style={{ background: 'var(--c-danger-bg, #5b1212)', borderColor: 'var(--c-danger, #e5484d)', color: 'var(--c-danger, #e5484d)', fontWeight: 700, fontSize: 'var(--fs-lg)', padding: '10px 22px' }}
-            >
+            <button className="btn danger lg" onClick={killNow}>
               {ar ? '⛔ إيقاف كل شيء الآن' : '⛔ STOP EVERYTHING NOW'}
             </button>
           </>

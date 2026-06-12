@@ -374,4 +374,29 @@ table.data td.num { text-align: end; }
 }
 .wlist-head .num, .wrow .num { text-align: end; }
 
+/* ---- component states + sizes (audit fixes) ---- */
+.btn.sm { padding: 3px 9px; font-size: var(--fs-xs); }
+.btn.lg { padding: 10px 20px; font-size: var(--fs-lg); font-weight: 700; }
+.btn.loading { color: transparent !important; position: relative; pointer-events: none; }
+.btn.loading::after {
+  content: ""; position: absolute; inset: 0; margin: auto;
+  inline-size: 15px; block-size: 15px; border: 2px solid currentColor; opacity: 0.6;
+  border-top-color: var(--c-text); border-radius: 50%; animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.badge.sm { font-size: 10px; padding: 2px 6px; }
+
+input.search.error, select.search.error { border-color: var(--c-danger); box-shadow: 0 0 0 3px var(--c-danger-bg); }
+.field-error { color: var(--c-danger); font-size: var(--fs-xs); margin-block-start: 4px; }
+
+/* keyboard focus for clickable list rows (a11y) */
+.wrow[role="button"] { outline: none; }
+.wrow:focus-visible { outline: 2px solid var(--c-brand); outline-offset: -2px; }
+
+/* layout utilities — replace repeated inline style={{ justify-content: space-between }} etc. */
+.between { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; }
+.list-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: 7px 0; border-block-end: 1px solid var(--c-border); }
+.list-row:last-child { border-block-end: 0; }
+
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
