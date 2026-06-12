@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { NavLink, Routes, Route, Navigate } from 'react-router-dom';
 import { useI18n } from './i18n/index.jsx';
 import { Badge } from './components/index.jsx';
+import { CommandPalette } from './components/CommandPalette.jsx';
+import { TweaksPanel } from './components/TweaksPanel.jsx';
+import { useDesignPrefs } from './components/designPrefs.jsx';
 import { useBackend } from './api/useBackend.jsx';
 
 import SetupWizard from './pages/SetupWizard.jsx';
@@ -31,18 +34,12 @@ const NAV = [
   { to: '/help', key: 'help', ico: '?' }
 ];
 
-function TopBar() {
+function TopBar({ onOpenCmdk, onOpenTweaks }) {
   const { t, lang, setLang } = useI18n();
   const { status, connected } = useBackend();
-  const [density, setDensity] = useState('comfortable');
-  const [theme, setTheme] = useState('dark');
-
-  useEffect(() => {
-    document.documentElement.dataset.density = density;
-  }, [density]);
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+  const { prefs, set } = useDesignPrefs();
+  const density = prefs.density;
+  const theme = prefs.theme;
 
   const opState = connected ? status?.operating_state?.operating_state || '—' : 'OFFLINE';
   const mode = connected ? status?.mode : null;
@@ -89,7 +86,7 @@ function TopBar() {
       <div className="topbar-row statbar">
         {connected ? (
           <>
-            <span className="pill"><span className={`led ${status?.engine?.paper_engine === 'active' ? 'ok' : 'warn'}`} /> {ar ? 'المحرك' : 'engine'} <b>{status?.engine?.paper_engine || '—'}</b></span>
+            <span className="pill"><span className={`led ${status?.engine?.paper_engine === 'active' ? 'ok live' : 'warn'}`} /> {ar ? 'المحرك' : 'engine'} <b>{status?.engine?.paper_engine || '—'}</b></span>
             <span className="pill"><span className={`led ${status?.vault?.vault_unlocked ? 'ok' : status?.vault?.vault_exists ? 'warn' : 'danger'}`} /> {ar ? 'الخزنة' : 'vault'} <b>{status?.vault?.vault_unlocked ? (ar ? 'مفتوحة' : 'unlocked') : status?.vault?.vault_exists ? (ar ? 'مقفلة' : 'locked') : (ar ? 'غير منشأة' : 'none')}</b></span>
             <span className="pill"><span className={`led ${status?.signer?.signer_status === 'ready' ? 'ok' : status?.signer?.signer_status === 'missing' ? 'danger' : 'warn'}`} /> signer <b>{status?.signer?.signer_status || '—'}</b></span>
             <span className="pill"><span className={`led ${status?.kill_switch?.global?.engaged === false ? 'ok' : 'danger'}`} /> kill <b>{status?.kill_switch?.global?.engaged === false ? 'off' : 'ON'}</b></span>
@@ -99,6 +96,15 @@ function TopBar() {
           <span className="pill"><span className="led danger" /> {ar ? 'الخادم غير متصل' : 'server offline'}</span>
         )}
         <span className="topbar-spacer" />
+        <button className="icon-btn" onClick={onOpenCmdk} aria-label={lang === 'ar' ? 'لوحة الأوامر' : 'Command palette'}>
+          <span aria-hidden>⌘</span>
+          <span>{lang === 'ar' ? 'الأوامر' : 'Command'}</span>
+          <span className="kbd">Ctrl K</span>
+        </button>
+        <button className="icon-btn" onClick={onOpenTweaks} aria-label={lang === 'ar' ? 'التخصيص' : 'Tweaks'}>
+          <span aria-hidden>🎛</span>
+          <span>{lang === 'ar' ? 'تخصيص' : 'Tweaks'}</span>
+        </button>
         <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('app.language')}</span>
         <div className="seg" role="group" aria-label={t('app.language')}>
           <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>EN</button>
@@ -106,13 +112,13 @@ function TopBar() {
         </div>
         <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('app.density')}</span>
         <div className="seg" role="group" aria-label={t('app.density')}>
-          <button className={density === 'compact' ? 'on' : ''} onClick={() => setDensity('compact')}>{t('app.compact')}</button>
-          <button className={density === 'comfortable' ? 'on' : ''} onClick={() => setDensity('comfortable')}>{t('app.comfortable')}</button>
+          <button className={density === 'compact' ? 'on' : ''} onClick={() => set({ density: 'compact' })}>{t('app.compact')}</button>
+          <button className={density === 'comfortable' ? 'on' : ''} onClick={() => set({ density: 'comfortable' })}>{t('app.comfortable')}</button>
         </div>
         <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('app.theme')}</span>
         <div className="seg" role="group" aria-label={t('app.theme')}>
-          <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>{t('app.dark')}</button>
-          <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>{t('app.light')}</button>
+          <button className={theme === 'dark' ? 'on' : ''} onClick={() => set({ theme: 'dark' })}>{t('app.dark')}</button>
+          <button className={theme === 'light' ? 'on' : ''} onClick={() => set({ theme: 'light' })}>{t('app.light')}</button>
         </div>
       </div>
     </div>
@@ -148,11 +154,25 @@ function Nav() {
 }
 
 export default function App() {
+  const [cmdkOpen, setCmdkOpen] = useState(false);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setCmdkOpen((o) => !o);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   return (
     <div className="app-shell">
       <Nav />
       <div className="main">
-        <TopBar />
+        <TopBar onOpenCmdk={() => setCmdkOpen(true)} onOpenTweaks={() => setTweaksOpen(true)} />
         <main className="content">
           <Routes>
             <Route path="/" element={<Navigate to="/setup" replace />} />
@@ -170,6 +190,8 @@ export default function App() {
           </Routes>
         </main>
       </div>
+      <CommandPalette open={cmdkOpen} setOpen={setCmdkOpen} onOpenTweaks={() => setTweaksOpen(true)} />
+      <TweaksPanel open={tweaksOpen} setOpen={setTweaksOpen} />
     </div>
   );
 }

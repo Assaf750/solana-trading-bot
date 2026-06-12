@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, Sparkline, FlashValue } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -72,7 +72,12 @@ export default function CommandCenter() {
       <div className="kpi-strip">
         <div className="stattile"><span className="lbl">{ar ? 'الحالة' : 'State'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={opTone}>{op.operating_state}</Badge></span><span className="sub">{ar ? 'الوضع' : 'mode'}: {status.mode}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'المحرّك' : 'Engine'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}>{engine.paper_engine || '—'}</span><span className="sub">{ar ? `${engine.followed_wallets ?? 0} متابَعة` : `${engine.followed_wallets ?? 0} followed`}</span></div>
-        <div className="stattile"><span className="lbl">{ar ? 'محقّق اليوم' : 'Realized today'}</span><span className={`val ${(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.daily_realized_pnl_usd)}</span><span className="sub">{summary?.open_positions ?? 0} {ar ? 'مفتوح' : 'open'}</span></div>
+        <div className="stattile">
+          <span className="lbl">{ar ? 'محقّق اليوم' : 'Realized today'}</span>
+          <FlashValue className={`val ${(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.daily_realized_pnl_usd ?? 0)} format={(v) => usd(v)} />
+          <Sparkline seed="realized-today" tone={(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'} bias={(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 1 : -1} width={130} height={26} points={32} />
+          <span className="sub">{summary?.open_positions ?? 0} {ar ? 'مفتوح' : 'open'}</span>
+        </div>
         <div className="stattile"><span className="lbl">{ar ? 'الخزنة' : 'Vault'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={vault.vault_unlocked ? 'ok' : vault.vault_exists ? 'warn' : 'danger'}>{vault.vault_unlocked ? (ar ? 'مفتوحة' : 'unlocked') : vault.vault_exists ? (ar ? 'مقفلة' : 'locked') : (ar ? 'غير منشأة' : 'none')}</Badge></span></div>
         <div className="stattile"><span className="lbl">signer</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={signer.signer_status === 'ready' ? 'ok' : signer.signer_status === 'missing' ? 'danger' : 'warn'}>{signer.signer_status}</Badge></span></div>
         <div className="stattile"><span className="lbl">REAL-LIVE</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}>{readiness.real_live_ready ? <Badge tone="warn">{ar ? 'بانتظارك' : 'awaiting you'}</Badge> : <Badge tone="danger">{t('app.blocked')}</Badge>}</span><span className="sub">{(readiness.blockers || []).length} {ar ? 'حاجز' : 'blockers'}</span></div>

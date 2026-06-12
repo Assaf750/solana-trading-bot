@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef, useId } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 
 // ---------- Badge ----------
@@ -296,4 +296,97 @@ export function NotExecutableModal({ open, title, onClose, body }) {
       </div>
     </div>
   );
+}
+
+// ---------- Deterministic series (seeded — stable per token, no real history) ----------
+// Used to render illustrative sparklines/mini-charts. NOT real price history; purely a
+// visual trend hint derived from a stable seed so the same token always draws the same line.
+export function genSeries(seed, n = 24, bias = 0) {
+  let h = 2166136261;
+  const s = String(seed);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let state = (h >>> 0) || 1;
+  const rnd = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+  const out = [];
+  let v = 40 + rnd() * 25;
+  for (let i = 0; i < n; i++) {
+    v += (rnd() - 0.5) * 14 + bias;
+    v = Math.max(4, Math.min(96, v));
+    out.push(v);
+  }
+  return out;
+}
+
+// ---------- Sparkline (inline SVG trend) ----------
+export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0, points = 24 }) {
+  const pts = (data && data.length) ? data : genSeries(seed ?? 'spark', points, bias);
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const span = (max - min) || 1;
+  const stepX = width / (pts.length - 1);
+  const coords = pts.map((v, i) => [i * stepX, height - ((v - min) / span) * (height - 3) - 1.5]);
+  const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ');
+  const area = `${line} L${width} ${height} L0 ${height} Z`;
+  const last = coords[coords.length - 1];
+  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : '';
+  return (
+    <span className={`spark ${cls}`} aria-hidden>
+      <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+        <path className="spark-area" d={area} />
+        <path className="spark-line" d={line} />
+        <circle className="spark-dot" cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="1.7" />
+      </svg>
+    </span>
+  );
+}
+
+// ---------- MiniChart (area chart for detail panels) ----------
+export function MiniChart({ data, tone, seed, bias = 0, height = 60, points = 40, label }) {
+  const rawId = useId();
+  const gid = 'mc' + rawId.replace(/[^a-zA-Z0-9]/g, '');
+  const width = 260;
+  const pts = (data && data.length) ? data : genSeries(seed ?? 'mc', points, bias);
+  const min = Math.min(...pts);
+  const max = Math.max(...pts);
+  const span = (max - min) || 1;
+  const stepX = width / (pts.length - 1);
+  const coords = pts.map((v, i) => [i * stepX, height - ((v - min) / span) * (height - 8) - 4]);
+  const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ');
+  const area = `${line} L${width} ${height} L0 ${height} Z`;
+  const last = coords[coords.length - 1];
+  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : '';
+  return (
+    <div className={`minichart ${cls}`}>
+      {label && <div className="minichart-label">{label}</div>}
+      <svg viewBox={`0 0 ${width} ${height}`} width="100%" height={height} preserveAspectRatio="none" aria-hidden>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" className="mc-stop-top" />
+            <stop offset="100%" className="mc-stop-bottom" />
+          </linearGradient>
+        </defs>
+        <path className="mc-area" style={{ fill: `url(#${gid})` }} d={area} />
+        <path className="mc-line" vectorEffect="non-scaling-stroke" d={line} />
+        <circle className="mc-dot" cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="2.4" />
+      </svg>
+    </div>
+  );
+}
+
+// ---------- FlashValue (flashes green/red when the value changes) ----------
+export function FlashValue({ value, format, className = '' }) {
+  const prev = useRef(value);
+  const [flash, setFlash] = useState('');
+  useEffect(() => {
+    if (prev.current != null && value != null && value !== prev.current) {
+      setFlash(value > prev.current ? 'flash-up' : 'flash-down');
+      const id = setTimeout(() => setFlash(''), 650);
+      prev.current = value;
+      return () => clearTimeout(id);
+    }
+    prev.current = value;
+    return undefined;
+  }, [value]);
+  const out = format ? format(value) : value;
+  return <span className={`${className} ${flash}`.trim()}>{out}</span>;
 }

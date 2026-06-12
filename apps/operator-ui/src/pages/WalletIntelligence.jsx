@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -141,9 +141,9 @@ export default function WalletIntelligence() {
         <EmptyState message={ar ? 'لا محافظ بعد — أضف أول محفظة بزر «＋ محفظة»' : 'No wallets yet — add your first with “＋ Wallet”'} />
       ) : (
         <div className="workspace">
-          <div className="wlist">
+          <div className="wlist has-trend">
             <div className="wlist-head">
-              <span>{ar ? 'المحفظة' : 'Wallet'}</span><span>mode</span>
+              <span>{ar ? 'المحفظة' : 'Wallet'}</span><span>{ar ? 'الاتجاه' : 'trend'}</span><span>mode</span>
               <span className="num">win%</span><span className="num">PnL</span><span className="num">{ar ? 'صفقات' : 'trades'}</span><span>{ar ? 'متابعة' : 'follow'}</span>
             </div>
             {view.map((w) => {
@@ -155,6 +155,9 @@ export default function WalletIntelligence() {
                   onClick={() => setSelectedId(w.wallet_id)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(w.wallet_id); } }}>
                   <span className="wname"><span className="lab">{w.label || short(w.tracked_wallet_address)}</span><span className="addr" dir="ltr">{short(w.tracked_wallet_address)}</span></span>
+                  <span className="trend-cell">
+                    <Sparkline seed={w.tracked_wallet_address} tone={s ? (s.win_rate >= 0.5 ? 'pos' : 'neg') : undefined} bias={s ? (s.win_rate >= 0.5 ? 1 : -1) : 0} width={60} height={20} />
+                  </span>
                   <span><Badge tone={w.copy_mode === 'full_mirror' ? 'warn' : 'info'}>{w.copy_mode === 'full_mirror' ? 'mirror' : 'follow'}</Badge></span>
                   <span className="num" style={{ color: s ? (s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? (s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—') : '·'}</span>
                   <span className="num" style={{ color: s ? ((s.realized_pnl_sol || 0) >= 0 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? `${s.realized_pnl_sol > 0 ? '+' : ''}${s.realized_pnl_sol}◎` : '·'}</span>
