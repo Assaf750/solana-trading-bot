@@ -90,6 +90,15 @@ export default function MyWalletsFunds() {
     refresh();
   }
 
+  async function applySafeSessionDefaults() {
+    const safe = { idle_timeout_ms: 600000, max_session_ms: 3600000, max_session_notional_usd: 100, lock_after_n_risk_rejections: 3 };
+    setBounds(Object.fromEntries(Object.entries(safe).map(([k, v]) => [k, String(v)])));
+    const r = await api.updateConfig({ signer_session: safe });
+    if (r.ok) note('ok', 'طُبِّقت حدود جلسة آمنة ✓ (قفل بعد 10د خمول / ساعة كحد أقصى / سقف $100 / 3 رفض)', 'Safe session bounds applied ✓ (lock after 10m idle / 1h max / $100 cap / 3 rejections)');
+    else note('danger', 'رفض الحفظ', 'Save rejected');
+    refresh();
+  }
+
   async function sessionAction(open) {
     const r = open ? await api.signerOpenSession() : await api.signerLock();
     if (!r.ok) note('danger', `رفض: ${r.data?.error || ''}`, `Refused: ${r.data?.error || ''}`);
@@ -217,6 +226,7 @@ export default function MyWalletsFunds() {
           ))}
         </div>
         <div className="row" style={{ marginBlockStart: 10 }}>
+          <button className="btn" onClick={applySafeSessionDefaults}>{ar ? '⚡ حدود آمنة بنقرة' : '⚡ Safe defaults'}</button>
           <button className="btn" onClick={saveBounds}>{ar ? 'حفظ الحدود' : 'Save bounds'}</button>
           <button className="btn" onClick={() => sessionAction(true)} disabled={signer.signer_status !== 'locked' || !signer.session_bounds_configured || !signer.key_imported}>
             {ar ? 'فتح جلسة توقيع' : 'Open signing session'}

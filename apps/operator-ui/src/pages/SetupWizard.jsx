@@ -187,10 +187,29 @@ export default function SetupWizard() {
             <Link className="btn" to="/workspace">{ar ? 'مساحة التداول ←' : 'Trading Workspace →'}</Link>
             <Link className="btn" to="/command">{ar ? 'مركز القيادة ←' : 'Command Center →'}</Link>
           </div>
+        </Card>
+      )}
+
+      {activeStep > 4 && (
+        <Card title={ar ? '💰 التشغيل بالمال الحقيقي (اختياري — مثل «إيداع» في باينانس)' : '💰 Go live with real money (optional — like a Binance "deposit")'}>
+          <p className="muted">
+            {ar
+              ? 'تطبيقك غير حافظ (non-custodial): أموالك ومفتاحك يبقيان عندك. بدل أن تودع أموالاً عند شركة، تموّل محفظة مخصّصة وتعطي التطبيق مفتاحها. ثلاث خطوات فقط:'
+              : 'Your app is non-custodial: funds and key stay with you. Instead of depositing at a company, you fund a dedicated wallet and give the app its key. Just three steps:'}
+          </p>
+          <ol style={{ margin: '6px 0 0', paddingInlineStart: 20, lineHeight: 1.9 }}>
+            <li>{ar ? 'أنشئ محفظة تنفيذ مخصّصة (ليست محفظتك الرئيسية) وموّلها بمبلغ تحتمل خسارته فقط — هذا «الإيداع».' : 'Create a dedicated execution wallet (not your main one), fund it with only what you can lose — this is the "deposit".'}</li>
+            <li>{ar ? 'في «محافظي والأموال»: استورد مفتاحها → اضغط «⚡ حدود آمنة بنقرة» → افتح جلسة توقيع.' : 'On My Wallets & Funds: import its key → click "⚡ Safe defaults" → open a signing session.'}</li>
+            <li>{ar ? 'في «الإعدادات والأمان»: اكتب ACTIVATE-REAL-LIVE واضغط التفعيل.' : 'On Settings & Safety: type ACTIVATE-REAL-LIVE and activate.'}</li>
+          </ol>
+          <div className="row" style={{ gap: 'var(--s-4)', marginBlockStart: 'var(--s-3)' }}>
+            <Link className="btn" to="/funds">{ar ? '1) محافظي والأموال ←' : '1) My Wallets & Funds →'}</Link>
+            <Link className="btn" to="/settings">{ar ? '2) الإعدادات والأمان ←' : '2) Settings & Safety →'}</Link>
+          </div>
           <DangerNote tone="danger" locked>
             {ar
-              ? 'التداول الحقيقي (REAL-LIVE) خطوة منفصلة بقرارك وحدك في صفحة الإعدادات والأمان — يتطلب محفظة تنفيذ مموَّلة ومفتاح توقيع وكتابة ACTIVATE-REAL-LIVE.'
-              : 'REAL-LIVE is a separate, owner-only step on Settings & Safety — needs a funded execution wallet, a signer key, and typing ACTIVATE-REAL-LIVE.'}
+              ? 'التأكيد المكتوب وزر الإيقاف ليسا عوائق — هما حمايتك. حتى باينانس تطلب تأكيداً قبل تحريك المال. زر الإيقاف في «التنبيهات» يوقف كل شيء فوراً.'
+              : 'The typed confirmation and kill switch are not obstacles — they protect you. Even Binance confirms before moving money. The kill switch on Alerts stops everything instantly.'}
           </DangerNote>
         </Card>
       )}
