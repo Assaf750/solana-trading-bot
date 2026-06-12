@@ -16,12 +16,15 @@ import Alerts from './pages/Alerts.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
 const NAV = [
+  { sec: { en: 'Start', ar: 'البداية' } },
   { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/command', key: 'command', ico: '◈' },
+  { sec: { en: 'Trading', ar: 'التداول' } },
   { to: '/workspace', key: 'workspace', ico: '▤' },
   { to: '/radar', key: 'radar', ico: '◎' },
   { to: '/wallets', key: 'wallets', ico: '◇' },
   { to: '/analytics', key: 'analytics', ico: '▦' },
+  { sec: { en: 'Account & System', ar: 'الحساب والنظام' } },
   { to: '/funds', key: 'funds', ico: '◰' },
   { to: '/settings', key: 'settings', ico: '⚙' },
   { to: '/alerts', key: 'alerts', ico: '⚑' },
@@ -83,7 +86,19 @@ function TopBar() {
             : <Badge tone="danger">{t('app.blocked')}</Badge>}
         </span>
       </div>
-      <div className="topbar-row">
+      <div className="topbar-row statbar">
+        {connected ? (
+          <>
+            <span className="pill"><span className={`led ${status?.engine?.paper_engine === 'active' ? 'ok' : 'warn'}`} /> {ar ? 'المحرك' : 'engine'} <b>{status?.engine?.paper_engine || '—'}</b></span>
+            <span className="pill"><span className={`led ${status?.vault?.vault_unlocked ? 'ok' : status?.vault?.vault_exists ? 'warn' : 'danger'}`} /> {ar ? 'الخزنة' : 'vault'} <b>{status?.vault?.vault_unlocked ? (ar ? 'مفتوحة' : 'unlocked') : status?.vault?.vault_exists ? (ar ? 'مقفلة' : 'locked') : (ar ? 'غير منشأة' : 'none')}</b></span>
+            <span className="pill"><span className={`led ${status?.signer?.signer_status === 'ready' ? 'ok' : status?.signer?.signer_status === 'missing' ? 'danger' : 'warn'}`} /> signer <b>{status?.signer?.signer_status || '—'}</b></span>
+            <span className="pill"><span className={`led ${status?.kill_switch?.global?.engaged === false ? 'ok' : 'danger'}`} /> kill <b>{status?.kill_switch?.global?.engaged === false ? 'off' : 'ON'}</b></span>
+            <span className="pill"><span className={`led ${status?.readiness?.blockers?.length ? 'warn' : 'ok'}`} /> {ar ? 'حواجز' : 'blockers'} <b>{status?.readiness?.blockers?.length ?? '—'}</b></span>
+          </>
+        ) : (
+          <span className="pill"><span className="led danger" /> {ar ? 'الخادم غير متصل' : 'server offline'}</span>
+        )}
+        <span className="topbar-spacer" />
         <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('app.language')}</span>
         <div className="seg" role="group" aria-label={t('app.language')}>
           <button className={lang === 'en' ? 'on' : ''} onClick={() => setLang('en')}>EN</button>
@@ -105,21 +120,27 @@ function TopBar() {
 }
 
 function Nav() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   return (
     <nav className="nav" aria-label="primary">
       <div className="nav-brand">
-        {t('app.brand')}
-        <small>{t('app.brandSub')}</small>
+        <span style={{ display: 'flex', flexDirection: 'column' }}>
+          {t('app.brand')}
+          <small>{t('app.brandSub')}</small>
+        </span>
       </div>
       <ul className="nav-list">
-        {NAV.map((n) => (
-          <li className="nav-item" key={n.key}>
-            <NavLink to={n.to} className={({ isActive }) => (isActive ? 'active' : '')}>
-              <span className="nav-ico" aria-hidden>{n.ico}</span>
-              {t(`nav.${n.key}`)}
-            </NavLink>
-          </li>
+        {NAV.map((n, i) => (
+          n.sec
+            ? <li className="nav-sec" key={`sec-${i}`}>{lang === 'ar' ? n.sec.ar : n.sec.en}</li>
+            : (
+              <li className="nav-item" key={n.key}>
+                <NavLink to={n.to} className={({ isActive }) => (isActive ? 'active' : '')}>
+                  <span className="nav-ico" aria-hidden>{n.ico}</span>
+                  {t(`nav.${n.key}`)}
+                </NavLink>
+              </li>
+            )
         ))}
       </ul>
     </nav>
