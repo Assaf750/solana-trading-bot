@@ -44,6 +44,7 @@ export const api = {
   vaultLock: () => call('POST', '/api/vault/lock', {}),
   storeSecret: (name, value) => call('POST', '/api/secrets', { name, value }),
   deleteSecret: (name) => call('DELETE', `/api/secrets/${encodeURIComponent(name)}`),
+  testProviderConnection: () => call('POST', '/api/providers/test-connection', {}),
   signerImportKey: (secret) => call('POST', '/api/signer/import-key', { secret }),
   signerOpenSession: () => call('POST', '/api/signer/open-session', {}),
   signerLock: () => call('POST', '/api/signer/lock', {}),

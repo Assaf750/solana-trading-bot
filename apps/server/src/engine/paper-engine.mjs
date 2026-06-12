@@ -196,17 +196,25 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     if (!found) pushEvent({ kind: 'leader_sell_no_position', leader, mint: swap.mint });
   }
 
-  async function onSignature(sig) {
-    if (!rememberSig(sig)) return;
+  // Unified leader-activity handler. txInline present on Helius transactionSubscribe
+  // (no round-trip); null on generic logsSubscribe (we fetch once, deduped).
+  async function onLeaderActivity({ signature, tx: txInline }) {
+    if (!rememberSig(signature)) return;
     lastEventAt = Date.now();
-    const tx = await rpc.getTransaction(sig);
-    if (!tx.ok || !tx.result) return;
+    let txResult = txInline;
+    if (!txResult) {
+      const tx = await rpc.getTransaction(signature);
+      if (!tx.ok || !tx.result) return;
+      txResult = tx.result;
+    }
     for (const w of followedWallets()) {
-      const swap = detectLeaderSwap({ tx: tx.result, leaderAddress: w.tracked_wallet_address });
+      const swap = detectLeaderSwap({ tx: txResult, leaderAddress: w.tracked_wallet_address });
       if (swap.kind === 'buy') await handleLeaderBuy({ leader: w.tracked_wallet_address, wallet: w, swap });
       else if (swap.kind === 'sell') await handleLeaderSell({ leader: w.tracked_wallet_address, wallet: w, swap });
     }
   }
+  // back-compat alias used by tests/probes
+  const onSignature = (sig) => onLeaderActivity({ signature: sig, tx: null });
 
   // ---------- TP/SL + mark loop (both books; exits routed per book) ----------
   async function markPass() {
@@ -251,14 +259,14 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   function startSubscription() {
     const addrs = followedWallets().map((w) => w.tracked_wallet_address);
     subscribedAddrs = addrs;
-    sub = rpc.subscribeLogs({
+    sub = rpc.subscribeWallets({
       addresses: addrs,
-      onSignature: (sig) => { onSignature(sig).catch(() => { /* per-event errors contained */ }); },
-      onUp: () => {
+      onLeaderActivity: (evt) => { onLeaderActivity(evt).catch(() => { /* per-event errors contained */ }); },
+      onUp: ({ provider } = {}) => {
         engineState = 'active';
         const op = operatingState.get().operating_state;
         if (op === 'WARMING_UP' || op === 'EXITS_ONLY') operatingState.transition('ACTIVE', 'stream connected + readiness ok');
-        pushEvent({ kind: 'stream_connected', wallets: addrs.length });
+        pushEvent({ kind: 'stream_connected', wallets: addrs.length, provider, enhanced: provider === 'helius' });
       },
       onGap: () => {
         engineState = 'exits_only_stream_gap';

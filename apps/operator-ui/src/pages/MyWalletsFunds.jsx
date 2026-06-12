@@ -21,6 +21,7 @@ export default function MyWalletsFunds() {
   const [inputs, setInputs] = useState({});
   const [signerKey, setSignerKey] = useState('');
   const [bounds, setBounds] = useState({ idle_timeout_ms: '', max_session_ms: '', max_session_notional_usd: '', lock_after_n_risk_rejections: '' });
+  const [connTest, setConnTest] = useState(null);
 
   async function loadSecrets() {
     const r = await api.secrets();
@@ -64,6 +65,12 @@ export default function MyWalletsFunds() {
       note('ok', `حُفظ المفتاح مشفّراً (${r.data.masked}) وربط المرجع ✓`, `Key stored encrypted (${r.data.masked}) and ref linked ✓`);
     }
     refresh(); loadSecrets();
+  }
+
+  async function testConnection() {
+    setConnTest({ testing: true });
+    const r = await api.testProviderConnection();
+    setConnTest(r.data);
   }
 
   async function importSigner() {
@@ -156,6 +163,22 @@ export default function MyWalletsFunds() {
             </div>
           );
         })}
+        <div className="row" style={{ marginBlockStart: 10 }}>
+          <button className="btn" onClick={testConnection} disabled={!vault.vault_unlocked}>
+            {ar ? '🔌 اختبار اتصال RPC' : '🔌 Test RPC connection'}
+          </button>
+          {connTest?.testing && <span className="muted">{ar ? 'جارٍ الاختبار…' : 'testing…'}</span>}
+          {connTest && !connTest.testing && (
+            connTest.ok
+              ? <Badge tone="ok">{ar ? `متصل ✓ · ${connTest.provider === 'helius' ? 'Helius (بث محسّن)' : 'RPC عام'} · slot ${connTest.current_slot} · ${connTest.latency_ms}ms` : `connected ✓ · ${connTest.provider} · slot ${connTest.current_slot} · ${connTest.latency_ms}ms`}</Badge>
+              : <Badge tone="danger">{ar ? `فشل: ${connTest.error}` : `failed: ${connTest.error}`}</Badge>
+          )}
+        </div>
+        {connTest?.ok && connTest.enhanced_stream && (
+          <p className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockStart: 6 }}>
+            {ar ? 'مزوّد Helius مكتشف — سيُستخدم البث المحسّن transactionSubscribe (اشتراك واحد لكل المحافظ، معاملات فورية، استهلاك أقل).' : 'Helius detected — enhanced transactionSubscribe stream will be used (one subscription, inline transactions, fewer credits).'}
+          </p>
+        )}
       </Card>
 
       <Card title={ar ? '✍️ مفتاح التوقيع (Signer)' : '✍️ Signer key'} right={<Badge tone={signerTone}>{signer.signer_status || '—'}</Badge>}>

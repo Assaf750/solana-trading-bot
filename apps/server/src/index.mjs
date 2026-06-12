@@ -63,7 +63,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc,
 });
 
 const port = Number(process.env.SOLTRADE_PORT) || 8787;
