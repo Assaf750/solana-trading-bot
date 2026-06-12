@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState, SimulatedBadge } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, FlashValue } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -63,8 +63,12 @@ export default function AnalyticsReports() {
       <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={live ? (ar ? 'أداء حقيقي من بيانات السلسلة' : 'Real-live performance from on-chain data') : (ar ? 'أداء التداول الورقي من بيانات حقيقية — لا أرقام مختلقة' : 'Paper performance from real data — no fabricated numbers')} />
 
       <div className="kpi-strip">
-        <div className="stattile"><span className="lbl">{ar ? 'محقّق' : 'Realized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.realized_pnl_usd)}</span></div>
-        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} {!live && <SimulatedBadge />}</span><span className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.unrealized_pnl_usd)}</span></div>
+        <div className="stattile">
+          <span className="lbl">{ar ? 'محقّق' : 'Realized'} {!live && <SimulatedBadge />}</span>
+          <FlashValue className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.realized_pnl_usd ?? 0)} format={(v) => usd(v)} />
+          <Sparkline seed="analytics-realized" tone={(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'} bias={(summary?.realized_pnl_usd ?? 0) >= 0 ? 1 : -1} width={130} height={24} points={32} />
+        </div>
+        <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} {!live && <SimulatedBadge />}</span><FlashValue className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.unrealized_pnl_usd ?? 0)} format={(v) => usd(v)} /></div>
         <div className="stattile"><span className="lbl">{ar ? 'مراكز مغلقة' : 'Closed'}</span><span className="val">{closed.length}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'صفقات' : 'Trades'}</span><span className="val">{trades.length}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'توكنات' : 'Tokens'}</span><span className="val">{byToken.length}</span></div>
@@ -84,11 +88,12 @@ export default function AnalyticsReports() {
           ) : (
             <div className="table-wrap">
               <table className="data">
-                <thead><tr><th className="nosort">token</th><th className="nosort">{ar ? 'صفقات' : 'trades'}</th><th className="nosort">{ar ? 'شراء' : 'buys'}</th><th className="nosort">{ar ? 'بيع' : 'sells'}</th><th className="nosort">net</th></tr></thead>
+                <thead><tr><th className="nosort">token</th><th className="nosort">{ar ? 'الاتجاه' : 'trend'}</th><th className="nosort">{ar ? 'صفقات' : 'trades'}</th><th className="nosort">{ar ? 'شراء' : 'buys'}</th><th className="nosort">{ar ? 'بيع' : 'sells'}</th><th className="nosort">net</th></tr></thead>
                 <tbody>
                   {byToken.map((e) => (
                     <tr key={e.mint}>
                       <td className="mono" dir="ltr">{shortMint(e.mint)}</td>
+                      <td><Sparkline seed={e.mint} tone={e.net >= 0 ? 'pos' : 'neg'} bias={e.net >= 0 ? 1 : -1} width={62} height={20} /></td>
                       <td className="num mono">{e.count}</td>
                       <td className="num mono">{usd(e.buys)}</td>
                       <td className="num mono">{usd(e.sells)}</td>

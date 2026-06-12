@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -87,7 +87,8 @@ export default function NewCoinRadar() {
                         : a.loading ? <span className="muted">{ar ? 'جارٍ…' : '…'}</span>
                         : a.error ? <Badge tone="danger">{a.error === 'vault_locked' ? 'vault' : 'err'}</Badge>
                         : s?.status === 'insufficient_evidence' ? <span className="faint">{ar ? 'لا دليل' : 'no data'}</span>
-                        : <span className="mono fs-xs">
+                        : <span className="mono fs-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                            <Sparkline seed={tr.address} tone={s.win_rate >= 0.5 ? 'pos' : 'neg'} bias={s.win_rate >= 0.5 ? 1 : -1} width={46} height={16} />
                             <span style={{ color: s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</span>
                             {' · '}<span style={{ color: (s.realized_pnl_sol || 0) >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{s.realized_pnl_sol > 0 ? '+' : ''}{s.realized_pnl_sol}◎</span>
                             {' · '}{s.trades_closed}t
