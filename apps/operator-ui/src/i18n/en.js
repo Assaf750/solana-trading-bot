@@ -53,6 +53,7 @@ export default {
     empty: 'Nothing to show'
   },
   nav: {
+    setup: 'Setup Wizard',
     command: 'Command Center',
     workspace: 'Trading Workspace',
     radar: 'New Coin Radar',

@@ -53,6 +53,7 @@ export default {
     empty: 'لا شيء لعرضه'
   },
   nav: {
+    setup: 'معالج الإعداد',
     command: 'مركز القيادة',
     workspace: 'مساحة التداول',
     radar: 'رادار العملات الجديدة',

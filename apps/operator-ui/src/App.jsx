@@ -4,6 +4,7 @@ import { useI18n } from './i18n/index.jsx';
 import { Badge } from './components/index.jsx';
 import { useBackend } from './api/useBackend.jsx';
 
+import SetupWizard from './pages/SetupWizard.jsx';
 import CommandCenter from './pages/CommandCenter.jsx';
 import TradingWorkspace from './pages/TradingWorkspace.jsx';
 import NewCoinRadar from './pages/NewCoinRadar.jsx';
@@ -15,6 +16,7 @@ import Alerts from './pages/Alerts.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
 const NAV = [
+  { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/command', key: 'command', ico: '◈' },
   { to: '/workspace', key: 'workspace', ico: '▤' },
   { to: '/radar', key: 'radar', ico: '◎' },
@@ -132,7 +134,8 @@ export default function App() {
         <TopBar />
         <main className="content">
           <Routes>
-            <Route path="/" element={<Navigate to="/command" replace />} />
+            <Route path="/" element={<Navigate to="/setup" replace />} />
+            <Route path="/setup" element={<SetupWizard />} />
             <Route path="/command" element={<CommandCenter />} />
             <Route path="/workspace" element={<TradingWorkspace />} />
             <Route path="/radar" element={<NewCoinRadar />} />
@@ -142,7 +145,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsSafety />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/help" element={<HelpGlossary />} />
-            <Route path="*" element={<Navigate to="/command" replace />} />
+            <Route path="*" element={<Navigate to="/setup" replace />} />
           </Routes>
         </main>
       </div>
