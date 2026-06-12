@@ -14,6 +14,7 @@ import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
+import { analyzeWallet } from './engine/wallet-analyzer.mjs';
 
 ensureDataDir();
 
@@ -64,6 +65,7 @@ const api = createApi({
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
   paperEngine, portfolio, livePortfolio, liveExecutor, rpc,
+  analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
 });
 
 const port = Number(process.env.SOLTRADE_PORT) || 8787;

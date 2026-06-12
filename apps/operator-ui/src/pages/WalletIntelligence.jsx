@@ -14,6 +14,7 @@ export default function WalletIntelligence() {
   const [label, setLabel] = useState('');
   const [mode, setMode] = useState('follow_entry_user_exit');
   const [msg, setMsg] = useState(null);
+  const [analysis, setAnalysis] = useState({}); // wallet_id -> {loading|data}
 
   async function load() {
     const r = await api.wallets();
@@ -41,6 +42,12 @@ export default function WalletIntelligence() {
   async function remove(w) {
     await api.removeWallet(w.wallet_id);
     load();
+  }
+
+  async function analyze(w) {
+    setAnalysis((a) => ({ ...a, [w.wallet_id]: { loading: true } }));
+    const r = await api.analyzeWallet(w.tracked_wallet_address);
+    setAnalysis((a) => ({ ...a, [w.wallet_id]: r.ok ? { data: r.data } : { error: r.data?.error || 'failed' } }));
   }
 
   if (!connected) {
@@ -109,7 +116,10 @@ export default function WalletIntelligence() {
                       </button>
                     </td>
                     <td>
-                      <button className="btn" onClick={() => remove(w)}>{ar ? 'حذف' : 'Remove'}</button>
+                      <span className="row" style={{ gap: 4 }}>
+                        <button className="btn" onClick={() => analyze(w)}>{ar ? '🔍 تحليل' : '🔍 Analyze'}</button>
+                        <button className="btn" onClick={() => remove(w)}>{ar ? 'حذف' : 'Remove'}</button>
+                      </span>
                     </td>
                   </tr>
                 ))}
@@ -119,11 +129,85 @@ export default function WalletIntelligence() {
         )}
       </Card>
 
+      {wallets.map((w) => {
+        const a = analysis[w.wallet_id];
+        if (!a) return null;
+        return (
+          <Card key={`an-${w.wallet_id}`}
+            title={<span>{ar ? '🔍 تحليل المحفظة (تاريخي، on-chain)' : '🔍 Wallet analysis (historical, on-chain)'} · <span className="mono" dir="ltr">{w.label || w.tracked_wallet_address.slice(0, 6) + '…'}</span></span>}>
+            {a.loading && <p className="muted">{ar ? 'جارٍ مسح آخر معاملات المحفظة من السلسلة…' : 'Scanning the wallet’s recent on-chain transactions…'}</p>}
+            {a.error && <Badge tone="danger">{a.error === 'vault_locked' ? (ar ? 'افتح الخزنة أولاً (تحتاج مفتاح RPC)' : 'Unlock the vault first (needs RPC key)') : a.error}</Badge>}
+            {a.data && <WalletAnalysis ar={ar} res={a.data} />}
+          </Card>
+        );
+      })}
+
       <DangerNote tone="info">
         {ar
           ? 'تحليلات الربحية وقابلية النسخ (copyability/veto/drift) تُحسب من بيانات السوق الحية بعد تشغيل محرك الورق (M3) — لن تُختلق أرقام قبل توفر دليل حقيقي.'
           : 'Profitability and copyability analytics (veto/drift) are computed from live market data once the paper engine (M3) runs — numbers are never fabricated before real evidence exists.'}
       </DangerNote>
+    </div>
+  );
+}
+
+function Stat({ label, value, tone }) {
+  return (
+    <div className="card" style={{ background: 'var(--c-bg-elev-2)', minWidth: 130 }}>
+      <div className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{label}</div>
+      <div className="mono" style={{ fontSize: 'var(--fs-lg)', color: tone === 'ok' ? 'var(--c-ok,#46a758)' : tone === 'danger' ? 'var(--c-danger,#e5484d)' : 'inherit' }}>{value}</div>
+    </div>
+  );
+}
+
+function WalletAnalysis({ ar, res }) {
+  const s = res.stats || {};
+  if (s.status === 'insufficient_evidence') {
+    return <EmptyState message={ar ? `لا صفقات قابلة للتحليل في آخر ${res.signatures_scanned || 0} معاملة (قد تكون محفظة جديدة أو غير متداولة).` : `No analyzable trades in the last ${res.signatures_scanned || 0} txs (may be new or inactive).`} />;
+  }
+  const wr = s.win_rate != null ? `${(s.win_rate * 100).toFixed(1)}%` : (ar ? 'غير متوفر' : 'unavailable');
+  const pnlUsd = s.realized_pnl_usd != null ? `$${s.realized_pnl_usd}` : `${s.realized_pnl_sol} SOL`;
+  const hold = s.avg_hold_seconds != null ? `${Math.round(s.avg_hold_seconds / 60)} min` : '—';
+  const bot = s.bot_signals || {};
+  const rapidTone = bot.rapid_flip_ratio > 0.4 ? 'danger' : bot.rapid_flip_ratio > 0.15 ? 'warn' : 'ok';
+  return (
+    <div className="stack" style={{ gap: 'var(--s-3)' }}>
+      {s.status === 'low_confidence' && (
+        <Badge tone="warn">{ar ? `ثقة منخفضة — عيّنة صغيرة (${s.trades_closed} صفقة مغلقة)` : `low confidence — small sample (${s.trades_closed} closed)`}</Badge>
+      )}
+      <div className="row" style={{ gap: 'var(--s-3)', flexWrap: 'wrap' }}>
+        <Stat label={ar ? 'نسبة الربح' : 'Win rate'} value={wr} tone={s.win_rate >= 0.5 ? 'ok' : 'danger'} />
+        <Stat label={ar ? 'الربح المحقّق' : 'Realized PnL'} value={pnlUsd} tone={(s.realized_pnl_sol || 0) >= 0 ? 'ok' : 'danger'} />
+        <Stat label={ar ? 'صفقات مغلقة' : 'Closed trades'} value={s.trades_closed} />
+        <Stat label={ar ? 'توكنات' : 'Tokens'} value={s.distinct_tokens} />
+        <Stat label={ar ? 'متوسط الاحتفاظ' : 'Avg hold'} value={hold} />
+      </div>
+
+      <div className="grid cols-2">
+        <div>
+          <div className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockEnd: 4 }}>{ar ? 'توزيع نتائج الصفقات' : 'Trade-outcome distribution'}</div>
+          <table className="data"><tbody>
+            {s.outcome_distribution.map((b) => (
+              <tr key={b.key}><td className="mono">{b.label}</td><td className="num mono">{b.count}</td></tr>
+            ))}
+          </tbody></table>
+        </div>
+        <div>
+          <div className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockEnd: 4 }}>{ar ? 'إشارات البوت/الغش' : 'Bot / wash signals'}</div>
+          <dl className="kv">
+            <dt>{ar ? 'بيع/شراء خلال 5ث' : 'buy/sell within 5s'}</dt>
+            <dd><Badge tone={rapidTone}>{bot.rapid_buy_sell_within_5s} ({((bot.rapid_flip_ratio || 0) * 100).toFixed(0)}%)</Badge></dd>
+            <dt>{ar ? 'بيع أكثر من شراء' : 'sold > bought'}</dt>
+            <dd><Badge tone={bot.sold_more_than_bought_tokens > 0 ? 'warn' : 'ok'}>{bot.sold_more_than_bought_tokens}</Badge></dd>
+          </dl>
+        </div>
+      </div>
+
+      <p className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
+        {ar
+          ? `مصدر: السلسلة مباشرة · عيّنة: ${s.sample_size} حدث من ${res.signatures_scanned} معاملة حديثة · ${s.cost_basis_note}`
+          : `source: on-chain · sample: ${s.sample_size} events from ${res.signatures_scanned} recent txs · ${s.cost_basis_note}`}
+      </p>
     </div>
   );
 }

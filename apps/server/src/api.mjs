@@ -4,7 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
 
   function readiness() {
@@ -199,6 +199,17 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             emit({ event_type: 'config_update', secrets_changed: true });
           }
           return { status: res.ok ? 200 : 400, body: res };
+        }
+        if (path === '/api/wallets/analyze') {
+          // READ-ONLY historical wallet intelligence. Needs unlocked vault (uses the RPC key).
+          if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
+          if (typeof analyzeWallet !== 'function') return { status: 503, body: { ok: false, error: 'analyzer_unavailable' } };
+          const address = body?.address;
+          if (typeof address !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) {
+            return { status: 400, body: { ok: false, error: 'invalid_address' } };
+          }
+          const r = await analyzeWallet({ address });
+          return { status: r.ok ? 200 : 502, body: r };
         }
         if (path === '/api/providers/test-connection') {
           // runtime readiness probe — confirms the stored RPC key actually works.

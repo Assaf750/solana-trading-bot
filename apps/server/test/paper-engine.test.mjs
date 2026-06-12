@@ -10,6 +10,7 @@ process.env.SOLTRADE_DATA_DIR = process.env.SOLTRADE_DATA_DIR || mkdtempSync(joi
 
 const { detectLeaderSwap, WSOL_MINT } = await import('../src/engine/swap-detector.mjs');
 const { isHeliusHost, buildWalletSubscriptions, parseStreamNotification } = await import('../src/engine/rpc-client.mjs');
+const { computeWalletStats } = await import('../src/engine/wallet-analyzer.mjs');
 const { createPaperPortfolio } = await import('../src/engine/paper-portfolio.mjs');
 const { checkEntryGates } = await import('../src/engine/risk-gates.mjs');
 const { createPaperEngine } = await import('../src/engine/paper-engine.mjs');
@@ -93,6 +94,44 @@ test('rpc-client: parseStreamNotification extracts inline tx (Helius) and signat
   assert.equal(p3.signature, 'SIG3');
   assert.equal(p3.tx, null, 'logs path has no inline tx');
   assert.equal(parseStreamNotification({ method: 'unknown' }), null);
+});
+
+// ---------- wallet analyzer (pure historical read-model) ----------
+test('wallet-analyzer: empty / no-evidence -> insufficient_evidence, never fabricates', () => {
+  assert.equal(computeWalletStats([]).status, 'insufficient_evidence');
+  assert.equal(computeWalletStats(null).status, 'insufficient_evidence');
+});
+
+test('wallet-analyzer: FIFO realized PnL, win rate, outcome buckets from real-shaped events', () => {
+  const ev = [
+    // token X: buy 100 @ 1 SOL, sell 100 @ 2 SOL  => +1 SOL, +100% => win, bucket 0-200
+    { kind: 'buy', mint: 'X', qtyUi: 100, quoteSol: 1, ts: 1000 },
+    { kind: 'sell', mint: 'X', qtyUi: 100, quoteSol: 2, ts: 1100 },
+    // token Y: buy 50 @ 2 SOL, sell 50 @ 0.5 SOL => -1.5 SOL, -75% => loss, bucket <-50
+    { kind: 'buy', mint: 'Y', qtyUi: 50, quoteSol: 2, ts: 2000 },
+    { kind: 'sell', mint: 'Y', qtyUi: 50, quoteSol: 0.5, ts: 2500 },
+  ];
+  const s = computeWalletStats(ev, { solPriceUsd: 200 });
+  assert.equal(s.trades_closed, 2);
+  assert.equal(s.win_rate, 0.5);
+  assert.ok(Math.abs(s.realized_pnl_sol - (-0.5)) < 1e-9, `realized ${s.realized_pnl_sol}`);
+  assert.equal(s.realized_pnl_usd, -100);
+  const dist = Object.fromEntries(s.outcome_distribution.map((b) => [b.key, b.count]));
+  assert.equal(dist.b_0_200, 1);
+  assert.equal(dist.lt_neg50, 1);
+  assert.equal(s.provenance, 'on_chain');
+});
+
+test('wallet-analyzer: partial FIFO sell + rapid-flip + sold>bought bot signals', () => {
+  const ev = [
+    { kind: 'buy', mint: 'Z', qtyUi: 100, quoteSol: 10, ts: 100 },
+    { kind: 'sell', mint: 'Z', qtyUi: 50, quoteSol: 8, ts: 103 }, // within 5s of buy -> rapid flip; sell half: cost 5, proceeds 8 -> +3
+    { kind: 'sell', mint: 'W', qtyUi: 10, quoteSol: 1, ts: 200 }, // sold with no prior buy -> sold>bought
+  ];
+  const s = computeWalletStats(ev);
+  assert.equal(s.trades_closed, 1, 'only the matched Z sell closes');
+  assert.equal(s.bot_signals.rapid_buy_sell_within_5s, 1);
+  assert.equal(s.bot_signals.sold_more_than_bought_tokens, 1);
 });
 
 // ---------- portfolio ----------
