@@ -132,8 +132,8 @@ function AuditTail({ ar }) {
           {rows.map((a) => (
             <tr key={a.audit_id || Math.random()}>
               <td className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(a.event_timestamp || '').replace('T', ' ').slice(0, 19)}</td>
-              <td className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{a.audit_reason}</td>
-              <td className="mono faint" style={{ fontSize: 'var(--fs-xs)' }}>{a.command_type || '—'}</td>
+              <td className="mono fs-xs">{a.audit_reason}</td>
+              <td className="mono faint fs-xs">{a.command_type || '—'}</td>
             </tr>
           ))}
         </tbody>

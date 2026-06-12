@@ -107,7 +107,7 @@ export default function TradingWorkspace() {
           ))}
         </div>
         <span className="topbar-spacer" />
-        <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? `${view.length} مركز` : `${view.length} positions`}</span>
+        <span className="muted fs-xs">{ar ? `${view.length} مركز` : `${view.length} positions`}</span>
       </div>
 
       <div className="workspace">
@@ -144,7 +144,7 @@ export default function TradingWorkspace() {
                   <span className="num" style={{ color: pnl >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>
                     {p.position_state === 'OPEN' ? `${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%` : '—'}
                   </span>
-                  <span className="mono faint" style={{ fontSize: 'var(--fs-xs)' }}>+{p.tp_pct}/-{p.sl_pct}</span>
+                  <span className="mono faint fs-xs">+{p.tp_pct}/-{p.sl_pct}</span>
                 </div>
               );
             })}
@@ -158,8 +158,8 @@ export default function TradingWorkspace() {
                     <span className="mono faint" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(e.ts || '').slice(11, 19)}</span>
                     <Badge tone={e.kind?.includes('rejected') || e.kind?.includes('gap') || e.kind?.includes('refused') ? 'danger' : e.kind?.includes('exit') ? 'warn' : e.kind?.includes('entry') ? 'ok' : 'info'}>{e.kind}</Badge>
                     {e.mint && <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{shortMint(e.mint)}</span>}
-                    {e.size_usd != null && <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{usd(e.size_usd)}</span>}
-                    {e.rejections && <span className="mono neg" style={{ fontSize: 'var(--fs-xs)' }}>{e.rejections.join(' · ')}</span>}
+                    {e.size_usd != null && <span className="mono fs-xs">{usd(e.size_usd)}</span>}
+                    {e.rejections && <span className="mono neg fs-xs">{e.rejections.join(' · ')}</span>}
                   </li>
                 ))}
               </ul>
@@ -206,7 +206,7 @@ export default function TradingWorkspace() {
                       <tr key={tr.trade_id}>
                         <td><Badge tone={tr.side === 'buy' ? 'info' : 'warn'}>{tr.side}</Badge></td>
                         <td className="num mono">{usd(tr.value_usd)}</td>
-                        <td className="mono faint" style={{ fontSize: 'var(--fs-xs)' }}>{tr.reason}</td>
+                        <td className="mono faint fs-xs">{tr.reason}</td>
                         <td className="mono faint" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(tr.ts || '').slice(11, 19)}</td>
                       </tr>
                     ))}

@@ -10,7 +10,7 @@ export default function PageHead({ title, sub, fresh = true }) {
       <div className="page-head-tags">
         <SimulatedBadge />
         <ReadOnlyBadge />
-        <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
+        <span className="faint fs-xs">
           {t('notice.truthMode')}: {t('notice.simulatedTag')}
         </span>
         <StalenessTag fresh={fresh} />

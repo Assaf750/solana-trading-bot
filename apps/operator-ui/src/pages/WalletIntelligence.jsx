@@ -175,7 +175,7 @@ export default function WalletIntelligence() {
                     <dt>{ar ? 'العنوان' : 'address'}</dt><dd className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)', wordBreak: 'break-all' }}>{selected.tracked_wallet_address}</dd>
                   </div>
                   <div className="row" style={{ marginBlockEnd: 'var(--s-2)' }}>
-                    <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? 'نمط النسخ' : 'copy mode'}</span>
+                    <span className="muted fs-xs">{ar ? 'نمط النسخ' : 'copy mode'}</span>
                     <div className="seg">
                       <button className={selected.copy_mode === 'follow_entry_user_exit' ? 'on' : ''} onClick={() => setCopyMode(selected, 'follow_entry_user_exit')}>follow_entry</button>
                       <button className={selected.copy_mode === 'full_mirror' ? 'on' : ''} onClick={() => setCopyMode(selected, 'full_mirror')}>full_mirror</button>
@@ -256,7 +256,7 @@ function WalletAnalysis({ ar, res }) {
           <dt>{ar ? 'بيع أكثر من شراء' : 'sold > bought'}</dt><dd><Badge tone={bot.sold_more_than_bought_tokens > 0 ? 'warn' : 'ok'}>{bot.sold_more_than_bought_tokens}</Badge></dd>
         </dl>
       </div>
-      <p className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
+      <p className="faint fs-xs">
         {ar ? `on-chain · ${s.sample_size} حدث من ${res.signatures_scanned} معاملة · FIFO, تقديري` : `on-chain · ${s.sample_size} events / ${res.signatures_scanned} txs · FIFO, directional`}
       </p>
     </div>

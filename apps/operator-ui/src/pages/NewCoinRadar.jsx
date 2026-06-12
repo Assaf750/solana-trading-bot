@@ -67,7 +67,7 @@ export default function NewCoinRadar() {
 
       {state?.data && (
         <Card title={ar ? `محافظ تتداول هذا التوكن (${traders.length})` : `Wallets trading this token (${traders.length})`}
-          right={<span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? `مُسِح ${state.data.scanned} معاملة` : `scanned ${state.data.scanned} txs`}</span>}>
+          right={<span className="muted fs-xs">{ar ? `مُسِح ${state.data.scanned} معاملة` : `scanned ${state.data.scanned} txs`}</span>}>
           {traders.length === 0 ? (
             <EmptyState message={ar ? 'لم تُرصد محافظ — جرّب توكناً أكثر نشاطاً' : 'No wallets found — try a more active token'} />
           ) : (
@@ -87,7 +87,7 @@ export default function NewCoinRadar() {
                         : a.loading ? <span className="muted">{ar ? 'جارٍ…' : '…'}</span>
                         : a.error ? <Badge tone="danger">{a.error === 'vault_locked' ? 'vault' : 'err'}</Badge>
                         : s?.status === 'insufficient_evidence' ? <span className="faint">{ar ? 'لا دليل' : 'no data'}</span>
-                        : <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>
+                        : <span className="mono fs-xs">
                             <span style={{ color: s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</span>
                             {' · '}<span style={{ color: (s.realized_pnl_sol || 0) >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{s.realized_pnl_sol > 0 ? '+' : ''}{s.realized_pnl_sol}◎</span>
                             {' · '}{s.trades_closed}t

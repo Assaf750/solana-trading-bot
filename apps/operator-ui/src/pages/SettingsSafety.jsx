@@ -143,7 +143,7 @@ export default function SettingsSafety() {
               <button className={evMode === 'warning_only' ? 'on' : ''} onClick={() => setEvMode('warning_only')}>warning_only</button>
             </div>
           </div>
-          <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
+          <p className="muted fs-sm">
             {ar ? 'warning_only لا يُرخي أبداً أي حد Hard-Risk ولا مفتاح الإيقاف.' : 'warning_only never relaxes a Hard-Risk limit or a kill switch.'}
           </p>
         </Card>
@@ -158,7 +158,7 @@ export default function SettingsSafety() {
             />
             <span className="muted">USD</span>
           </div>
-          <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
+          <p className="muted fs-sm">
             {ar ? 'سقف رأس المال الذي يُسمح للمحرك بالتصرف فيه. يجب أن يكون رقماً منتهياً أكبر من صفر.' : 'The cap the engine may operate with. Must be finite and > 0.'}
           </p>
         </Card>
@@ -167,7 +167,7 @@ export default function SettingsSafety() {
       <div className="row">
         <button className="btn" onClick={save}>{ar ? '💾 حفظ الإعدادات' : '💾 Save settings'}</button>
         {saveMsg && <Badge tone={saveMsg.tone}>{saveMsg.text}</Badge>}
-        {cfg && <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>config_version: {cfg.config_version}</span>}
+        {cfg && <span className="muted fs-xs">config_version: {cfg.config_version}</span>}
       </div>
 
       <Card title={t('settings.realLive')} right={
@@ -221,7 +221,7 @@ export default function SettingsSafety() {
             {liveResult.warning && <p className="muted" style={{ marginBlockStart: 6 }}>{liveResult.warning}</p>}
             <ul style={{ margin: '6px 0 0', paddingInlineStart: 18 }}>
               {(liveResult.blockers || []).map((b, i) => (
-                <li key={i} className="mono" style={{ fontSize: 'var(--fs-sm)' }}>{b.blocker}</li>
+                <li key={i} className="mono fs-sm">{b.blocker}</li>
               ))}
             </ul>
           </div>

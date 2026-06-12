@@ -395,6 +395,8 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 .wrow:focus-visible { outline: 2px solid var(--c-brand); outline-offset: -2px; }
 
 /* layout utilities — replace repeated inline style={{ justify-content: space-between }} etc. */
+.fs-xs { font-size: var(--fs-xs); }
+.fs-sm { font-size: var(--fs-sm); }
 .between { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); flex-wrap: wrap; }
 .list-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: 7px 0; border-block-end: 1px solid var(--c-border); }
 .list-row:last-child { border-block-end: 0; }

@@ -166,7 +166,7 @@ export default function MyWalletsFunds() {
             <div className="row" key={slot.name} style={{ padding: '8px 0', borderBottom: '1px solid var(--c-border)', flexWrap: 'wrap' }}>
               <span style={{ minWidth: 220 }}>{ar ? slot.ar : slot.en}</span>
               {stored
-                ? <><Badge tone="ok">{stored.masked}</Badge><span className="mono muted" style={{ fontSize: 'var(--fs-xs)' }}>{`vault:${slot.name}`}</span></>
+                ? <><Badge tone="ok">{stored.masked}</Badge><span className="mono muted fs-xs">{`vault:${slot.name}`}</span></>
                 : <Badge tone="danger">{ar ? 'غير مُدخل' : 'not set'}</Badge>}
               <input
                 className="search" type="password" dir="ltr" style={{ flex: '1 1 220px' }}

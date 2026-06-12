@@ -61,7 +61,7 @@ export default function HelpGlossary() {
       <Card title={ar ? 'المسرد' : 'Glossary'} right={<Badge tone="info">SSOT-aligned</Badge>}>
         <div className="filterbar" style={{ margin: 0, marginBlockEnd: 'var(--s-3)', background: 'transparent', border: 0, padding: 0 }}>
           <input className="search grow" placeholder={ar ? 'بحث في المصطلحات…' : 'Search terms…'} value={q} onChange={(e) => setQ(e.target.value)} />
-          <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{rows.length}</span>
+          <span className="muted fs-xs">{rows.length}</span>
         </div>
         {rows.length === 0 ? <EmptyState message={ar ? 'لا نتائج' : 'No matches'} /> : (
           <div className="table-wrap">
@@ -71,7 +71,7 @@ export default function HelpGlossary() {
                 {rows.map((g) => (
                   <tr key={g.term}>
                     <td style={{ fontWeight: 600 }}>{g.term}</td>
-                    <td className="mono faint" style={{ fontSize: 'var(--fs-xs)' }}>{g.ssot}</td>
+                    <td className="mono faint fs-xs">{g.ssot}</td>
                     <td style={{ whiteSpace: 'normal' }}>{g.definition}</td>
                   </tr>
                 ))}

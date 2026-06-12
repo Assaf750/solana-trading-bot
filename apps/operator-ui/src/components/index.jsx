@@ -284,7 +284,7 @@ export function NotExecutableModal({ open, title, onClose, body }) {
         <DangerNote tone="warn">
           {body || t('notice.notExecutable')}
         </DangerNote>
-        <p className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
+        <p className="muted fs-sm">
           {t('notice.readOnly')}
         </p>
         <div className="modal-actions">

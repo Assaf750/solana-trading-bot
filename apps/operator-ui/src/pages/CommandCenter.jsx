@@ -88,7 +88,7 @@ export default function CommandCenter() {
                     <span className="mono faint" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(e.ts || '').slice(11, 19)}</span>
                     <Badge tone={e.kind?.includes('rejected') || e.kind?.includes('gap') || e.kind?.includes('refused') ? 'danger' : e.kind?.includes('exit') ? 'warn' : e.kind?.includes('entry') ? 'ok' : 'info'}>{e.kind}</Badge>
                     {e.mint && <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{shortMint(e.mint)}</span>}
-                    {e.rejections && <span className="mono neg" style={{ fontSize: 'var(--fs-xs)' }}>{e.rejections.join(' · ')}</span>}
+                    {e.rejections && <span className="mono neg fs-xs">{e.rejections.join(' · ')}</span>}
                   </li>
                 ))}
               </ul>
@@ -97,12 +97,12 @@ export default function CommandCenter() {
         </div>
 
         <div className="detail-pane stack" style={{ gap: 'var(--s-3)' }}>
-          <Card title={<span>🚀 {ar ? 'خطوات البدء' : 'Getting started'} <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>{doneCount}/4</span></span>}>
+          <Card title={<span>🚀 {ar ? 'خطوات البدء' : 'Getting started'} <span className="faint fs-sm">{doneCount}/4</span></span>}>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
               {steps.map((s, i) => (
                 <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--c-border)' }}>
                   <span><span aria-hidden style={{ marginInlineEnd: 8 }}>{s.done ? '✅' : '⬜'}</span>{s.label}</span>
-                  <Link to={s.to} className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? 'اذهب ←' : 'go →'}</Link>
+                  <Link to={s.to} className="mono fs-xs">{ar ? 'اذهب ←' : 'go →'}</Link>
                 </li>
               ))}
             </ul>
@@ -115,7 +115,7 @@ export default function CommandCenter() {
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                   {readiness.blockers.map((b, i) => (
                     <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--c-border)' }}>
-                      <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{b.blocker}</span>
+                      <span className="mono fs-xs">{b.blocker}</span>
                       <Badge tone="danger">{ar ? 'ناقص' : 'missing'}</Badge>
                     </li>
                   ))}
