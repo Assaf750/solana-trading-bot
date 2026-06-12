@@ -103,6 +103,10 @@ function serveStatic(pathname, res) {
   let file = safe;
   if (!existsSync(file) || !statSync(file).isFile()) file = join(UI_DIST, 'index.html'); // SPA fallback
   const mime = MIME[extname(file)] || 'application/octet-stream';
-  res.writeHead(200, { 'content-type': mime });
+  // hashed assets (Vite emits content-hashed filenames) are immutable; index.html must
+  // never be cached so a rebuilt UI loads immediately (no stale bundle after upgrades).
+  const isHashedAsset = /\/assets\/.+\.[0-9a-zA-Z_-]{8,}\.(js|css)$/.test(file.replace(/\\/g, '/'));
+  const cache = isHashedAsset ? 'public, max-age=31536000, immutable' : 'no-cache, must-revalidate';
+  res.writeHead(200, { 'content-type': mime, 'cache-control': cache });
   res.end(readFileSync(file));
 }

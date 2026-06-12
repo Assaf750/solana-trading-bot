@@ -1,22 +1,39 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Metric, Badge, DangerNote, StatusChip, EmptyState } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
+import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
+
+const usd = (v) => `$${Number(v ?? 0).toFixed(2)}`;
+const shortMint = (m) => `${String(m).slice(0, 4)}…${String(m).slice(-4)}`;
 
 export default function CommandCenter() {
   const { t, lang } = useI18n();
   const ar = lang === 'ar';
   const { status, connected } = useBackend();
+  const [events, setEvents] = useState([]);
+  const [summary, setSummary] = useState(null);
+
+  async function load() {
+    const [ev, p] = await Promise.all([api.engineEvents(), api.positions()]);
+    if (ev.ok) setEvents((ev.data.events || []).slice().reverse());
+    if (p.ok) setSummary(p.data.summary || null);
+  }
+  useEffect(() => {
+    if (!connected) return undefined;
+    load();
+    const iv = setInterval(load, 8000);
+    return () => clearInterval(iv);
+  }, [connected]);
 
   if (!connected) {
     return (
       <div className="stack">
         <PageHead title={t('command.title')} sub={t('command.sub')} />
         <DangerNote tone="danger" locked>
-          {ar
-            ? 'الخادم المحلي غير متصل. شغّل START.bat في مجلد البرنامج ثم أعد تحميل هذه الصفحة.'
-            : 'Local server offline. Run START.bat in the app folder, then reload this page.'}
+          {ar ? 'الخادم المحلي غير متصل. شغّل START.bat ثم أعد تحميل الصفحة.' : 'Local server offline. Run START.bat, then reload.'}
         </DangerNote>
         <EmptyState message={ar ? 'لا بيانات بدون الخادم — لا شيء يُختلق' : 'No data without the server — nothing is fabricated'} />
       </div>
@@ -28,121 +45,85 @@ export default function CommandCenter() {
   const signer = status.signer || {};
   const vault = status.vault || {};
   const ks = status.kill_switch || {};
+  const engine = status.engine || {};
   const globalKill = ks.global?.engaged !== false;
-  const signerTone = { ready: 'ok', degraded: 'warn', locked: 'warn', missing: 'danger', failed: 'danger' }[signer.signer_status] || 'neutral';
+  const opTone = op.operating_state === 'ACTIVE' ? 'ok' : op.operating_state === 'KILLED' ? 'danger' : 'warn';
 
   const steps = [
     { done: vault.vault_exists, label: ar ? 'إنشاء الخزنة المشفّرة' : 'Create the encrypted vault', to: '/funds' },
-    { done: Boolean(status.config_version > 1), label: ar ? 'حفظ حدود المخاطر (Hard-Risk)' : 'Save your Hard-Risk limits', to: '/settings' },
+    { done: Boolean(status.config_version > 1), label: ar ? 'حفظ حدود المخاطر' : 'Save your Hard-Risk limits', to: '/settings' },
     { done: !readiness.blockers?.some((b) => b.blocker === 'rpc_provider_not_configured'), label: ar ? 'إدخال مفتاح RPC' : 'Enter your RPC key', to: '/funds' },
-    { done: false, label: ar ? 'تسجيل محفظة متبوعة وتفعيل المتابعة' : 'Register a tracked wallet and enable follow', to: '/wallets' },
+    { done: engine.followed_wallets > 0, label: ar ? 'متابعة محفظة رابحة' : 'Follow a winning wallet', to: '/wallets' },
   ];
+  const doneCount = steps.filter((s) => s.done).length;
 
   return (
     <div className="stack">
-      <PageHead title={t('command.title')} sub={ar ? 'حالة النظام الحية من الخادم المحلي' : 'Live system state from the local server'} />
+      <PageHead title={ar ? 'مركز القيادة' : 'Command Center'} sub={ar ? 'الحالة الحية للنظام من الخادم المحلي' : 'Live system state from the local server'} />
 
       {globalKill && (
         <DangerNote tone="danger" locked>
-          {ar ? 'مفتاح الإيقاف مُفعَّل — كل التداول موقوف. فكّه من صفحة التنبيهات.' : 'Kill switch ENGAGED — all trading halted. Disengage from the Alerts page.'}
+          {ar ? 'مفتاح الإيقاف مفعّل — كل التداول موقوف. فكّه من صفحة التنبيهات.' : 'Kill switch ENGAGED — all trading halted. Disengage from Alerts.'}
         </DangerNote>
       )}
 
-      <div className="grid cols-4">
-        <Card title={t('command.systemStatus')}>
-          <div className="stack" style={{ gap: 'var(--s-2)' }}>
-            <StatusChip label={t('app.operatingState')} state={op.operating_state} />
-            <div className="row">
-              <span className="muted">{ar ? 'الوضع' : 'mode'}:</span>
-              <Badge tone={status.mode === 'real_live' ? 'danger' : 'warn'}>{status.mode}</Badge>
-            </div>
-            <div className="row">
-              <span className="muted">{ar ? 'السبب' : 'reason'}:</span>
-              <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{op.reason || '—'}</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card title={ar ? 'الخزنة والموقّع' : 'Vault & Signer'}>
-          <div className="stack" style={{ gap: 'var(--s-2)' }}>
-            <div className="row">
-              <span className="muted">vault:</span>
-              <Badge tone={vault.vault_unlocked ? 'ok' : vault.vault_exists ? 'warn' : 'danger'}>
-                {vault.vault_unlocked ? 'unlocked' : vault.vault_exists ? 'locked' : 'missing'}
-              </Badge>
-            </div>
-            <div className="row">
-              <span className="muted">signer:</span>
-              <Badge tone={signerTone}>{signer.signer_status}</Badge>
-            </div>
-            <div className="row">
-              <span className="muted">{ar ? 'أسرار مخزنة' : 'secrets'}:</span>
-              <span className="mono">{vault.secret_count ?? 0}</span>
-            </div>
-          </div>
-        </Card>
-
-        <Card title={ar ? 'المحركات' : 'Engines'}>
-          <div className="stack" style={{ gap: 'var(--s-2)' }}>
-            <div className="row">
-              <span className="muted">paper:</span>
-              <Badge tone="warn">{status.engine?.paper_engine || '—'}</Badge>
-            </div>
-            <div className="row">
-              <span className="muted">live:</span>
-              <Badge tone="danger">{status.engine?.live_engine || '—'}</Badge>
-            </div>
-          </div>
-        </Card>
-
-        <Card title={t('app.realLive')}>
-          <Metric label="status" value={
-            readiness.real_live_ready
-              ? <Badge tone="warn">{ar ? 'بانتظار قرارك' : 'awaiting your decision'}</Badge>
-              : <Badge tone="danger">{t('app.blocked')}</Badge>
-          } />
-          <p className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockEnd: 0 }}>
-            {(readiness.blockers || []).length} {ar ? 'حاجز متبقٍ' : 'blocker(s) remaining'}
-          </p>
-        </Card>
+      <div className="kpi-strip">
+        <div className="stattile"><span className="lbl">{ar ? 'الحالة' : 'State'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={opTone}>{op.operating_state}</Badge></span><span className="sub">{ar ? 'الوضع' : 'mode'}: {status.mode}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'المحرّك' : 'Engine'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}>{engine.paper_engine || '—'}</span><span className="sub">{ar ? `${engine.followed_wallets ?? 0} متابَعة` : `${engine.followed_wallets ?? 0} followed`}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'محقّق اليوم' : 'Realized today'}</span><span className={`val ${(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`}>{usd(summary?.daily_realized_pnl_usd)}</span><span className="sub">{summary?.open_positions ?? 0} {ar ? 'مفتوح' : 'open'}</span></div>
+        <div className="stattile"><span className="lbl">{ar ? 'الخزنة' : 'Vault'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={vault.vault_unlocked ? 'ok' : vault.vault_exists ? 'warn' : 'danger'}>{vault.vault_unlocked ? (ar ? 'مفتوحة' : 'unlocked') : vault.vault_exists ? (ar ? 'مقفلة' : 'locked') : (ar ? 'غير منشأة' : 'none')}</Badge></span></div>
+        <div className="stattile"><span className="lbl">signer</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={signer.signer_status === 'ready' ? 'ok' : signer.signer_status === 'missing' ? 'danger' : 'warn'}>{signer.signer_status}</Badge></span></div>
+        <div className="stattile"><span className="lbl">REAL-LIVE</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}>{readiness.real_live_ready ? <Badge tone="warn">{ar ? 'بانتظارك' : 'awaiting you'}</Badge> : <Badge tone="danger">{t('app.blocked')}</Badge>}</span><span className="sub">{(readiness.blockers || []).length} {ar ? 'حاجز' : 'blockers'}</span></div>
       </div>
 
-      <div className="grid cols-2">
-        <Card title={ar ? '🚀 خطوات البدء' : '🚀 Getting started'}>
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {steps.map((s, i) => (
-              <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--c-border)' }}>
-                <span>
-                  <span aria-hidden style={{ marginInlineEnd: 8 }}>{s.done ? '✅' : '⬜'}</span>
-                  {s.label}
-                </span>
-                <Link to={s.to} className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? 'اذهب ←' : 'go →'}</Link>
-              </li>
-            ))}
-          </ul>
-        </Card>
-
-        <Card title={ar ? 'حواجز التشغيل الحقيقي' : 'REAL-LIVE blockers'}>
-          {(readiness.blockers || []).length === 0
-            ? <p className="muted">{ar ? 'لا حواجز إعداد متبقية' : 'No configuration blockers remain'}</p>
-            : (
-              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                {readiness.blockers.map((b, i) => (
-                  <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--c-border)' }}>
-                    <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{b.blocker}</span>
-                    <Badge tone="danger">{ar ? 'ناقص' : 'missing'}</Badge>
+      <div className="workspace">
+        <div className="stack" style={{ gap: 'var(--s-3)' }}>
+          <Card title={ar ? 'قرارات المحرك الحية' : 'Live engine decisions'}>
+            {events.length === 0 ? (
+              <EmptyState message={ar ? 'لا أحداث بعد — تظهر عند نشاط القادة المتابَعين' : 'No events yet — they appear when followed leaders act'} />
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 360, overflow: 'auto' }}>
+                {events.slice(0, 40).map((e, i) => (
+                  <li key={i} style={{ padding: '6px 0', borderBottom: '1px solid var(--c-border)', display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <span className="mono faint" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(e.ts || '').slice(11, 19)}</span>
+                    <Badge tone={e.kind?.includes('rejected') || e.kind?.includes('gap') || e.kind?.includes('refused') ? 'danger' : e.kind?.includes('exit') ? 'warn' : e.kind?.includes('entry') ? 'ok' : 'info'}>{e.kind}</Badge>
+                    {e.mint && <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{shortMint(e.mint)}</span>}
+                    {e.rejections && <span className="mono neg" style={{ fontSize: 'var(--fs-xs)' }}>{e.rejections.join(' · ')}</span>}
                   </li>
                 ))}
               </ul>
             )}
-        </Card>
-      </div>
+          </Card>
+        </div>
 
-      <DangerNote tone="info">
-        {ar
-          ? 'محرك الورق (M3) ثم المحرك الحي (M4) قيد البناء — هذه الصفحة تعرض حالة الخادم الفعلية ولا تختلق أي رقم.'
-          : 'The paper engine (M3) then live engine (M4) are being built — this page shows the real server state and fabricates nothing.'}
-      </DangerNote>
+        <div className="detail-pane stack" style={{ gap: 'var(--s-3)' }}>
+          <Card title={<span>🚀 {ar ? 'خطوات البدء' : 'Getting started'} <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>{doneCount}/4</span></span>}>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {steps.map((s, i) => (
+                <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid var(--c-border)' }}>
+                  <span><span aria-hidden style={{ marginInlineEnd: 8 }}>{s.done ? '✅' : '⬜'}</span>{s.label}</span>
+                  <Link to={s.to} className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{ar ? 'اذهب ←' : 'go →'}</Link>
+                </li>
+              ))}
+            </ul>
+          </Card>
+
+          <Card title={ar ? 'حواجز التشغيل الحقيقي' : 'REAL-LIVE blockers'}>
+            {(readiness.blockers || []).length === 0
+              ? <p className="muted">{ar ? 'لا حواجز إعداد متبقية' : 'No configuration blockers remain'}</p>
+              : (
+                <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                  {readiness.blockers.map((b, i) => (
+                    <li key={i} className="row" style={{ justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px solid var(--c-border)' }}>
+                      <span className="mono" style={{ fontSize: 'var(--fs-xs)' }}>{b.blocker}</span>
+                      <Badge tone="danger">{ar ? 'ناقص' : 'missing'}</Badge>
+                    </li>
+                  ))}
+                </ul>
+              )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
