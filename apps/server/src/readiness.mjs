@@ -5,6 +5,7 @@ import { hardRiskComplete } from './config-service.mjs';
 export function computeReadiness({ config, vault, killSwitch, signerStatus }) {
   const cfg = config.get();
   const blockers = [];
+  const advisories = [];
 
   const hr = hardRiskComplete(cfg);
   if (!hr.complete) {
@@ -16,11 +17,15 @@ export function computeReadiness({ config, vault, killSwitch, signerStatus }) {
     blockers.push({ blocker: 'capital_limit_missing_or_invalid' });
   }
 
+  // RPC is a hard requirement (no trading without an endpoint).
   if (!cfg.providers?.rpc_url_ref || !vault.hasSecret(refName(cfg.providers.rpc_url_ref))) {
     blockers.push({ blocker: 'rpc_provider_not_configured' });
   }
+  // Jupiter API key is NOT a hard blocker: the engine functions on the free
+  // (keyless) Jupiter endpoint. A dedicated key only raises rate limits — recommended
+  // for heavy real-money trading, so it is surfaced as an advisory, not a gate.
   if (!cfg.providers?.jupiter_key_ref || !vault.hasSecret(refName(cfg.providers.jupiter_key_ref))) {
-    blockers.push({ blocker: 'jupiter_key_not_configured' });
+    advisories.push({ advisory: 'jupiter_key_recommended_for_rate_limits', optional: true });
   }
 
   const ss = cfg.signer_session || {};
@@ -44,6 +49,7 @@ export function computeReadiness({ config, vault, killSwitch, signerStatus }) {
       && typeof cap === 'number' && Number.isFinite(cap) && cap > 0,
     real_live_ready: blockers.length === 0,
     blockers,
+    advisories,
     validation_status: blockers.length === 0 ? 'valid' : 'warning',
     mode: cfg.mode,
   };
