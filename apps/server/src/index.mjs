@@ -15,6 +15,7 @@ import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
+import { discoverTokenTraders } from './engine/wallet-discovery.mjs';
 
 ensureDataDir();
 
@@ -66,6 +67,7 @@ const api = createApi({
   broadcast: (p) => broadcastRef(p),
   paperEngine, portfolio, livePortfolio, liveExecutor, rpc,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
+  discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
 });
 
 const port = Number(process.env.SOLTRADE_PORT) || 8787;
