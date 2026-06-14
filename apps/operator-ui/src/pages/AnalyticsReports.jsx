@@ -71,6 +71,17 @@ export default function AnalyticsReports() {
 
   const byLeader = (insights?.leaders || []).filter((l) => l.trades > 0).slice(0, 8);
 
+  async function downloadCsv(which) {
+    const r = await api.exportCsv(which, live ? 'live' : 'paper');
+    if (!r.ok || !r.data?.csv) return;
+    const blob = new Blob([r.data.csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = r.data.filename || `${which}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   if (!connected) {
     return (
       <div className="stack">
@@ -83,6 +94,12 @@ export default function AnalyticsReports() {
   return (
     <div className="stack">
       <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={live ? (ar ? 'أداء حقيقي من بيانات السلسلة' : 'Real-live performance from on-chain data') : (ar ? 'أداء التداول الورقي من بيانات حقيقية — لا أرقام مختلقة' : 'Paper performance from real data — no fabricated numbers')} />
+
+      <div className="row" style={{ gap: 'var(--s-2)', flexWrap: 'wrap' }}>
+        <button className="btn" onClick={() => downloadCsv('positions')}>⬇ {ar ? 'تصدير المراكز المغلقة (CSV)' : 'Export closed positions (CSV)'}</button>
+        <button className="btn" onClick={() => downloadCsv('trades')}>⬇ {ar ? 'تصدير دفتر الصفقات (CSV)' : 'Export trade ledger (CSV)'}</button>
+        <span className="muted fs-xs">{ar ? 'تكلفة/عائد/أرباح محقّقة لكل مركز — للمحاسبة والضريبة' : 'cost / proceeds / realized P&L per position — for accounting & tax'}</span>
+      </div>
 
       <div className="kpi-strip">
         <div className="stattile">

@@ -43,6 +43,7 @@ export const api = {
   latency: () => call('GET', '/api/latency'),
   leaderInsights: () => call('GET', '/api/leader-insights'),
   tokenMeta: (mints) => call('GET', `/api/token-meta?mints=${encodeURIComponent((mints || []).join(','))}`),
+  exportCsv: (which, book = 'paper') => call('GET', `/api/export/${which}?book=${book}`),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),
