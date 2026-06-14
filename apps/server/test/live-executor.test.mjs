@@ -251,6 +251,58 @@ test('live-executor: falls back to in-process signing when the hot-executor fail
   assert.equal(m.calls.sent, 1, 'transaction still broadcast');
 });
 
+test('live-executor: submits via Jito bundle when submit_backend=jito and configured', async () => {
+  const tipAccount = b58encode(Buffer.alloc(32, 5));
+  const blockhash = b58encode(Buffer.alloc(32, 6));
+  let bundleCalls = 0; let bundleLen = 0; let rpcSends = 0;
+  const m = buildExecutor({
+    config: { get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, submit_backend: 'jito', jito_tip_account: tipAccount, jito_tip_lamports: 12000 } }) },
+    deps: {
+      jitoSendBundle: async (txs) => { bundleCalls += 1; bundleLen = txs.length; return { ok: true, result: 'bundle1' }; },
+      rpc: {
+        rpc: async (method) => {
+          if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+          if (method === 'getLatestBlockhash') return { ok: true, result: { value: { blockhash } } };
+          if (method === 'sendTransaction') { rpcSends += 1; return { ok: true, result: 'rpcsig' }; }
+          if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } };
+          return { ok: true, result: null };
+        },
+        getTransaction: async () => ({ ok: true, result: null }),
+      },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintY', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'jito', 'MintY', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(bundleCalls, 1, 'submitted via Jito bundle');
+  assert.equal(bundleLen, 2, 'swap tx + tip tx bundled');
+  assert.equal(rpcSends, 0, 'did NOT use rpc sendTransaction');
+});
+
+test('live-executor: falls back to rpc sendTransaction when the Jito bundle fails', async () => {
+  const tipAccount = b58encode(Buffer.alloc(32, 5));
+  const blockhash = b58encode(Buffer.alloc(32, 6));
+  let rpcSends = 0;
+  const m = buildExecutor({
+    config: { get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, submit_backend: 'jito', jito_tip_account: tipAccount, jito_tip_lamports: 12000 } }) },
+    deps: {
+      jitoSendBundle: async () => ({ ok: false, error: 'jito_down' }),
+      rpc: {
+        rpc: async (method) => {
+          if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+          if (method === 'getLatestBlockhash') return { ok: true, result: { value: { blockhash } } };
+          if (method === 'sendTransaction') { rpcSends += 1; return { ok: true, result: 'rpcsig' }; }
+          if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } };
+          return { ok: true, result: null };
+        },
+        getTransaction: async () => ({ ok: true, result: null }),
+      },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintY', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'jfb', 'MintY', '1'] });
+  assert.equal(r.ok, true, 'still sends when Jito fails');
+  assert.equal(rpcSends, 1, 'fell back to rpc sendTransaction');
+});
+
 test('live-executor: session notional is charged ONCE across a retried (reverted) intent', async () => {
   let charges = 0;
   const m = buildExecutor({ deps: {

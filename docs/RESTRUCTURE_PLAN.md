@@ -19,8 +19,13 @@ compiled-core pattern, local AMM math). See sources at the end.
 - ✅ Rust signer WIRED into the live path behind `execution.signer_backend='rust'` +
   `HOT_EXECUTOR_BIN` (hot-executor-client.mjs); fails safe to in-process. End-to-end verified:
   Node client → real Rust binary == in-process (identical signature/tx/address).
-- ⏭️ Next: TS live submit via the Rust-built bodies; ClickHouse writer in the runtime then
-  analytics over ClickHouse; optional self-hosted gRPC/ShredStream.
+- ✅ Jito bundle submit backend WIRED behind `execution.submit_backend='jito'` +
+  `providers.jito_url_ref` + `jito_tip_account`/`jito_tip_lamports`: bundles the swap tx with a
+  tip-transfer tx (pure `jito-tip-tx.mjs`, tested); falls back to RPC sendTransaction on ANY
+  failure. Live POST needs an owner-provided Jito endpoint to verify end-to-end (fallback keeps
+  it safe meanwhile).
+- ⏭️ Next: ClickHouse writer in the runtime then analytics over ClickHouse; live getTipFloor for
+  dynamic tips (Rust select_tip already built); optional self-hosted gRPC/ShredStream.
 
 ## Target architecture (north star)
 

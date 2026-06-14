@@ -47,6 +47,9 @@ const DEFAULTS = {
     sizing_value: 10,
     usdc_quote_enabled: false,
     signer_backend: 'node',        // 'node' (in-process) | 'rust' (services/hot-executor)
+    submit_backend: 'rpc',         // 'rpc' (sendTransaction) | 'jito' (bundle + tip; falls back to rpc)
+    jito_tip_account: null,        // base58 Jito tip account (required for the jito backend)
+    jito_tip_lamports: 10000,      // tip per bundle (lamports)
   },
   copy_defaults: {
     copy_mode: 'follow_entry_user_exit',  // safe default; full_mirror is per-wallet explicit
@@ -62,6 +65,7 @@ const DEFAULTS = {
     jupiter_key_ref: null,
     grpc_url_ref: null,       // Yellowstone/Geyser gRPC endpoint (preferred ingestion transport)
     grpc_token_ref: null,     // optional x-token for the gRPC endpoint
+    jito_url_ref: null,       // Jito block-engine base URL (for the jito submit backend)
   },
   signer_session: {
     // ALL must be explicitly set (non-null) for the signer to be "ready"
@@ -82,7 +86,7 @@ const NUMERIC_BOUNDS = {
   minimum_net_expectancy: [-1e9, 1e9], minimum_profit_factor: [0, 100],
   minimum_lower_confidence_bound: [-1e9, 1e9], minimum_sample_size: [1, 1e6],
   minimum_exit_success_rate: [0, 1], max_expected_drawdown_pct: [0.1, 100],
-  capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9],
+  capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9], jito_tip_lamports: [1000, 1e9],
   take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
   max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
   idle_timeout_ms: [10_000, 86_400_000], max_session_ms: [60_000, 86_400_000],
@@ -106,7 +110,7 @@ export function validateConfigPatch(patch) {
   const sections = {
     hard_risk: HARD_RISK_FIELDS,
     ev: [...EV_FIELDS, 'ev_gate_mode'],
-    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend'],
+    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
@@ -119,6 +123,10 @@ export function validateConfigPatch(patch) {
       if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'signer_backend' && !['node', 'rust'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'submit_backend' && !['rpc', 'jito'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'jito_tip_account') {
+        if (v !== null && (typeof v !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v))) errors.push({ field, error: 'must_be_base58_or_null' });
+      }
       else if (field === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'usdc_quote_enabled' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
       else if (field.endsWith('_ref')) {

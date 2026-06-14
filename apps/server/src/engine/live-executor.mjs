@@ -5,13 +5,14 @@
 import { createHash } from 'node:crypto';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 import { seedFromStoredSecret, keypairFromSeed, signSerializedTransaction } from './tx-signer.mjs';
+import { buildTipTransferTx } from './jito-tip-tx.mjs';
 import { WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 
 const INTENTS_FILE = 'intent-ledger.json';
 const SOL_RESERVE_LAMPORTS = 0.05 * 1e9; // never spend the fee/rent reserve
 const SIGNER_SECRET_NAME = 'signer_keypair';
 
-export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null }) {
+export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null, jitoSendBundle = null }) {
   let solPriceCache = { usd: null, at: 0 };
 
   // ---------- intent ledger (idempotency: a retry can NEVER duplicate an on-chain tx) ----------
@@ -89,6 +90,28 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     const can = signer.canSignNow({ notional_usd: notionalUsd });
     if (!can.allowed) refusals.push(`signer_${can.reason}`);
     return { allowed: refusals.length === 0, refusals };
+  }
+
+  /** Broadcast a signed swap tx. Jito backend (flagged): bundle the swap tx with a tip-transfer
+   *  tx (atomic, same slot). ANY Jito failure falls back to plain RPC sendTransaction, so a Jito
+   *  outage/misconfig can never block a live send. Returns the rpc()-shaped { ok, result/error }. */
+  async function submitSigned({ signedTxBase64, signatureB58, owner, seed }) {
+    const cfg = config.get();
+    if (cfg.execution?.submit_backend === 'jito' && jitoSendBundle && cfg.execution?.jito_tip_account) {
+      try {
+        const bh = await rpc.rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
+        const blockhash = bh.ok ? bh.result?.value?.blockhash : null;
+        if (blockhash) {
+          const tipLamports = Number.isFinite(cfg.execution?.jito_tip_lamports) ? cfg.execution.jito_tip_lamports : 10000;
+          const tipTx = buildTipTransferTx({ owner, tipAccount: cfg.execution.jito_tip_account, lamports: tipLamports, recentBlockhash: blockhash });
+          const tipSigned = signSerializedTransaction({ txBase64: tipTx, seed });
+          const res = await jitoSendBundle([signedTxBase64, tipSigned.signedTxBase64]);
+          // on accept, the swap tx still lands under its deterministic signature
+          if (res?.ok) return { ok: true, result: signatureB58, via: 'jito' };
+        }
+      } catch { /* fall through to RPC */ }
+    }
+    return rpc.rpc('sendTransaction', [signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
   }
 
   async function confirmSignature(signatureB58) {
@@ -211,7 +234,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     // still resolve against the chain by signature — instead of a dead intent that is neither
     // retryable nor reconcilable (which would strand the position forever).
     setIntent(intent_id, 'SENT_PENDING', { signature: signed.signatureB58, sol_price_usd: price });
-    const sent = await rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
+    const sent = await submitSigned({ signedTxBase64: signed.signedTxBase64, signatureB58: signed.signatureB58, owner, seed: kpRes.seed });
     if (!sent.ok) {
       // Distinguish PROVABLY-unsent from ambiguous failures. A JSON-RPC error response
       // (`rpc_<code>`, e.g. preflight/simulation rejection) means the node refused the tx

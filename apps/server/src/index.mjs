@@ -70,9 +70,32 @@ const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simula
 const hotSigner = process.env.HOT_EXECUTOR_BIN
   ? createHotExecutorClient({ binPath: process.env.HOT_EXECUTOR_BIN })
   : null;
+// Jito bundle sender — POSTs to the configured block-engine URL (vault ref). Only invoked when
+// execution.submit_backend='jito' AND the URL is set; the live-executor falls back to RPC on any
+// failure. The URL is resolved from the vault at call time and never logged.
+async function jitoSendBundle(txsBase64) {
+  const ref = config.get().providers?.jito_url_ref;
+  if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
+  const r = vault.getSecretForUse(ref.slice(6));
+  if (!r.ok) return { ok: false, error: 'jito_url_unavailable' };
+  try {
+    const res = await fetch(`${r.value.replace(/\/+$/, '')}/api/v1/bundles`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [txsBase64, { encoding: 'base64' }] }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return { ok: false, error: `jito_http_${res.status}` };
+    const j = await res.json();
+    if (j.error) return { ok: false, error: `jito_${j.error.code ?? 'err'}` };
+    return { ok: true, result: j.result };
+  } catch (e) {
+    return { ok: false, error: `jito_failed_${String(e?.name || 'err')}` };
+  }
+}
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,
-  audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner,
+  audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle,
 });
 
 const paperEngine = createPaperEngine({
