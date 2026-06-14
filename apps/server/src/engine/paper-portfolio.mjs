@@ -80,9 +80,11 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     const realized = proceeds_usd - costPart - (fee_usd_est || 0);
     p.qty_ui -= qtySold;
     p.cost_usd -= costPart;
+    p.realized_usd = (p.realized_usd || 0) + realized; // per-position net P&L (sums partials) for leader stats
     if (f >= 1 || p.qty_ui <= 0) {
       p.position_state = 'CLOSED';
       p.qty_ui = 0; p.cost_usd = 0;
+      p.closed_at = nowIso();
     } else if (Number.isFinite(p.mark_usd) && p.mark_status === 'valid') {
       // partial exit: shrink the mark to the remaining quantity so unrealized P&L isn't inflated
       // in the window before the next markPass re-quotes the position. Only rescale a VALID mark —
@@ -141,11 +143,47 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     });
     s.realized_pnl_usd += realized;
     s.daily.realized_pnl_usd += realized;
+    p.realized_usd = (p.realized_usd || 0) + realized;
     p.position_state = 'CLOSED';
     p.qty_ui = 0; p.cost_usd = 0;
+    p.closed_at = nowIso();
     delete p.needs_reconciliation;
     save(s);
     return { ok: true, realized_usd: realized, closed: true };
+  }
+
+  /** Realized-history stats for one leader, from this book's CLOSED positions (each carries its
+   *  net realized_usd). Feeds the EV quality gate. profit_factor = Infinity when there are no losses. */
+  function leaderStats(leader) {
+    const closed = load().positions.filter(
+      (p) => p.leader_address === leader && p.position_state === 'CLOSED' && Number.isFinite(p.realized_usd),
+    );
+    const rs = closed.map((p) => p.realized_usd);
+    const n = rs.length;
+    const wins = rs.filter((x) => x > 0);
+    const grossProfit = wins.reduce((a, b) => a + b, 0);
+    const grossLoss = -rs.filter((x) => x < 0).reduce((a, b) => a + b, 0);
+    const total = rs.reduce((a, b) => a + b, 0);
+    return {
+      trades: n,
+      wins: wins.length,
+      total_realized: total,
+      avg_realized: n ? total / n : 0,
+      gross_profit: grossProfit,
+      gross_loss: grossLoss,
+      profit_factor: grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : 0),
+      win_rate: n ? wins.length / n : 0,
+    };
+  }
+
+  /** Count of the leader's most-recent CONSECUTIVE losing closed positions (auto-pause trigger). */
+  function leaderConsecutiveLosses(leader) {
+    const closed = load().positions
+      .filter((p) => p.leader_address === leader && p.position_state === 'CLOSED' && p.closed_at && Number.isFinite(p.realized_usd))
+      .sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1)); // newest first
+    let n = 0;
+    for (const p of closed) { if (p.realized_usd < 0) n += 1; else break; }
+    return n;
   }
 
   function setEntriesBlocked(blocked) {
@@ -171,6 +209,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
 
   return {
     state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
+    leaderStats, leaderConsecutiveLosses,
     recordEntry, recordExit, setMark, setEntriesBlocked, flagNeedsReconciliation, resolveReconciliation, summary,
   };
 }

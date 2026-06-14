@@ -5,6 +5,7 @@
 import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
 import { checkTokenSafety } from './token-safety.mjs';
+import { checkEvGate } from './ev-gate.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -152,6 +153,17 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       return;
     }
 
+    // EV quality gate — block (strict) or warn (warning_only) entries from leaders whose realized
+    // history (this book) fails the configured ev.* thresholds, once enough closed trades exist.
+    const evGate = checkEvGate({ cfg, stats: typeof pf.leaderStats === 'function' ? pf.leaderStats(leader) : null });
+    if (!evGate.allowed) {
+      pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: evGate.rejections.map((r) => `ev_gate:${r}`) });
+      return;
+    }
+    if (evGate.rejections.length) {
+      pushEvent({ kind: 'ev_gate_warning', leader, mint: swap.mint, rejections: evGate.rejections });
+    }
+
     // Exit feasibility BEFORE entry: a sell route must exist for the would-be position
     const slipBps = Math.round((cfg.copy_defaults?.max_entry_slippage_vs_leader || 5) * 100);
     let buyQuote = await jupiter.paperBuy({ mint: swap.mint, sizeUsd, slippageBps: slipBps });
@@ -254,6 +266,23 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
    *  intentParts defaults to (position, reason) — a stable key per logical exit. It is NOT
    *  day-bucketed (that would mint a new intent across UTC midnight and defeat dedup); a
    *  provably-unsent failure is still retryable via the live-executor RETRYABLE statuses. */
+  // Auto-pause a leader after N consecutive losing closed positions (GMGN/OdinBot-style
+  // protection). Off unless copy_defaults.auto_pause_after_losses (or the per-wallet override) is set.
+  function maybeAutoPause(p, pf) {
+    if (typeof pf.leaderConsecutiveLosses !== 'function') return;
+    const w = walletsRegistry.list().find((x) => x.wallet_id === p.wallet_id);
+    if (!w || !w.follow_enabled) return;
+    const cfg = config.get();
+    const threshold = w.config?.auto_pause_after_losses ?? cfg.copy_defaults?.auto_pause_after_losses;
+    if (!Number.isFinite(threshold) || threshold <= 0) return;
+    const losses = pf.leaderConsecutiveLosses(p.leader_address);
+    if (losses >= threshold) {
+      walletsRegistry.setFollow(w.wallet_id, false);
+      pushEvent({ kind: 'leader_auto_paused', leader: p.leader_address, wallet_id: w.wallet_id, consecutive_losses: losses, threshold });
+      audit({ audit_scope: 'wallet', audit_reason: 'leader_auto_paused', command_type: null, detail: { wallet_id: w.wallet_id, leader: p.leader_address, consecutive_losses: losses } });
+    }
+  }
+
   async function performExit({ pf, p, fraction, reason, intentParts }) {
     // re-confirm the position is still OPEN right before acting — a concurrent exit (TP/SL vs
     // leader-mirror) may have closed it since the caller snapshotted it; avoids a second real sell.
@@ -286,7 +315,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         // do NOT subtract an extra fee estimate (that would double-count fees in realized P&L)
         fee_usd_est: 0, price_impact_pct: exec.priceImpactPct, reason,
       });
-      if (res.ok) pushEvent({ kind: 'live_exit', position_id: p.position_id, reason, proceeds_usd: exec.proceedsUsd, realized_usd: res.realized_usd, signature: exec.signature });
+      if (res.ok) { pushEvent({ kind: 'live_exit', position_id: p.position_id, reason, proceeds_usd: exec.proceedsUsd, realized_usd: res.realized_usd, signature: exec.signature }); maybeAutoPause(p, pf); }
       return res;
     }
     const q = await jupiter.usdValueOf({ mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals });
@@ -298,7 +327,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       position_id: p.position_id, fraction, proceeds_usd: q.usd,
       fee_usd_est: FEE_EST_USD, price_impact_pct: q.priceImpactPct, reason,
     });
-    if (res.ok) pushEvent({ kind: 'paper_exit', position_id: p.position_id, reason, proceeds_usd: q.usd, realized_usd: res.realized_usd });
+    if (res.ok) { pushEvent({ kind: 'paper_exit', position_id: p.position_id, reason, proceeds_usd: q.usd, realized_usd: res.realized_usd }); maybeAutoPause(p, pf); }
     return res;
   }
 

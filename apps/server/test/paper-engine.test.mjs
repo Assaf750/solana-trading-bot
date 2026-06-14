@@ -382,3 +382,80 @@ test('leader-sell front-run: default OFF still ignores leader sells in follow_en
   await engine._internal.handleLeaderSell({ leader: LEADER, wallet, swap: { kind: 'sell', mint: MEME, fullExit: true, soldFraction: 1 } });
   assert.equal(portfolio.openCount(), before, 'no exit by default in follow_entry mode');
 });
+
+// ---------- feature 3: analytics -> engine (EV gate + auto-pause) ----------
+function engineWith(config, portfolio, walletsRegistry = createWalletRegistry(), jupiterOverride) {
+  const jupiter = jupiterOverride || {
+    quote: async () => ({ ok: true, outAmount: 150 * 1e6 }),
+    paperBuy: async ({ sizeUsd }) => ({ ok: true, outAmountBase: Math.round((sizeUsd / 0.15) * 1e6), priceImpactPct: 0.3 }),
+    usdValueOf: async ({ qtyUi }) => ({ ok: true, usd: qtyUi * 0.15, priceImpactPct: 0.5 }),
+  };
+  return createPaperEngine({
+    config, walletsRegistry, killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true, getSecretForUse: () => ({ ok: true, value: 'http://x' }) },
+    portfolio, rpc: safeMintRpc(), jupiter, audit: () => {}, broadcast: () => {},
+  });
+}
+// seed CLOSED positions for a leader by recording an entry then a full exit at cost+realized
+function seedClosed(portfolio, leader, walletId, realizedList) {
+  for (const realized of realizedList) {
+    const pos = portfolio.recordEntry({ leader_address: leader, wallet_id: walletId, token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+    portfolio.recordExit({ position_id: pos.position_id, fraction: 1, proceeds_usd: 10 + realized, fee_usd_est: 0, reason: 'seed' });
+  }
+}
+
+test('EV gate: blocks entries from a leader failing thresholds (strict)', async () => {
+  const config = fullConfig();
+  config.update({ ev: { ev_gate_mode: 'strict', minimum_sample_size: 5, minimum_profit_factor: 1.5, minimum_exit_success_rate: 0.5, minimum_net_expectancy: 0 } });
+  const portfolio = createPaperPortfolio({ file: 'pf-ev-block.json' });
+  seedClosed(portfolio, LEADER, 'w1', [-5, -5, -5, -5, -5]); // 5 losses -> PF 0, win_rate 0
+  const engine = engineWith(config, portfolio);
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderBuy({ leader: LEADER, wallet: { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: {} }, swap: BUY });
+  assert.equal(portfolio.openCount(), before, 'entry blocked by the EV gate');
+  assert.ok(engine.events(10).some((e) => e.kind === 'entry_rejected' && e.rejections.some((x) => x.startsWith('ev_gate'))));
+});
+
+test('EV gate: allows a leader meeting thresholds', async () => {
+  const config = fullConfig();
+  config.update({ ev: { ev_gate_mode: 'strict', minimum_sample_size: 5, minimum_profit_factor: 1.5, minimum_exit_success_rate: 0.5, minimum_net_expectancy: 0 } });
+  const portfolio = createPaperPortfolio({ file: 'pf-ev-ok.json' });
+  seedClosed(portfolio, LEADER, 'w1', [10, 10, 10, -5, 10]); // PF=40/5=8, win_rate 0.8
+  const engine = engineWith(config, portfolio);
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderBuy({ leader: LEADER, wallet: { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: {} }, swap: BUY });
+  assert.equal(portfolio.openCount(), before + 1, 'quality leader allowed');
+});
+
+test('auto-pause: unfollows a leader after N consecutive losing exits', async () => {
+  const config = fullConfig();
+  config.update({ copy_defaults: { auto_pause_after_losses: 3 } });
+  const portfolio = createPaperPortfolio({ file: 'pf-autopause.json' });
+  const walletsRegistry = createWalletRegistry();
+  const reg = walletsRegistry.register({ tracked_wallet_address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs1', label: 'L' });
+  const w = reg.ok ? reg.wallet : walletsRegistry.list()[0];
+  walletsRegistry.setFollow(w.wallet_id, true);
+  seedClosed(portfolio, w.tracked_wallet_address, w.wallet_id, [-5, -5]); // 2 prior losses
+  // a losing exit ($5 proceeds on a $10 position) is the 3rd consecutive loss -> pause
+  const engine = engineWith(config, portfolio, walletsRegistry, { usdValueOf: async () => ({ ok: true, usd: 5 }) });
+  const live = portfolio.recordEntry({ leader_address: w.tracked_wallet_address, wallet_id: w.wallet_id, token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  const p = portfolio.openPositions().find((x) => x.position_id === live.position_id);
+  await engine._internal.performExit({ pf: portfolio, p, fraction: 1, reason: 'stop_loss_hit' });
+  assert.equal(walletsRegistry.list().find((x) => x.wallet_id === w.wallet_id).follow_enabled, false, 'leader auto-unfollowed');
+  assert.ok(engine.events(10).some((e) => e.kind === 'leader_auto_paused'));
+});
+
+test('auto-pause: OFF by default (no threshold) leaves follow untouched', async () => {
+  const config = fullConfig();
+  config.update({ copy_defaults: { auto_pause_after_losses: null } }); // clear any value leaked via shared config.json
+  const portfolio = createPaperPortfolio({ file: 'pf-noautopause.json' });
+  const walletsRegistry = createWalletRegistry();
+  const w = walletsRegistry.register({ tracked_wallet_address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs1', label: 'L' }).wallet;
+  walletsRegistry.setFollow(w.wallet_id, true);
+  seedClosed(portfolio, w.tracked_wallet_address, w.wallet_id, [-5, -5, -5]); // many losses, but no threshold set
+  const engine = engineWith(config, portfolio, walletsRegistry, { usdValueOf: async () => ({ ok: true, usd: 5 }) });
+  const live = portfolio.recordEntry({ leader_address: w.tracked_wallet_address, wallet_id: w.wallet_id, token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  const p = portfolio.openPositions().find((x) => x.position_id === live.position_id);
+  await engine._internal.performExit({ pf: portfolio, p, fraction: 1, reason: 'stop_loss_hit' });
+  assert.equal(walletsRegistry.list().find((x) => x.wallet_id === w.wallet_id).follow_enabled, true, 'still followed (auto-pause off)');
+});

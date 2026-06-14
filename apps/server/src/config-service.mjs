@@ -60,6 +60,7 @@ const DEFAULTS = {
     max_entry_drift_pct: null,            // null = drift guard OFF; else skip/shrink if price ran past leader's fill
     drift_action: 'skip',                 // 'skip' | 'shrink'
     exit_on_leader_sell: false,           // front-run the dump: exit on a leader sell even in follow_entry mode
+    auto_pause_after_losses: null,        // null = OFF; else auto-unfollow a leader after N consecutive losses
   },
   safety: {
     // pre-trade anti-rug screen (fail-closed); each check independently toggleable
@@ -99,7 +100,7 @@ const NUMERIC_BOUNDS = {
   capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9], jito_tip_lamports: [1000, 1e9],
   take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
   max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
-  max_entry_drift_pct: [0.1, 100000],
+  max_entry_drift_pct: [0.1, 100000], auto_pause_after_losses: [1, 1000],
   idle_timeout_ms: [10_000, 86_400_000], max_session_ms: [60_000, 86_400_000],
   max_session_notional_usd: [1, 1e9], lock_after_n_risk_rejections: [1, 100],
 };
@@ -122,7 +123,7 @@ export function validateConfigPatch(patch) {
     hard_risk: HARD_RISK_FIELDS,
     ev: [...EV_FIELDS, 'ev_gate_mode'],
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
-    copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell'],
+    copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
