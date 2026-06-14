@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState, Sparkline, FlashValue } from '../components/index.jsx';
+import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -197,7 +198,7 @@ export default function CommandCenter() {
                   const pnlPct = p.cost_usd > 0 && mark != null ? ((mark - p.cost_usd) / p.cost_usd) * 100 : null;
                   return (
                     <li key={p.position_id} className="list-row">
-                      <span className="mono fs-xs" dir="ltr">{shortMint(p.token_mint)}</span>
+                      <TokenLabel mint={p.token_mint} className="fs-sm" />
                       <span className="row" style={{ gap: 8 }}>
                         <Sparkline data={p.mark_history} seed={p.token_mint} tone={pnlPct == null ? 'muted' : pnlPct >= 0 ? 'pos' : 'neg'} width={48} height={16} />
                         <span className="mono fs-sm" style={{ color: pnlPct == null ? 'var(--c-text-faint)' : pnlPct >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{pnlPct == null ? '—' : `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%`}</span>

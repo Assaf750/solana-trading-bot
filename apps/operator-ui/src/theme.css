@@ -620,3 +620,10 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 @keyframes estop-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, .5); } 50% { box-shadow: 0 0 0 14px rgba(229, 72, 77, 0); } }
 .estop-ring.live { animation: estop-pulse 2.2s ease-out infinite; }
 :root[data-motion="off"] .estop-ring.live { animation: none; }
+
+/* ---- token label (mint -> symbol + logo) ---- */
+.token-label { display: inline-flex; align-items: center; gap: 6px; min-inline-size: 0; }
+.token-ico { inline-size: 16px; block-size: 16px; border-radius: 50%; object-fit: cover; background: var(--c-bg-elev-3); flex: 0 0 auto; }
+.token-label .token-sym { font-weight: 700; color: var(--c-text); letter-spacing: .01em; }
+.token-label .token-addr { font-size: var(--fs-xs); color: var(--c-text-faint); }
+.wname .token-label { gap: 6px; }

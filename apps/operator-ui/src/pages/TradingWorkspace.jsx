@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, MiniChart, FlashValue } from '../components/index.jsx';
+import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -158,7 +159,7 @@ export default function TradingWorkspace() {
                   onClick={() => setSelectedId(p.position_id)}
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(p.position_id); } }}>
                   <span className="wname">
-                    <span className="lab mono" dir="ltr">{shortMint(p.token_mint)}</span>
+                    <TokenLabel mint={p.token_mint} showMint={false} className="lab" />
                     <span className="addr" dir="ltr">{ar ? 'قائد' : 'leader'} {shortMint(p.leader_address)} · {ago(p.entry_ts)}</span>
                   </span>
                   <span className="trend-cell">
@@ -199,7 +200,7 @@ export default function TradingWorkspace() {
           ) : (
             <>
               <Card
-                title={<span className="mono" dir="ltr">{shortMint(selected.token_mint)}</span>}
+                title={<TokenLabel mint={selected.token_mint} />}
                 right={<Badge tone={selected.position_state === 'OPEN' ? 'ok' : 'neutral'}>{selected.position_state}</Badge>}
               >
                 {(() => {

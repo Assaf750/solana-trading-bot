@@ -42,6 +42,7 @@ export const api = {
   intents: () => call('GET', '/api/intents'),
   latency: () => call('GET', '/api/latency'),
   leaderInsights: () => call('GET', '/api/leader-insights'),
+  tokenMeta: (mints) => call('GET', `/api/token-meta?mints=${encodeURIComponent((mints || []).join(','))}`),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),

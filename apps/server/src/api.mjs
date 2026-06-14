@@ -4,7 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders, tokenMeta }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   // Single-flight for the heavy on-chain scans: only one runs at a time so re-clicks can't
   // stack and compound RPC pressure on the shared client the live trading engine also uses.
@@ -197,6 +197,14 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/leader-insights') {
           // per-leader realized performance (this bot's book) + follow/drop/watch recommendation
           return { status: 200, body: paperEngine && typeof paperEngine.leaderInsights === 'function' ? paperEngine.leaderInsights() : { leaders: [], recommendation: { follow: [], drop: [], watch: [] } } };
+        }
+        if (path.startsWith('/api/token-meta')) {
+          // DISPLAY-ONLY mint -> {symbol,name,icon}. No vault/secret needed; degrades to {}.
+          if (typeof tokenMeta?.resolve !== 'function') return { status: 200, body: { tokens: {} } };
+          const qs = new URLSearchParams(path.split('?')[1] || '');
+          const mints = (qs.get('mints') || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
+          const tokens = await tokenMeta.resolve(mints);
+          return { status: 200, body: { tokens } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

@@ -17,6 +17,7 @@ import { createLiveExecutor } from './engine/live-executor.mjs';
 import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
+import { createTokenMetadata } from './engine/token-metadata.mjs';
 
 ensureDataDir();
 
@@ -106,11 +107,13 @@ const paperEngine = createPaperEngine({
   rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p),
 });
 
+const tokenMeta = createTokenMetadata();
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
   discoverFromLeaders: () => discoverFromLeadersImpl({

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, MiniChart, FlashValue } from '../components/index.jsx';
+import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -120,7 +121,7 @@ export default function AnalyticsReports() {
                 <tbody>
                   {byToken.map((e) => (
                     <tr key={e.mint}>
-                      <td className="mono" dir="ltr">{shortMint(e.mint)}</td>
+                      <td><TokenLabel mint={e.mint} /></td>
                       <td className="trend-col"><Sparkline seed={e.mint} tone={e.net >= 0 ? 'pos' : 'neg'} bias={e.net >= 0 ? 1 : -1} width={62} height={20} /></td>
                       <td className="num mono">{e.count}</td>
                       <td className="num mono">{usd(e.buys)}</td>
