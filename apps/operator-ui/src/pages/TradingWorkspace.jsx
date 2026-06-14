@@ -26,12 +26,17 @@ export default function TradingWorkspace() {
   const [events, setEvents] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [posFilter, setPosFilter] = useState('open'); // open | closed | all
+  const [latency, setLatency] = useState(null);
+  const [intents, setIntents] = useState([]);
 
   const live = status?.mode === 'real_live';
 
   async function load() {
     const ev = await api.engineEvents();
     if (ev.ok) setEvents((ev.data.events || []).slice().reverse());
+    const [lat, intn] = await Promise.all([api.latency(), api.intents()]);
+    if (lat.ok) setLatency(lat.data || null);
+    if (intn.ok) setIntents((intn.data.intents || []).slice().reverse());
     // REAL-LIVE -> show the real book; PAPER -> the simulated book
     if (live) {
       const lp = await api.livePositions();
@@ -248,6 +253,34 @@ export default function TradingWorkspace() {
             </>
           )}
         </div>
+      </div>
+
+      <div className="grid cols-2">
+        <Card title={ar ? 'زمن استجابة المسار' : 'Pipeline latency'} sub={ar ? 'p50 / p90 / p99 (مللي ثانية)' : 'p50 / p90 / p99 (ms)'}>
+          {!latency || !latency.count ? <p className="muted">{ar ? 'لا عيّنات بعد' : 'No samples yet'}</p> : (
+            <table className="data">
+              <thead><tr><th className="nosort">metric</th><th className="nosort num">p50</th><th className="nosort num">p90</th><th className="nosort num">p99</th><th className="nosort num">max</th></tr></thead>
+              <tbody>
+                {Object.entries(latency.metrics || {}).map(([m, s]) => (
+                  <tr key={m}><td className="mono fs-xs">{m}</td><td className="num mono">{s.p50}</td><td className="num mono">{s.p90}</td><td className="num mono">{s.p99}</td><td className="num mono">{s.max}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>{ar ? `العيّنات: ${latency?.count ?? 0} · ingestion_lag على مسار logsSubscribe فقط` : `samples: ${latency?.count ?? 0} · ingestion_lag only on the logsSubscribe path`}</p>
+        </Card>
+        <Card title={ar ? 'النوايا الحيّة' : 'Live intents'} sub={ar ? 'دورة حياة معاملات المال الحقيقي' : 'real-money tx lifecycle'}>
+          {intents.length === 0 ? <p className="muted">{ar ? 'لا نوايا حيّة' : 'No live intents'}</p> : (
+            <table className="data"><tbody>
+              {intents.slice(0, 12).map((it) => (
+                <tr key={it.intent_id}>
+                  <td><Badge tone={it.status === 'CONFIRMED' ? 'ok' : String(it.status).startsWith('FAILED') ? 'danger' : String(it.status).includes('UNCONFIRMED') ? 'warn' : 'info'}>{it.status}</Badge></td>
+                  <td className="mono faint fs-xs" dir="ltr">{String(it.signature || it.intent_id || '').slice(0, 12)}…</td>
+                </tr>
+              ))}
+            </tbody></table>
+          )}
+        </Card>
       </div>
 
       <DangerNote tone={live ? 'danger' : 'info'}>

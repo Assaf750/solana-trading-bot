@@ -9,6 +9,9 @@ const PROVIDER_SLOTS = [
   { name: 'helius_rpc_url', cfgKey: 'rpc_url_ref', ar: 'رابط RPC (Helius أو غيره)', en: 'RPC URL (Helius or other)', ph: 'https://mainnet.helius-rpc.com/?api-key=…' },
   { name: 'stream_endpoint', cfgKey: 'stream_ref', ar: 'رابط البث (LaserStream/WS)', en: 'Stream endpoint (LaserStream/WS)', ph: 'wss://…' },
   { name: 'jupiter_api_key', cfgKey: 'jupiter_key_ref', ar: 'مفتاح Jupiter API', en: 'Jupiter API key', ph: 'jup_…' },
+  { name: 'grpc_endpoint', cfgKey: 'grpc_url_ref', ar: 'نقطة gRPC (Yellowstone/Geyser)', en: 'gRPC endpoint (Yellowstone/Geyser)', ph: 'https://…grpc…:443' },
+  { name: 'grpc_token', cfgKey: 'grpc_token_ref', ar: 'رمز gRPC (اختياري)', en: 'gRPC x-token (optional)', ph: 'token…' },
+  { name: 'jito_block_engine', cfgKey: 'jito_url_ref', ar: 'رابط Jito block-engine', en: 'Jito block-engine URL', ph: 'https://…jito…' },
 ];
 
 export default function MyWalletsFunds() {

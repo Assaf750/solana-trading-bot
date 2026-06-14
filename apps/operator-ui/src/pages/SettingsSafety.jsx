@@ -25,6 +25,10 @@ export default function SettingsSafety() {
   const [form, setForm] = useState({});
   const [capital, setCapital] = useState('');
   const [evMode, setEvMode] = useState('strict');
+  const [ev, setEv] = useState({});
+  const [safety, setSafety] = useState({});
+  const [copyDef, setCopyDef] = useState({});
+  const [exec, setExec] = useState({});
   const [saveMsg, setSaveMsg] = useState(null);
   const [confirmLive, setConfirmLive] = useState('');
   const [liveResult, setLiveResult] = useState(null);
@@ -38,6 +42,28 @@ export default function SettingsSafety() {
       setForm(f);
       setCapital(r.data.execution?.capital_limit ?? '');
       setEvMode(r.data.ev?.ev_gate_mode || 'strict');
+      const d = r.data;
+      const g = (o, k) => (o?.[k] ?? '');
+      setEv({
+        minimum_net_expectancy: g(d.ev, 'minimum_net_expectancy'), minimum_profit_factor: g(d.ev, 'minimum_profit_factor'),
+        minimum_lower_confidence_bound: g(d.ev, 'minimum_lower_confidence_bound'), minimum_sample_size: g(d.ev, 'minimum_sample_size'),
+        minimum_exit_success_rate: g(d.ev, 'minimum_exit_success_rate'), max_expected_drawdown_pct: g(d.ev, 'max_expected_drawdown_pct'),
+      });
+      setSafety({
+        enabled: d.safety?.enabled !== false, require_mint_revoked: d.safety?.require_mint_revoked !== false,
+        require_freeze_revoked: d.safety?.require_freeze_revoked !== false, block_permanent_delegate: d.safety?.block_permanent_delegate !== false,
+      });
+      setCopyDef({
+        take_profit_pct: g(d.copy_defaults, 'take_profit_pct'), stop_loss_pct: g(d.copy_defaults, 'stop_loss_pct'),
+        max_entry_slippage_vs_leader: g(d.copy_defaults, 'max_entry_slippage_vs_leader'), min_mirror_sell_pct: g(d.copy_defaults, 'min_mirror_sell_pct'),
+        max_entry_drift_pct: g(d.copy_defaults, 'max_entry_drift_pct'), drift_action: d.copy_defaults?.drift_action || 'skip',
+        exit_on_leader_sell: Boolean(d.copy_defaults?.exit_on_leader_sell), auto_pause_after_losses: g(d.copy_defaults, 'auto_pause_after_losses'),
+      });
+      setExec({
+        signer_backend: d.execution?.signer_backend || 'node', submit_backend: d.execution?.submit_backend || 'rpc',
+        jito_tip_account: d.execution?.jito_tip_account ?? '', jito_tip_lamports: g(d.execution, 'jito_tip_lamports'),
+        sizing_mode: d.execution?.sizing_mode || 'fixed_usd', sizing_value: g(d.execution, 'sizing_value'),
+      });
     }
   }
   useEffect(() => { if (connected) loadConfig(); }, [connected]);
@@ -49,10 +75,31 @@ export default function SettingsSafety() {
       const v = form[field];
       hard_risk[field] = v === '' || v === null ? null : Number(v);
     }
+    const numOrNull = (v) => (v === '' || v === null ? null : Number(v));
     const patch = {
       hard_risk,
-      ev: { ev_gate_mode: evMode },
-      execution: { capital_limit: capital === '' ? null : Number(capital) },
+      ev: {
+        ev_gate_mode: evMode,
+        minimum_net_expectancy: numOrNull(ev.minimum_net_expectancy), minimum_profit_factor: numOrNull(ev.minimum_profit_factor),
+        minimum_lower_confidence_bound: numOrNull(ev.minimum_lower_confidence_bound), minimum_sample_size: numOrNull(ev.minimum_sample_size),
+        minimum_exit_success_rate: numOrNull(ev.minimum_exit_success_rate), max_expected_drawdown_pct: numOrNull(ev.max_expected_drawdown_pct),
+      },
+      safety: {
+        enabled: !!safety.enabled, require_mint_revoked: !!safety.require_mint_revoked,
+        require_freeze_revoked: !!safety.require_freeze_revoked, block_permanent_delegate: !!safety.block_permanent_delegate,
+      },
+      copy_defaults: {
+        take_profit_pct: numOrNull(copyDef.take_profit_pct), stop_loss_pct: numOrNull(copyDef.stop_loss_pct),
+        max_entry_slippage_vs_leader: numOrNull(copyDef.max_entry_slippage_vs_leader), min_mirror_sell_pct: numOrNull(copyDef.min_mirror_sell_pct),
+        max_entry_drift_pct: numOrNull(copyDef.max_entry_drift_pct), drift_action: copyDef.drift_action || 'skip',
+        exit_on_leader_sell: !!copyDef.exit_on_leader_sell, auto_pause_after_losses: numOrNull(copyDef.auto_pause_after_losses),
+      },
+      execution: {
+        capital_limit: capital === '' ? null : Number(capital),
+        signer_backend: exec.signer_backend || 'node', submit_backend: exec.submit_backend || 'rpc',
+        jito_tip_account: exec.jito_tip_account === '' ? null : exec.jito_tip_account, jito_tip_lamports: numOrNull(exec.jito_tip_lamports),
+        sizing_mode: exec.sizing_mode || 'fixed_usd', sizing_value: numOrNull(exec.sizing_value),
+      },
     };
     const r = await api.updateConfig(patch);
     if (r.ok) {
@@ -146,6 +193,24 @@ export default function SettingsSafety() {
           <p className="muted fs-sm">
             {ar ? 'warning_only لا يُرخي أبداً أي حد Hard-Risk ولا مفتاح الإيقاف.' : 'warning_only never relaxes a Hard-Risk limit or a kill switch.'}
           </p>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-2)', marginBlockStart: 'var(--s-2)' }}>
+            {[
+              ['minimum_sample_size', ar ? 'أدنى عدد صفقات' : 'Min sample size'],
+              ['minimum_profit_factor', ar ? 'أدنى عامل ربح' : 'Min profit factor'],
+              ['minimum_exit_success_rate', ar ? 'أدنى نسبة نجاح (0–1)' : 'Min exit success (0–1)'],
+              ['minimum_net_expectancy', ar ? 'أدنى توقّع صافٍ' : 'Min net expectancy'],
+              ['minimum_lower_confidence_bound', ar ? 'أدنى حدّ ثقة' : 'Min lower conf. bound'],
+              ['max_expected_drawdown_pct', ar ? 'أقصى تراجع متوقّع %' : 'Max expected drawdown %'],
+            ].map(([k, label]) => (
+              <label key={k} className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{label}</span>
+                <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" value={ev[k] ?? ''} onChange={(e) => setEv({ ...ev, [k]: e.target.value })} />
+              </label>
+            ))}
+          </div>
+          <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>
+            {ar ? 'تُطبَّق على أداء كل قائد بعد بلوغ «أدنى عدد صفقات». غير المنفَّذ بعد: lower-confidence و expected-drawdown.' : 'Applied per-leader once min sample is reached. Not yet enforced: lower-confidence & expected-drawdown.'}
+          </p>
         </Card>
 
         <Card title={ar ? 'رأس المال' : 'Capital'}>
@@ -163,6 +228,85 @@ export default function SettingsSafety() {
           </p>
         </Card>
       </div>
+
+      <div className="grid cols-2">
+        <Card title={ar ? 'فحص أمان العملة (anti-rug)' : 'Token safety (anti-rug)'} sub={ar ? 'يُرفض الدخول إن فشل الفحص (fail-closed).' : 'Entry is rejected if a check fails (fail-closed).'}>
+          {[
+            ['enabled', ar ? 'تفعيل الفحص' : 'Enabled'],
+            ['require_mint_revoked', ar ? 'صلاحية السكّ مُلغاة' : 'Mint authority revoked'],
+            ['require_freeze_revoked', ar ? 'صلاحية التجميد مُلغاة' : 'Freeze authority revoked'],
+            ['block_permanent_delegate', ar ? 'حظر PermanentDelegate (Token-2022)' : 'Block PermanentDelegate (Token-2022)'],
+          ].map(([k, label]) => (
+            <label key={k} className="row" style={{ gap: 8, marginBlockEnd: 6 }}>
+              <input type="checkbox" checked={!!safety[k]} onChange={(e) => setSafety({ ...safety, [k]: e.target.checked })} />
+              <span className="fs-sm">{label}</span>
+            </label>
+          ))}
+        </Card>
+
+        <Card title={ar ? 'افتراضات النسخ العامة' : 'Global copy defaults'} sub={ar ? 'تُستخدم ما لم تُستبدل لكل محفظة.' : 'Used unless overridden per-wallet.'}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-2)' }}>
+            {[
+              ['take_profit_pct', ar ? 'جني الربح %' : 'Take-profit %'],
+              ['stop_loss_pct', ar ? 'وقف الخسارة %' : 'Stop-loss %'],
+              ['max_entry_slippage_vs_leader', ar ? 'انزلاق الدخول %' : 'Entry slippage %'],
+              ['min_mirror_sell_pct', ar ? 'أدنى بيع مرآة %' : 'Min mirror sell %'],
+              ['max_entry_drift_pct', ar ? 'حدّ انحراف الدخول %' : 'Max entry drift %'],
+              ['auto_pause_after_losses', ar ? 'إيقاف بعد N خسائر' : 'Auto-pause after N losses'],
+            ].map(([k, label]) => (
+              <label key={k} className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{label}</span>
+                <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" placeholder={ar ? 'فارغ = افتراضي' : 'empty = default'} value={copyDef[k] ?? ''} onChange={(e) => setCopyDef({ ...copyDef, [k]: e.target.value })} />
+              </label>
+            ))}
+            <label className="stack" style={{ gap: 4 }}>
+              <span className="muted fs-xs">{ar ? 'إجراء الانحراف' : 'Drift action'}</span>
+              <select className="search" dir="ltr" value={copyDef.drift_action || 'skip'} onChange={(e) => setCopyDef({ ...copyDef, drift_action: e.target.value })}>
+                <option value="skip">skip</option><option value="shrink">shrink</option>
+              </select>
+            </label>
+            <label className="row" style={{ gap: 8, alignSelf: 'end' }}>
+              <input type="checkbox" checked={!!copyDef.exit_on_leader_sell} onChange={(e) => setCopyDef({ ...copyDef, exit_on_leader_sell: e.target.checked })} />
+              <span className="fs-xs">{ar ? 'خروج عند بيع القائد' : 'Exit on leader sell'}</span>
+            </label>
+          </div>
+        </Card>
+      </div>
+
+      <Card title={ar ? 'التنفيذ (متقدم)' : 'Execution (advanced)'} sub={ar ? 'موقّع/إرسال المسار الحيّ. Rust/Jito يتراجعان آمناً.' : 'Live-path signer/submit. Rust/Jito fail safe to in-process/RPC.'}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-2)' }}>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">signer_backend</span>
+            <select className="search" dir="ltr" value={exec.signer_backend || 'node'} onChange={(e) => setExec({ ...exec, signer_backend: e.target.value })}>
+              <option value="node">node (in-process)</option><option value="rust">rust (hot-executor)</option>
+            </select>
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">submit_backend</span>
+            <select className="search" dir="ltr" value={exec.submit_backend || 'rpc'} onChange={(e) => setExec({ ...exec, submit_backend: e.target.value })}>
+              <option value="rpc">rpc (sendTransaction)</option><option value="jito">jito (bundle + tip)</option>
+            </select>
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">{ar ? 'حساب إكرامية Jito (base58)' : 'Jito tip account (base58)'}</span>
+            <input className="search" dir="ltr" placeholder={ar ? 'مطلوب لـjito' : 'required for jito'} value={exec.jito_tip_account ?? ''} onChange={(e) => setExec({ ...exec, jito_tip_account: e.target.value })} />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">jito_tip_lamports</span>
+            <input className="search" type="number" inputMode="decimal" dir="ltr" value={exec.jito_tip_lamports ?? ''} onChange={(e) => setExec({ ...exec, jito_tip_lamports: e.target.value })} />
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">{ar ? 'نمط التحجيم العام' : 'Global sizing mode'}</span>
+            <select className="search" dir="ltr" value={exec.sizing_mode || 'fixed_usd'} onChange={(e) => setExec({ ...exec, sizing_mode: e.target.value })}>
+              <option value="fixed_usd">fixed_usd</option><option value="fixed_sol">fixed_sol</option><option value="pct_of_capital">pct_of_capital</option>
+            </select>
+          </label>
+          <label className="stack" style={{ gap: 4 }}>
+            <span className="muted fs-xs">{ar ? 'قيمة التحجيم العامة' : 'Global sizing value'}</span>
+            <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" value={exec.sizing_value ?? ''} onChange={(e) => setExec({ ...exec, sizing_value: e.target.value })} />
+          </label>
+        </div>
+      </Card>
 
       <div className="row">
         <button className="btn" onClick={save}>{ar ? '💾 حفظ الإعدادات' : '💾 Save settings'}</button>
