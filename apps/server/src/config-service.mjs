@@ -73,6 +73,11 @@ const DEFAULTS = {
     require_freeze_revoked: true,
     block_permanent_delegate: true,
   },
+  lists: {
+    // token allow/deny by mint. Blacklist: never buy. Whitelist: if non-empty, buy ONLY these.
+    token_blacklist: [],
+    token_whitelist: [],
+  },
   providers: {
     // refs only — raw keys live in the vault
     rpc_url_ref: null,        // e.g. vault:helius_rpc_url
@@ -143,6 +148,7 @@ export function validateConfigPatch(patch) {
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct', 'breakeven_after_tp1'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
+    lists: ['token_blacklist', 'token_whitelist'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref', 'telegram_bot_token_ref', 'webhook_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
     notifications: ['enabled', 'telegram_enabled', 'webhook_enabled', 'telegram_chat_id', 'on_entry', 'on_exit', 'on_kill', 'on_daily_loss'],
@@ -155,6 +161,11 @@ export function validateConfigPatch(patch) {
       if (section === 'notifications') {
         if (field === 'telegram_chat_id') { if (v !== null && typeof v !== 'string') errors.push({ field, error: 'must_be_string_or_null' }); }
         else if (typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
+      }
+      else if (section === 'lists') {
+        if (!Array.isArray(v)) errors.push({ field, error: 'must_be_array' });
+        else if (v.length > 2000) errors.push({ field, error: 'too_many_entries' });
+        else if (!v.every((m) => typeof m === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m))) errors.push({ field, error: 'must_be_base58_mints' });
       }
       else if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital', 'proportional_leader'].includes(v)) errors.push({ field, error: 'invalid_enum' });

@@ -8,6 +8,14 @@ export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocke
   // once the daily-loss limit trips this book, entries stay blocked for the rest of the day
   if (entriesBlocked) rejections.push('entries_blocked_daily_loss');
 
+  // token allow/deny lists (policy blocks — NOT risk-cap breaches, so they never feed the signer
+  // lockout). Blacklist: never buy. Whitelist: if non-empty, only its mints may be bought.
+  const lists = cfg.lists || {};
+  const blacklist = Array.isArray(lists.token_blacklist) ? lists.token_blacklist : [];
+  const whitelist = Array.isArray(lists.token_whitelist) ? lists.token_whitelist : [];
+  if (tokenMint && blacklist.includes(tokenMint)) rejections.push('token_blacklisted');
+  if (tokenMint && whitelist.length > 0 && !whitelist.includes(tokenMint)) rejections.push('token_not_whitelisted');
+
   const hr = cfg.hard_risk || {};
   const need = (f) => typeof hr[f] === 'number' && Number.isFinite(hr[f]);
 

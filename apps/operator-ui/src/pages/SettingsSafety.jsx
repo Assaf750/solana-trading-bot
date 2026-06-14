@@ -57,6 +57,7 @@ export default function SettingsSafety() {
   const [copyDef, setCopyDef] = useState({});
   const [exec, setExec] = useState({});
   const [notif, setNotif] = useState({});
+  const [lists, setLists] = useState({ token_blacklist: '', token_whitelist: '' });
   const [activePreset, setActivePreset] = useState(null);
   const [saveMsg, setSaveMsg] = useState(null);
   const [confirmLive, setConfirmLive] = useState('');
@@ -102,6 +103,10 @@ export default function SettingsSafety() {
         telegram_chat_id: nf.telegram_chat_id ?? '',
         on_entry: nf.on_entry !== false, on_exit: nf.on_exit !== false, on_kill: nf.on_kill !== false, on_daily_loss: nf.on_daily_loss !== false,
       });
+      setLists({
+        token_blacklist: (d.lists?.token_blacklist || []).join('\n'),
+        token_whitelist: (d.lists?.token_whitelist || []).join('\n'),
+      });
       setActivePreset(null);
     }
   }
@@ -123,6 +128,9 @@ export default function SettingsSafety() {
       hard_risk[field] = v === '' || v === null ? null : Number(v);
     }
     const numOrNull = (v) => (v === '' || v === null ? null : Number(v));
+    // parse a textarea of mints: split on whitespace/commas, keep valid base58, dedupe
+    const parseMints = (s) => [...new Set(String(s || '').split(/[\s,]+/).map((x) => x.trim())
+      .filter((x) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(x)))];
     const patch = {
       hard_risk,
       ev: {
@@ -154,6 +162,10 @@ export default function SettingsSafety() {
         enabled: !!notif.enabled, telegram_enabled: !!notif.telegram_enabled, webhook_enabled: !!notif.webhook_enabled,
         telegram_chat_id: notif.telegram_chat_id === '' ? null : String(notif.telegram_chat_id),
         on_entry: !!notif.on_entry, on_exit: !!notif.on_exit, on_kill: !!notif.on_kill, on_daily_loss: !!notif.on_daily_loss,
+      },
+      lists: {
+        token_blacklist: parseMints(lists.token_blacklist),
+        token_whitelist: parseMints(lists.token_whitelist),
       },
     };
     const r = await api.updateConfig(patch);
@@ -379,6 +391,25 @@ export default function SettingsSafety() {
               ))}
             </Card>
           </div>
+
+          <Card title={ar ? 'قوائم العملات (سماح/حظر)' : 'Token allow / deny lists'}
+            sub={ar ? 'عنوان mint واحد لكل سطر. الحظر: لا يُشترى أبداً. السماح: إن لم يكن فارغاً، تُشترى عملاته فقط.' : 'One mint address per line. Blacklist: never buy. Whitelist: if non-empty, only its mints are bought.'}>
+            <div className="grid cols-2" style={{ gap: 'var(--s-3)' }}>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? '⛔ قائمة الحظر (mints)' : '⛔ Blacklist (mints)'}</span>
+                <textarea className="search" dir="ltr" rows={5} style={{ resize: 'vertical', fontFamily: 'var(--mono)', fontSize: 'var(--fs-xs)' }}
+                  placeholder={'So111…\nDezXAZ…'} value={lists.token_blacklist} onChange={(e) => setLists({ ...lists, token_blacklist: e.target.value })} />
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? '✅ قائمة السماح (mints)' : '✅ Whitelist (mints)'}</span>
+                <textarea className="search" dir="ltr" rows={5} style={{ resize: 'vertical', fontFamily: 'var(--mono)', fontSize: 'var(--fs-xs)' }}
+                  placeholder={ar ? 'اتركه فارغاً = السماح للكل' : 'empty = allow all'} value={lists.token_whitelist} onChange={(e) => setLists({ ...lists, token_whitelist: e.target.value })} />
+              </label>
+            </div>
+            <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>
+              {ar ? 'تُحفظ العناوين الصالحة فقط (base58) وتُزال التكرارات تلقائياً.' : 'Only valid base58 addresses are saved; duplicates are removed automatically.'}
+            </p>
+          </Card>
         </>
       )}
 
