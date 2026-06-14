@@ -8,7 +8,7 @@ const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const PER_WALLET_FIELDS = [
   'copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader',
   'min_mirror_sell_pct', 'sizing_mode', 'sizing_value', 'rebuy_cooldown',
-  'max_time_in_position', 'label',
+  'max_time_in_position', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'label',
 ];
 
 export function createWalletRegistry() {
@@ -61,7 +61,9 @@ export function createWalletRegistry() {
       if (!PER_WALLET_FIELDS.includes(k)) { errors.push({ field: k, error: 'unknown_field' }); continue; }
       if (k === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
       if (k === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
-      if (['take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'sizing_value'].includes(k)
+      if (k === 'drift_action' && !['skip', 'shrink'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
+      if (k === 'exit_on_leader_sell' && typeof v !== 'boolean') errors.push({ field: k, error: 'must_be_boolean' });
+      if (['take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'sizing_value', 'max_entry_drift_pct'].includes(k)
         && v !== null && (typeof v !== 'number' || !Number.isFinite(v) || v <= 0)) {
         errors.push({ field: k, error: 'must_be_positive_finite' });
       }

@@ -286,3 +286,99 @@ test('paper pipeline: follow_entry_user_exit ignores leader sells (risk modifier
   });
   assert.equal(portfolio.openCount(), openBefore, 'no forced exit in follow_entry mode');
 });
+
+// ---------- feature 2: late-entry drift guard + leader-sell front-run ----------
+test('swap-detector: a buy exposes quoteSpentSol/Usdc for fill-price reconstruction', () => {
+  const s = detectLeaderSwap({ tx: txFixture({ postMeme: 1000, preSol: 10e9, postSol: 9e9 }), leaderAddress: LEADER });
+  assert.equal(s.kind, 'buy');
+  assert.equal(s.quoteSpentSol, 1);   // spent 1 SOL
+  assert.equal(s.quoteSpentUsdc, 0);
+});
+
+function fullConfig() {
+  const config = createConfigService();
+  config.update({
+    hard_risk: Object.fromEntries(HARD_RISK_FIELDS.map((f) => [f, f === 'max_open_positions' ? 5 : f === 'max_daily_loss_usdt' ? 100 : 25])),
+    execution: { capital_limit: 1000, sizing_value: 10 },
+  });
+  return config;
+}
+const safeMintRpc = () => ({ rpc: async (m) => (m === 'getAccountInfo'
+  ? { ok: true, result: { value: { data: { parsed: { type: 'mint', info: { mintAuthority: null, freezeAuthority: null } } } } } }
+  : { ok: true, result: null }) });
+function activeState() { const o = createOperatingState(); o.transition('WARMING_UP', 't'); o.transition('ACTIVE', 't'); return o; }
+function liveKill() { const k = createKillSwitch(); k.disengage({ level: 'global' }); return k; }
+
+// leader bought 1000 tokens for 1 SOL; at $150/SOL => leader fill price = $0.15/token
+const BUY = { kind: 'buy', mint: MEME, uiDelta: 1000, post: 1000, decimals: 6, quoteSpentSol: 1, quoteSpentUsdc: 0 };
+function driftEngine(file, ourPx) {
+  const portfolio = createPaperPortfolio({ file });
+  const jupiter = {
+    quote: async () => ({ ok: true, outAmount: 150 * 1e6 }),                                   // WSOL->USDC => $150/SOL
+    paperBuy: async ({ sizeUsd }) => ({ ok: true, outAmountBase: Math.round((sizeUsd / ourPx) * 1e6), priceImpactPct: 0.3 }),
+    usdValueOf: async ({ qtyUi }) => ({ ok: true, usd: qtyUi * ourPx, priceImpactPct: 0.5 }),
+  };
+  const engine = createPaperEngine({
+    config: fullConfig(), walletsRegistry: createWalletRegistry(), killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true, getSecretForUse: () => ({ ok: true, value: 'http://x' }) },
+    portfolio, rpc: safeMintRpc(), jupiter, audit: () => {}, broadcast: () => {},
+  });
+  return { engine, portfolio };
+}
+
+test('drift guard: SKIPS a late entry when price ran past the leader fill', async () => {
+  const { engine, portfolio } = driftEngine('pf-drift-skip.json', 0.30); // 100% above leader's $0.15
+  const wallet = { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: { max_entry_drift_pct: 20, drift_action: 'skip' } };
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderBuy({ leader: LEADER, wallet, swap: BUY });
+  assert.equal(portfolio.openCount(), before, 'no position opened on a late entry');
+  assert.ok(engine.events(10).some((e) => e.kind === 'entry_skipped_late_entry'));
+});
+
+test('drift guard: SHRINKS size on a late entry when action=shrink', async () => {
+  const { engine, portfolio } = driftEngine('pf-drift-shrink.json', 0.30); // 100% drift -> factor 20/100 -> $2
+  const wallet = { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: { max_entry_drift_pct: 20, drift_action: 'shrink' } };
+  await engine._internal.handleLeaderBuy({ leader: LEADER, wallet, swap: BUY });
+  const pos = portfolio.openPositions().at(-1);
+  assert.ok(pos, 'position opened (shrunk)');
+  assert.ok(Math.abs(pos.cost_usd - 2) < 0.05, `size shrunk to ~(threshold/drift)*sizeUsd = ~2, got ${pos.cost_usd}`);
+  assert.ok(engine.events(10).some((e) => e.kind === 'entry_drift_shrunk'));
+});
+
+test('drift guard: ALLOWS entry within the drift threshold', async () => {
+  const { engine, portfolio } = driftEngine('pf-drift-ok.json', 0.165); // 10% drift < 20% threshold
+  const wallet = { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: { max_entry_drift_pct: 20 } };
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderBuy({ leader: LEADER, wallet, swap: BUY });
+  assert.equal(portfolio.openCount(), before + 1, 'entry allowed within threshold');
+  assert.equal(portfolio.openPositions().at(-1).cost_usd, 10);
+});
+
+test('leader-sell front-run: exits in follow_entry mode when exit_on_leader_sell=true', async () => {
+  const portfolio = createPaperPortfolio({ file: 'pf-frontrun.json' });
+  portfolio.recordEntry({ leader_address: LEADER, wallet_id: 'w1', token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  const engine = createPaperEngine({
+    config: fullConfig(), walletsRegistry: createWalletRegistry(), killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true }, portfolio, rpc: safeMintRpc(),
+    jupiter: { usdValueOf: async () => ({ ok: true, usd: 12, priceImpactPct: 0.5 }) }, audit: () => {}, broadcast: () => {},
+  });
+  const wallet = { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: { exit_on_leader_sell: true } };
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderSell({ leader: LEADER, wallet, swap: { kind: 'sell', mint: MEME, fullExit: true, soldFraction: 1 } });
+  assert.equal(portfolio.openCount(), before - 1, 'position exited (front-run) on leader sell');
+  assert.ok(engine.events(10).some((e) => e.kind === 'leader_sell_frontrun_exit'));
+});
+
+test('leader-sell front-run: default OFF still ignores leader sells in follow_entry mode', async () => {
+  const portfolio = createPaperPortfolio({ file: 'pf-nofrontrun.json' });
+  portfolio.recordEntry({ leader_address: LEADER, wallet_id: 'w1', token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  const engine = createPaperEngine({
+    config: fullConfig(), walletsRegistry: createWalletRegistry(), killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true }, portfolio, rpc: safeMintRpc(),
+    jupiter: { usdValueOf: async () => ({ ok: true, usd: 12 }) }, audit: () => {}, broadcast: () => {},
+  });
+  const wallet = { wallet_id: 'w1', copy_mode: 'follow_entry_user_exit', config: {} };
+  const before = portfolio.openCount();
+  await engine._internal.handleLeaderSell({ leader: LEADER, wallet, swap: { kind: 'sell', mint: MEME, fullExit: true, soldFraction: 1 } });
+  assert.equal(portfolio.openCount(), before, 'no exit by default in follow_entry mode');
+});

@@ -63,16 +63,27 @@ export function detectLeaderSwap({ tx, leaderAddress, quoteMints = DEFAULT_QUOTE
     }
 
     let quoteFlow = solDelta; // + means leader received quote, - means leader paid quote
+    let solQuote = solDelta;  // SOL/wSOL side of the quote flow (for fill-price reconstruction)
+    let usdcQuote = 0;        // USDC side of the quote flow
     const targets = [];
     for (const [mint, d] of deltas) {
-      if (quoteMints.has(mint)) quoteFlow += d.delta;
-      else if (Math.abs(d.delta) > 0) targets.push({ mint, ...d });
+      if (quoteMints.has(mint)) {
+        quoteFlow += d.delta;
+        if (mint === WSOL_MINT) solQuote += d.delta;
+        else if (mint === USDC_MINT) usdcQuote += d.delta;
+      } else if (Math.abs(d.delta) > 0) targets.push({ mint, ...d });
     }
     if (targets.length !== 1) return { kind: null, reason: targets.length === 0 ? 'no_token_delta' : 'multi_token_ambiguous' };
 
     const t = targets[0];
     if (t.delta > 0 && quoteFlow < 0) {
-      return { kind: 'buy', mint: t.mint, uiDelta: t.delta, post: t.post, decimals: t.decimals, quoteSpent: -quoteFlow };
+      // quoteSpentSol/Usdc let the engine price the leader's fill (drift guard); a buy spends quote
+      return {
+        kind: 'buy', mint: t.mint, uiDelta: t.delta, post: t.post, decimals: t.decimals,
+        quoteSpent: -quoteFlow,
+        quoteSpentSol: solQuote < 0 ? -solQuote : 0,
+        quoteSpentUsdc: usdcQuote < 0 ? -usdcQuote : 0,
+      };
     }
     if (t.delta < 0 && quoteFlow > 0) {
       const fullExit = t.post <= Math.abs(t.delta) * 1e-6 || t.post === 0;

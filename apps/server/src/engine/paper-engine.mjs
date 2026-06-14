@@ -127,7 +127,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`sizing_${sized.error}`] });
       return;
     }
-    const sizeUsd = sized.usd;
+    let sizeUsd = sized.usd;
 
     const gate = checkEntryGates({
       cfg, portfolio: pf, sizeUsd, tokenMint: swap.mint,
@@ -154,12 +154,43 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
 
     // Exit feasibility BEFORE entry: a sell route must exist for the would-be position
     const slipBps = Math.round((cfg.copy_defaults?.max_entry_slippage_vs_leader || 5) * 100);
-    const buyQuote = await jupiter.paperBuy({ mint: swap.mint, sizeUsd, slippageBps: slipBps });
+    let buyQuote = await jupiter.paperBuy({ mint: swap.mint, sizeUsd, slippageBps: slipBps });
     if (!buyQuote.ok) {
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`route_invalid:${buyQuote.error}`] });
       return;
     }
-    const qtyUi = buyQuote.outAmountBase / 10 ** swap.decimals;
+    let qtyUi = buyQuote.outAmountBase / 10 ** swap.decimals;
+
+    // Late-entry drift guard: if the token already ran past the leader's fill price, skip or shrink
+    // (the #1 reason copies lose — you fill after the pump). OFF unless max_entry_drift_pct is set.
+    const driftThresh = wallet.config?.max_entry_drift_pct ?? cfg.copy_defaults?.max_entry_drift_pct;
+    if (Number.isFinite(driftThresh) && driftThresh > 0 && swap.uiDelta > 0 && qtyUi > 0) {
+      const solPx = await solUsd();
+      const leaderUsd = (swap.quoteSpentSol || 0) * (solPx || 0) + (swap.quoteSpentUsdc || 0);
+      const leaderPx = leaderUsd > 0 ? leaderUsd / swap.uiDelta : 0; // leader's USD price/token
+      const ourPx = sizeUsd / qtyUi;                                 // our would-be USD price/token
+      if (leaderPx > 0) {
+        const driftPct = ((ourPx - leaderPx) / leaderPx) * 100;
+        if (driftPct > driftThresh) {
+          const action = wallet.config?.drift_action ?? cfg.copy_defaults?.drift_action ?? 'skip';
+          if (action === 'shrink') {
+            const shrunk = sizeUsd * Math.max(0, Math.min(1, driftThresh / driftPct));
+            if (shrunk < 1) {
+              pushEvent({ kind: 'entry_skipped_late_entry', leader, mint: swap.mint, drift_pct: Number(driftPct.toFixed(1)), threshold: driftThresh });
+              return;
+            }
+            const rq = await jupiter.paperBuy({ mint: swap.mint, sizeUsd: shrunk, slippageBps: slipBps });
+            if (!rq.ok) { pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`route_invalid:${rq.error}`] }); return; }
+            sizeUsd = shrunk; buyQuote = rq; qtyUi = rq.outAmountBase / 10 ** swap.decimals;
+            pushEvent({ kind: 'entry_drift_shrunk', leader, mint: swap.mint, drift_pct: Number(driftPct.toFixed(1)), new_size_usd: Number(shrunk.toFixed(2)) });
+          } else {
+            pushEvent({ kind: 'entry_skipped_late_entry', leader, mint: swap.mint, drift_pct: Number(driftPct.toFixed(1)), threshold: driftThresh });
+            return;
+          }
+        }
+      }
+    }
+
     const sellCheck = await jupiter.usdValueOf({ mint: swap.mint, qtyUi, decimals: swap.decimals });
     if (!sellCheck.ok) {
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`exit_feasibility_fail:${sellCheck.error}`] });
@@ -280,6 +311,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       pushEvent({ kind: 'leader_partial_sell_below_min', leader, mint: swap.mint, fraction_pct: Number((fraction * 100).toFixed(1)), min_pct: minPct });
       return;
     }
+    // front-run the dump: optionally exit our position when the leader sells, even in
+    // follow_entry_user_exit mode (a leader/dev sell is a strong exit signal). OFF by default.
+    const exitOnLeaderSell = wallet.config?.exit_on_leader_sell ?? cfg.copy_defaults?.exit_on_leader_sell ?? false;
     // mirror sells act on BOTH books (paper history continues while live runs)
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     let found = false;
@@ -289,16 +323,23 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       const open = pf.openPositions().filter((p) => p.leader_address === leader && p.token_mint === swap.mint && !p.needs_reconciliation);
       if (!open.length) continue;
       found = true;
-      if (wallet.copy_mode !== 'full_mirror') {
+      if (wallet.copy_mode === 'full_mirror') {
+        for (const p of open) {
+          const reason = swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored';
+          // keyed by the leader's signature so each distinct leader sell mirrors independently;
+          // if the signature is unavailable, fall back to the stable per-logical-exit key (no date).
+          const intentParts = signature ? ['sell', p.position_id, reason, signature] : ['sell', p.position_id, reason];
+          await performExit({ pf, p, fraction, reason, intentParts });
+        }
+      } else if (exitOnLeaderSell) {
+        // follow_entry mode but operator opted to front-run: full-exit on any leader sell
+        for (const p of open) {
+          const intentParts = signature ? ['sell', p.position_id, 'leader_sell_frontrun', signature] : ['sell', p.position_id, 'leader_sell_frontrun'];
+          await performExit({ pf, p, fraction: 1, reason: 'leader_sell_frontrun', intentParts });
+        }
+        pushEvent({ kind: 'leader_sell_frontrun_exit', leader, mint: swap.mint, positions: open.length });
+      } else {
         pushEvent({ kind: 'leader_sell_risk_modifier_only', leader, mint: swap.mint, note: 'follow_entry_user_exit ignores leader sells by policy' });
-        return;
-      }
-      for (const p of open) {
-        const reason = swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored';
-        // keyed by the leader's signature so each distinct leader sell mirrors independently;
-        // if the signature is unavailable, fall back to the stable per-logical-exit key (no date).
-        const intentParts = signature ? ['sell', p.position_id, reason, signature] : ['sell', p.position_id, reason];
-        await performExit({ pf, p, fraction, reason, intentParts });
       }
     }
     if (!found) pushEvent({ kind: 'leader_sell_no_position', leader, mint: swap.mint });
