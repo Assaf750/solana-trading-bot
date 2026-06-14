@@ -11,7 +11,7 @@ const INTENTS_FILE = 'intent-ledger.json';
 const SOL_RESERVE_LAMPORTS = 0.05 * 1e9; // never spend the fee/rent reserve
 const SIGNER_SECRET_NAME = 'signer_keypair';
 
-export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast }) {
+export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null }) {
   let solPriceCache = { usd: null, at: 0 };
 
   // ---------- intent ledger (idempotency: a retry can NEVER duplicate an on-chain tx) ----------
@@ -188,12 +188,21 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       return { ok: false, error: 'audit_unavailable_before_sign' };
     }
 
-    let signed;
-    try {
-      signed = signSerializedTransaction({ txBase64: swap.txBase64, seed: kpRes.seed });
-    } catch (e) {
-      setIntent(intent_id, 'FAILED_PRE_SEND', { error: String(e?.message || 'sign_failed') });
-      return { ok: false, error: String(e?.message || 'sign_failed') };
+    // Sign. Backend is selectable per-call: 'rust' routes to the hot-executor (verified
+    // byte-identical to the in-process signer); ANY hot-executor failure falls back to in-process
+    // so a dead/misconfigured helper can NEVER block a live signature (fail-safe).
+    let signed = null;
+    if (config.get().execution?.signer_backend === 'rust' && hotSigner) {
+      const r = await hotSigner.sign({ txBase64: swap.txBase64, seed: kpRes.seed });
+      if (r?.ok) signed = r;
+    }
+    if (!signed) {
+      try {
+        signed = signSerializedTransaction({ txBase64: swap.txBase64, seed: kpRes.seed });
+      } catch (e) {
+        setIntent(intent_id, 'FAILED_PRE_SEND', { error: String(e?.message || 'sign_failed') });
+        return { ok: false, error: String(e?.message || 'sign_failed') };
+      }
     }
 
     // Persist the DETERMINISTIC tx signature (the fee-payer sig we just computed = the on-chain

@@ -16,8 +16,11 @@ compiled-core pattern, local AMM math). See sources at the end.
 - ✅ `services/ingestor` — WIRED behind `subscribeWallets` (gRPC transport when configured, WS fallback).
 - ✅ `services/hot-executor` (Rust) — signer (cross-verified vs Node) + submit/bundle/tip
   request construction; 8 cargo tests. TS does the network POST (idempotency stays in TS).
-- ⏭️ Next: live HTTP submit wiring in TS via the Rust-built bodies; analytics over ClickHouse;
-  optional self-hosted gRPC/ShredStream.
+- ✅ Rust signer WIRED into the live path behind `execution.signer_backend='rust'` +
+  `HOT_EXECUTOR_BIN` (hot-executor-client.mjs); fails safe to in-process. End-to-end verified:
+  Node client → real Rust binary == in-process (identical signature/tx/address).
+- ⏭️ Next: TS live submit via the Rust-built bodies; ClickHouse writer in the runtime then
+  analytics over ClickHouse; optional self-hosted gRPC/ShredStream.
 
 ## Target architecture (north star)
 

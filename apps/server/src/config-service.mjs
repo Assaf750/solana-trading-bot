@@ -46,6 +46,7 @@ const DEFAULTS = {
     sizing_mode: 'fixed_usd',
     sizing_value: 10,
     usdc_quote_enabled: false,
+    signer_backend: 'node',        // 'node' (in-process) | 'rust' (services/hot-executor)
   },
   copy_defaults: {
     copy_mode: 'follow_entry_user_exit',  // safe default; full_mirror is per-wallet explicit
@@ -105,7 +106,7 @@ export function validateConfigPatch(patch) {
   const sections = {
     hard_risk: HARD_RISK_FIELDS,
     ev: [...EV_FIELDS, 'ev_gate_mode'],
-    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled'],
+    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
@@ -117,6 +118,7 @@ export function validateConfigPatch(patch) {
       if (!sections[section].includes(field)) { errors.push({ field: `${section}.${field}`, error: 'unknown_field' }); continue; }
       if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'signer_backend' && !['node', 'rust'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'usdc_quote_enabled' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
       else if (field.endsWith('_ref')) {

@@ -14,6 +14,7 @@ import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
+import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 
@@ -64,9 +65,14 @@ let broadcastRef = () => {};
 // LIVE book + executor — real money path, fully gated (mode + signer session + kill
 // switch + readiness); separate file from the paper book, never mixed
 const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false });
+// Optional Rust hot-executor for signing — active only when the binary path is set AND the owner
+// flips execution.signer_backend='rust'. Any failure falls back to in-process signing (fail-safe).
+const hotSigner = process.env.HOT_EXECUTOR_BIN
+  ? createHotExecutorClient({ binPath: process.env.HOT_EXECUTOR_BIN })
+  : null;
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,
-  audit: appendAudit, broadcast: (p) => broadcastRef(p),
+  audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner,
 });
 
 const paperEngine = createPaperEngine({

@@ -227,6 +227,30 @@ test('live-executor: FAILED_ON_CHAIN is retryable (a reverted tx moved nothing)'
   assert.equal(m.exec._internal.claimIntent('int_foc', { side: 'sell' }).ok, true);
 });
 
+test('live-executor: routes signing through the Rust hot-executor when signer_backend=rust', async () => {
+  let signCalls = 0;
+  const m = buildExecutor({
+    config: { get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, signer_backend: 'rust' } }) },
+    deps: { hotSigner: { sign: async () => { signCalls += 1; return { ok: true, signedTxBase64: 'RUST', signatureB58: 'RSIG', signerAddress: 'x' }; } } },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintY', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'rust', 'MintY', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(signCalls, 1, 'signing routed to the Rust hot-executor');
+  assert.equal(m.calls.sent, 1);
+});
+
+test('live-executor: falls back to in-process signing when the hot-executor fails', async () => {
+  let signCalls = 0;
+  const m = buildExecutor({
+    config: { get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, signer_backend: 'rust' } }) },
+    deps: { hotSigner: { sign: async () => { signCalls += 1; return { ok: false, error: 'executor_exited' }; } } },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintY', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'fb', 'MintY', '1'] });
+  assert.equal(r.ok, true, 'still signs in-process when the hot-executor fails (fail-safe)');
+  assert.equal(signCalls, 1, 'hot-executor was attempted');
+  assert.equal(m.calls.sent, 1, 'transaction still broadcast');
+});
+
 test('live-executor: session notional is charged ONCE across a retried (reverted) intent', async () => {
   let charges = 0;
   const m = buildExecutor({ deps: {
