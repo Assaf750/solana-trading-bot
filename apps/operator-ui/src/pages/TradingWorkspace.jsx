@@ -122,6 +122,7 @@ export default function TradingWorkspace() {
       )}
 
       <ManualTradePanel ar={ar} live={live} onDone={load} />
+      <OrdersPanel ar={ar} live={live} />
 
       <div className="filterbar">
         <label>{ar ? 'المراكز' : 'Positions'}</label>
@@ -387,6 +388,93 @@ function ManualTradePanel({ ar, live, onDone }) {
       </div>
       {mintOk && <div style={{ marginBlockStart: 8 }}><TokenLabel mint={mint.trim()} /></div>}
       {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
+    </Card>
+  );
+}
+
+// Limit-buy / DCA orders: created here, fired later by the engine through the gated buy path.
+function OrdersPanel({ ar }) {
+  const [orders, setOrders] = useState([]);
+  const [type, setType] = useState('limit_buy');
+  const [mint, setMint] = useState('');
+  const [size, setSize] = useState('');
+  const [target, setTarget] = useState('');
+  const [intervalSec, setIntervalSec] = useState('3600');
+  const [total, setTotal] = useState('5');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  async function load() { const r = await api.orders(); if (r.ok) setOrders(r.data.orders || []); }
+  useEffect(() => { load(); const iv = setInterval(load, 12000); return () => clearInterval(iv); }, []);
+
+  const mintOk = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint.trim());
+  const valid = mintOk && Number(size) > 0 && (type === 'limit_buy' ? Number(target) > 0 : Number(intervalSec) >= 30 && Number(total) >= 1);
+
+  async function create() {
+    setBusy(true);
+    const spec = type === 'limit_buy'
+      ? { type, mint: mint.trim(), size_usd: Number(size), target_price_usd: Number(target) }
+      : { type, mint: mint.trim(), size_usd: Number(size), interval_sec: Number(intervalSec), total: Number(total) };
+    const r = await api.addOrder(spec);
+    setBusy(false);
+    if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? 'أُنشئ الأمر ✓' : 'Order created ✓' }); setMint(''); setSize(''); setTarget(''); load(); }
+    else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل الإنشاء' : 'create failed') });
+  }
+  async function cancel(id) { await api.cancelOrder(id); load(); }
+
+  const open = orders.filter((o) => o.status === 'open');
+  const recent = orders.filter((o) => o.status !== 'open').slice(-5).reverse();
+  const statusTone = (s) => (s === 'filled' || s === 'completed' ? 'ok' : s === 'failed' ? 'danger' : s === 'cancelled' ? 'neutral' : 'warn');
+
+  return (
+    <Card title={ar ? '⏱ أوامر حدّية / DCA' : '⏱ Limit / DCA orders'}
+      sub={ar ? 'أوامر تُنفَّذ لاحقاً تلقائياً عبر نفس حواجز الأمان: شراء عند سعر، أو تقسيم زمني.' : 'Deferred orders fired automatically through the same gates: buy at a price, or split over time.'}>
+      <div className="row" style={{ marginBlockEnd: 'var(--s-2)' }}>
+        <div className="seg" role="group">
+          <button className={type === 'limit_buy' ? 'on' : ''} onClick={() => setType('limit_buy')}>{ar ? 'حدّي (شراء)' : 'Limit buy'}</button>
+          <button className={type === 'dca' ? 'on' : ''} onClick={() => setType('dca')}>DCA</button>
+        </div>
+      </div>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <input className="search" dir="ltr" style={{ flex: '2 1 280px' }} placeholder={ar ? 'عنوان التوكن (mint)' : 'token mint'} value={mint} onChange={(e) => setMint(e.target.value)} />
+        <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" style={{ flex: '1 1 90px' }} placeholder={ar ? 'الحجم $' : 'size $'} value={size} onChange={(e) => setSize(e.target.value)} />
+        {type === 'limit_buy' ? (
+          <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" style={{ flex: '1 1 130px' }} placeholder={ar ? 'سعر مستهدف $/توكن' : 'target $/token'} value={target} onChange={(e) => setTarget(e.target.value)} />
+        ) : (
+          <>
+            <input className="search" type="number" inputMode="decimal" dir="ltr" style={{ flex: '1 1 110px' }} placeholder={ar ? 'الفاصل (ث)' : 'interval (s)'} value={intervalSec} onChange={(e) => setIntervalSec(e.target.value)} />
+            <input className="search" type="number" inputMode="decimal" dir="ltr" style={{ flex: '1 1 90px' }} placeholder={ar ? 'عدد المرات' : 'count'} value={total} onChange={(e) => setTotal(e.target.value)} />
+          </>
+        )}
+        <button className="btn primary" onClick={create} disabled={!valid || busy}>{ar ? 'إنشاء' : 'Create'}</button>
+      </div>
+      {mintOk && <div style={{ marginBlockStart: 8 }}><TokenLabel mint={mint.trim()} /></div>}
+      {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
+
+      {open.length > 0 && (
+        <div className="table-wrap" style={{ marginBlockStart: 'var(--s-3)' }}>
+          <table className="data">
+            <thead><tr><th className="nosort">type</th><th className="nosort">token</th><th className="nosort num">size</th><th className="nosort">{ar ? 'الشرط' : 'condition'}</th><th className="nosort"></th></tr></thead>
+            <tbody>
+              {open.map((o) => (
+                <tr key={o.order_id}>
+                  <td><Badge tone="info">{o.type === 'dca' ? 'DCA' : 'limit'}</Badge></td>
+                  <td><TokenLabel mint={o.mint} showIcon={false} /></td>
+                  <td className="num mono">${o.size_usd}</td>
+                  <td className="mono fs-xs">{o.type === 'limit_buy' ? `≤ $${o.target_price_usd}` : `${o.done}/${o.total} · ${o.interval_sec}s`}</td>
+                  <td><button className="btn danger" onClick={() => cancel(o.order_id)}>{ar ? 'إلغاء' : 'Cancel'}</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div className="row" style={{ gap: 'var(--s-2)', flexWrap: 'wrap', marginBlockStart: 'var(--s-2)' }}>
+          <span className="muted fs-xs">{ar ? 'حديثاً:' : 'recent:'}</span>
+          {recent.map((o) => <Badge key={o.order_id} tone={statusTone(o.status)}>{(o.type === 'dca' ? 'DCA' : 'limit')} · {o.status}</Badge>)}
+        </div>
+      )}
     </Card>
   );
 }

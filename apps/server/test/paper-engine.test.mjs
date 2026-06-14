@@ -558,3 +558,55 @@ test('manual sell: unknown position -> not_found', async () => {
   const { engine } = manualEngine('pf-manual-sell-nf.json');
   assert.equal((await engine.manualSell({ position_id: 'nope' })).error, 'position_not_found');
 });
+
+// ---------- limit / DCA orders (engine integration) ----------
+const { createOrdersStore } = await import('../src/engine/orders.mjs');
+function orderEngine(pfFile, ordFile, px = 0.001) {
+  const portfolio = createPaperPortfolio({ file: pfFile });
+  const store = createOrdersStore({ file: ordFile });
+  const jupiter = {
+    quote: async () => ({ ok: true, outAmount: 150e6 }),
+    paperBuy: async ({ sizeUsd }) => ({ ok: true, outAmountBase: Math.round((sizeUsd / px) * 1e6), priceImpactPct: 0.2 }),
+    usdValueOf: async ({ qtyUi }) => ({ ok: true, usd: qtyUi * px, priceImpactPct: 0.3 }),
+  };
+  const engine = createPaperEngine({
+    config: fullConfig(), walletsRegistry: createWalletRegistry(), killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true }, portfolio, rpc: manualRpc(), jupiter, audit: () => {}, broadcast: () => {}, ordersStore: store,
+  });
+  return { engine, portfolio, store };
+}
+
+test('limit order: fires a manual buy when price <= target, marks filled', async () => {
+  const { engine, portfolio, store } = orderEngine('pf-ord-fill.json', 'ord-fill.json', 0.001);
+  const a = await engine.addOrder({ type: 'limit_buy', mint: MEME, size_usd: 10, target_price_usd: 0.0012 }); // price 0.001 <= 0.0012
+  assert.equal(a.ok, true);
+  await engine._internal.pollOrders();
+  assert.equal(portfolio.openCount(), 1);
+  assert.equal(store.list().find((o) => o.order_id === a.order.order_id).status, 'filled');
+});
+
+test('limit order: stays open while price is above target (no buy)', async () => {
+  const { engine, portfolio, store } = orderEngine('pf-ord-hold.json', 'ord-hold.json', 0.001);
+  const a = await engine.addOrder({ type: 'limit_buy', mint: MEME, size_usd: 10, target_price_usd: 0.0008 }); // price 0.001 > 0.0008
+  await engine._internal.pollOrders();
+  assert.equal(portfolio.openCount(), 0);
+  assert.equal(store.list().find((o) => o.order_id === a.order.order_id).status, 'open');
+});
+
+test('add_order: validation (bad type / interval / target)', async () => {
+  const { engine } = orderEngine('pf-ord-val.json', 'ord-val.json');
+  assert.equal((await engine.addOrder({ type: 'nope', mint: MEME, size_usd: 10 })).error, 'invalid_order_type');
+  assert.equal((await engine.addOrder({ type: 'limit_buy', mint: MEME, size_usd: 10, target_price_usd: 0 })).error, 'invalid_target_price');
+  assert.equal((await engine.addOrder({ type: 'dca', mint: MEME, size_usd: 10, interval_sec: 5, total: 3 })).error, 'invalid_interval');
+});
+
+test('dca order: fires on the first poll (next_at = now) and advances done', async () => {
+  const { engine, portfolio, store } = orderEngine('pf-ord-dca.json', 'ord-dca.json', 0.001);
+  const a = await engine.addOrder({ type: 'dca', mint: MEME, size_usd: 5, interval_sec: 60, total: 2 });
+  await engine._internal.pollOrders();
+  assert.equal(portfolio.openCount(), 1);
+  const o = store.list().find((x) => x.order_id === a.order.order_id);
+  assert.equal(o.done, 1);
+  assert.equal(o.status, 'open'); // 1 of 2 done
+  assert.ok(o.next_at > Date.now()); // rescheduled ~60s out
+});

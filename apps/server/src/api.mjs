@@ -149,6 +149,20 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
       });
     },
+    add_order(p) {
+      // create a limit-buy or DCA order (fired later by the engine through the gated buy path)
+      if (!paperEngine || typeof paperEngine.addOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return paperEngine.addOrder(p || {}).then((res) => {
+        if (res.ok) audit({ audit_scope: 'position', audit_reason: 'order_created', command_type: 'add_order', detail: { type: p?.type, mint: p?.mint } });
+        return { status: res.ok ? 200 : 400, body: res };
+      });
+    },
+    cancel_order(p) {
+      if (!paperEngine || typeof paperEngine.cancelOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      const res = paperEngine.cancelOrder(p?.order_id);
+      if (res.ok) audit({ audit_scope: 'position', audit_reason: 'order_cancelled', command_type: 'cancel_order', detail: { order_id: p?.order_id } });
+      return { status: res.ok ? 200 : res.error === 'order_not_found' ? 404 : 400, body: res };
+    },
     activate_real_live(p) {
       // THE OWNER'S SWITCH. Every readiness blocker must be gone AND the owner must
       // type the exact confirmation. Anything missing => refusal with the honest list.
@@ -229,6 +243,9 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           if (which === 'positions') return { status: 200, body: { filename: `soltrade-positions-${tag}-${stamp}.csv`, csv: positionsCsv(state) } };
           if (which === 'trades') return { status: 200, body: { filename: `soltrade-trades-${tag}-${stamp}.csv`, csv: tradesCsv(state) } };
           return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
+        }
+        if (path === '/api/orders') {
+          return { status: 200, body: { orders: paperEngine && typeof paperEngine.listOrders === 'function' ? paperEngine.listOrders() : [] } };
         }
         if (path.startsWith('/api/token-meta')) {
           // DISPLAY-ONLY mint -> {symbol,name,icon}. No vault/secret needed; degrades to {}.

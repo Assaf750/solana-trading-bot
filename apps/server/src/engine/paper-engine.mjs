@@ -9,6 +9,7 @@ import { checkEvGate } from './ev-gate.mjs';
 import { trailingStopHit, firstTierHit, breakevenStopHit } from './exit-rules.mjs';
 import { proportionalLeaderUsd } from './sizing.mjs';
 import { checkMarketFilters } from './market-filters.mjs';
+import { shouldFire, nextOrderState } from './orders.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -21,7 +22,7 @@ const FEE_EST_USD = 0.05; // conservative per-trade network fee estimate (labele
 // an unreadable/estimate fill is NOT and must be flagged for reconciliation instead.
 const isRealOnChainProceeds = (fill) => fill?.fillSource === 'on_chain' && Number.isFinite(fill?.proceedsUsd);
 
-export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast, notifier = null }) {
+export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast, notifier = null, ordersStore = null }) {
   let sub = null;
   let supervisor = null;
   let markTimer = null;
@@ -505,6 +506,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   // ---------- TP/SL + mark loop (both books; exits routed per book) ----------
   async function markPass() {
     await reconcilePass().catch(() => { /* contained — never block marks/exits */ });
+    await pollOrders().catch(() => { /* contained — order polling never blocks marks/exits */ });
     const cfg = config.get();
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     for (const pf of books) {
@@ -764,6 +766,55 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { ok: false, error: 'position_not_found' };
   }
 
+  // ---------- limit / DCA orders ----------
+  async function priceOfMint(mint, decimals) {
+    // buy-side USD price per token from a $1 quote (what a limit buy would actually pay)
+    const q = await jupiter.paperBuy({ mint, sizeUsd: 1, slippageBps: 100 });
+    if (!q.ok) return null;
+    const tokens = q.outAmountBase / 10 ** decimals;
+    return tokens > 0 ? 1 / tokens : null;
+  }
+
+  async function addOrder(spec) {
+    if (!ordersStore) return { ok: false, error: 'orders_unsupported' };
+    const { type, mint } = spec || {};
+    if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return { ok: false, error: 'invalid_mint' };
+    const size = Number(spec?.size_usd);
+    if (!Number.isFinite(size) || size <= 0) return { ok: false, error: 'invalid_size' };
+    const sup = await rpc.rpc('getTokenSupply', [mint, { commitment: 'confirmed' }]);
+    const decimals = sup.ok ? Number(sup.result?.value?.decimals) : NaN;
+    if (!Number.isFinite(decimals)) return { ok: false, error: 'mint_unreadable' };
+    if (type === 'limit_buy') {
+      const target = Number(spec?.target_price_usd);
+      if (!Number.isFinite(target) || target <= 0) return { ok: false, error: 'invalid_target_price' };
+      return { ok: true, order: ordersStore.add({ type, mint, decimals, size_usd: size, target_price_usd: target }) };
+    }
+    if (type === 'dca') {
+      const interval = Number(spec?.interval_sec);
+      const total = Number(spec?.total);
+      if (!Number.isFinite(interval) || interval < 30) return { ok: false, error: 'invalid_interval' }; // floor 30s
+      if (!Number.isFinite(total) || total < 1 || total > 1000) return { ok: false, error: 'invalid_total' };
+      return { ok: true, order: ordersStore.add({ type, mint, decimals, size_usd: size, interval_sec: interval, total, done: 0, next_at: Date.now() }) };
+    }
+    return { ok: false, error: 'invalid_order_type' };
+  }
+
+  function listOrders() { return ordersStore ? ordersStore.list() : []; }
+  function cancelOrder(order_id) { return ordersStore ? ordersStore.cancel(order_id) : { ok: false, error: 'orders_unsupported' }; }
+
+  // Poll open orders and fire matured ones through the SAME gated manualBuy path.
+  async function pollOrders() {
+    if (!ordersStore) return;
+    for (const o of ordersStore.openOrders()) {
+      const price = o.type === 'limit_buy' ? await priceOfMint(o.mint, o.decimals).catch(() => null) : null;
+      if (!shouldFire({ order: o, price, now: Date.now() })) continue;
+      const r = await manualBuy({ mint: o.mint, sizeUsd: o.size_usd });
+      const updated = nextOrderState({ order: o, ok: !!r?.ok, now: Date.now(), error: r?.error || (r?.rejections ? r.rejections.join(',') : null) });
+      ordersStore.replace(o.order_id, updated);
+      if (r?.ok) pushEvent({ kind: o.type === 'dca' ? 'dca_buy_filled' : 'limit_buy_filled', order_id: o.order_id, mint: o.mint, position_id: r.position_id });
+    }
+  }
+
   /** Phase 0 latency report (pipeline-lag percentiles). Decides whether the gRPC/Rust
    *  investment is justified — see docs/RESTRUCTURE_PLAN.md. */
   function latencyReport() { return latency.summary(); }
@@ -803,5 +854,5 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { mode: cfg.mode, leaders, recommendation };
   }
 
-  return { start, stop, status, events, closePosition, resolvePosition, manualBuy, manualSell, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, leaderInsights, desiredState } };
+  return { start, stop, status, events, closePosition, resolvePosition, manualBuy, manualSell, addOrder, listOrders, cancelOrder, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, pollOrders, resolvePosition, leaderInsights, desiredState } };
 }

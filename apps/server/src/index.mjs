@@ -10,6 +10,7 @@ import { startServer } from './server.mjs';
 import { appendAudit } from './audit-log.mjs';
 import { ensureDataDir } from './util.mjs';
 import { createPaperPortfolio } from './engine/paper-portfolio.mjs';
+import { createOrdersStore } from './engine/orders.mjs';
 import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
@@ -119,10 +120,12 @@ const liveExecutor = createLiveExecutor({
   audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle, getJitoTipFloor,
 });
 
+const ordersStore = createOrdersStore();
+
 const paperEngine = createPaperEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
   livePortfolio, liveExecutor, signer,
-  rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p), notifier,
+  rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p), notifier, ordersStore,
 });
 
 // DAS enriches token display metadata for mints Jupiter doesn't list (Helius-only, degrades to
