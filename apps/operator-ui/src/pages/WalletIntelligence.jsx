@@ -289,6 +289,7 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
       rebuy_cooldown: v('rebuy_cooldown'), max_time_in_position: v('max_time_in_position'),
       max_entry_drift_pct: v('max_entry_drift_pct'), drift_action: c.drift_action ?? '',
       auto_pause_after_losses: v('auto_pause_after_losses'), exit_on_leader_sell: Boolean(c.exit_on_leader_sell),
+      trailing_stop_pct: v('trailing_stop_pct'),
     };
   };
   const [d, setD] = useState(() => draftFrom(wallet));
@@ -304,7 +305,7 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
   );
 
   async function save() {
-    const numeric = ['take_profit_pct', 'stop_loss_pct', 'sizing_value', 'max_entry_slippage_vs_leader', 'rebuy_cooldown', 'max_time_in_position', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'auto_pause_after_losses'];
+    const numeric = ['take_profit_pct', 'stop_loss_pct', 'sizing_value', 'max_entry_slippage_vs_leader', 'rebuy_cooldown', 'max_time_in_position', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'auto_pause_after_losses', 'trailing_stop_pct'];
     const patch = {};
     for (const k of numeric) patch[k] = d[k] === '' ? null : Number(d[k]); // null clears the override -> falls back to global default
     if (d.sizing_mode) patch.sizing_mode = d.sizing_mode;
@@ -321,6 +322,7 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-2)' }}>
         <NumCell k="take_profit_pct" label={ar ? 'جني الربح %' : 'Take-profit %'} />
         <NumCell k="stop_loss_pct" label={ar ? 'وقف الخسارة %' : 'Stop-loss %'} />
+        <NumCell k="trailing_stop_pct" label={ar ? 'وقف متحرك %' : 'Trailing stop %'} />
         <label className="stack" style={{ gap: 4 }}>
           <span className="muted fs-xs">{ar ? 'نمط التحجيم' : 'Sizing mode'}</span>
           <select className="search" value={d.sizing_mode} onChange={(e) => set('sizing_mode', e.target.value)} dir="ltr">

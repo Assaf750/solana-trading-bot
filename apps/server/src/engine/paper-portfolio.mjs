@@ -116,6 +116,11 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     // not a synthetic seeded one. Stale ('unavailable') quotes are skipped to avoid flat noise.
     if (mark_status === 'valid' && Number.isFinite(mark_usd)) {
       p.mark_history = [...(p.mark_history || []), Math.round(mark_usd * 1e6) / 1e6].slice(-MARK_HISTORY_MAX);
+      // track the highest P&L % seen (size-independent) — drives the trailing stop, survives restarts.
+      if (p.cost_usd > 0) {
+        const pct = (mark_usd - p.cost_usd) / p.cost_usd * 100;
+        p.peak_pnl_pct = Math.max(p.peak_pnl_pct ?? pct, pct);
+      }
     }
     save(s);
   }

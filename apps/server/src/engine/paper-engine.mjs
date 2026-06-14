@@ -6,6 +6,7 @@ import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
 import { checkTokenSafety } from './token-safety.mjs';
 import { checkEvGate } from './ev-gate.mjs';
+import { trailingStopHit } from './exit-rules.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -480,6 +481,13 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         const maxAge = w?.config?.max_time_in_position;
         if (Number.isFinite(maxAge) && maxAge > 0 && (Date.now() - new Date(p.entry_ts).getTime()) / 1000 > maxAge) {
           await performExit({ pf, p, fraction: 1, reason: 'max_time_in_position' });
+          continue;
+        }
+        // trailing stop (per-wallet override -> global default): protects gains once armed.
+        const trailingPct = Number(w?.config?.trailing_stop_pct ?? cfg.copy_defaults?.trailing_stop_pct);
+        const peakPct = Math.max(p.peak_pnl_pct ?? pnlPct, pnlPct);
+        if (trailingStopHit({ pnlPct, peakPct, trailingPct })) {
+          await performExit({ pf, p, fraction: 1, reason: 'trailing_stop_hit' });
           continue;
         }
         if (pnlPct >= p.tp_pct) {
