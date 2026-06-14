@@ -143,7 +143,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
    * side 'sell': sell qtyUi of mint back to SOL. Returns actual fill data.
    */
   async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts, recovery = null, positionId = null }, releaseLock = () => {}) {
-    const notionalUsd = side === 'buy' ? sizeUsd : sizeUsd; // sell passes estimated proceeds in sizeUsd
+    const notionalUsd = sizeUsd; // buy: sizeUsd; sell: estimated proceeds passed in sizeUsd
     const g = gates({ action: side === 'buy' ? 'entry' : 'exit', notionalUsd });
     if (!g.allowed) return { ok: false, error: 'gates_refused', refusals: g.refusals };
 
@@ -196,7 +196,12 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       return { ok: false, error: String(e?.message || 'sign_failed') };
     }
 
-    setIntent(intent_id, 'SENT_PENDING');
+    // Persist the DETERMINISTIC tx signature (the fee-payer sig we just computed = the on-chain
+    // tx id) and the fill-time SOL price BEFORE broadcasting. So even an ambiguous send failure
+    // (timeout / 5xx / retries-exhausted) leaves a SENT_UNCONFIRMED intent that reconcile() can
+    // still resolve against the chain by signature — instead of a dead intent that is neither
+    // retryable nor reconcilable (which would strand the position forever).
+    setIntent(intent_id, 'SENT_PENDING', { signature: signed.signatureB58, sol_price_usd: price });
     const sent = await rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
     if (!sent.ok) {
       // Distinguish PROVABLY-unsent from ambiguous failures. A JSON-RPC error response
@@ -230,11 +235,15 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     }
 
     // actual fill amounts from the confirmed tx (bounded attempts; estimate fallback)
-    const { actualOutUi, fillSource, solDelta } = await extractFill({
+    const { actualOutUi, fillSource } = await extractFill({
       txSig, side, mint, owner, fallbackOutUi: q.outAmount / 10 ** (side === 'buy' ? decimals : 9),
     });
-    // real buy cost = SOL actually spent (incl. fees) * price; undefined falls back to intended sizeUsd upstream
-    const costUsd = side === 'buy' && solDelta != null && solDelta < 0 && price ? -solDelta * price : undefined;
+    // real buy cost = the EXACT swap input. ExactIn => q.inAmount IS the SOL actually swapped, so
+    // pricing it gives the true cost basis WITHOUT folding in the network fee + recoverable ATA
+    // rent (which the raw native-balance delta would, asymmetric to the sell leg). undefined falls
+    // back to intended sizeUsd upstream.
+    const costUsd = side === 'buy' && Number.isFinite(q.inAmount) && q.inAmount > 0 && price
+      ? (q.inAmount / 1e9) * price : undefined;
 
     setIntent(intent_id, 'CONFIRMED', { signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource });
     safeAudit({ audit_scope: 'intent', audit_reason: 'live_tx_confirmed', detail: { intent_id, signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource } });
@@ -275,14 +284,25 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     const st = await rpc.rpc('getSignatureStatuses', [[it.signature], { searchTransactionHistory: true }]);
     if (!st.ok) return { resolved: 'pending' }; // RPC down — leave as-is, try again next pass
     const v = st.result?.value?.[0];
-    if (!v) { setIntent(intent_id, 'FAILED_SEND', { error: 'reconcile_not_found' }); return { resolved: 'never_landed' }; }
+    if (!v) {
+      // A just-broadcast tx can be briefly ABSENT from getSignatureStatuses while it propagates.
+      // Require N consecutive "not found" passes (N * markPass interval > blockhash expiry ~90s)
+      // before declaring it never-landed & retryable — otherwise we could rebroadcast a tx that
+      // is still in flight and double-execute.
+      const misses = (it.reconcile_misses || 0) + 1;
+      if (misses < 3) { setIntent(intent_id, it.status, { reconcile_misses: misses }); return { resolved: 'pending' }; }
+      setIntent(intent_id, 'FAILED_SEND', { error: 'reconcile_not_found', reconcile_misses: misses });
+      return { resolved: 'never_landed' };
+    }
     if (v.err) { setIntent(intent_id, 'FAILED_ON_CHAIN', { error: 'reconcile_tx_failed' }); return { resolved: 'failed_on_chain' }; }
     if (v.confirmationStatus !== 'confirmed' && v.confirmationStatus !== 'finalized') return { resolved: 'pending' };
     const d = it.detail || {};
     const kp = ownerKeypair();
     const owner = kp.ok ? kp.kp.address : null;
-    const price = await solPriceUsd();
-    const { actualOutUi, fillSource, solDelta } = await extractFill({ txSig: it.signature, side: d.side, mint: d.mint, owner, fallbackOutUi: 0 });
+    // price the historical fill at the SOL price captured WHEN THE INTENT WAS SENT (stored on the
+    // intent), not the current price — a delayed reconcile must not drift proceeds with SOL's move.
+    const price = it.sol_price_usd ?? (await solPriceUsd());
+    const { actualOutUi, fillSource } = await extractFill({ txSig: it.signature, side: d.side, mint: d.mint, owner, fallbackOutUi: 0 });
     setIntent(intent_id, 'CONFIRMED', { signature: it.signature, actual_out_ui: actualOutUi, fill_source: fillSource, reconciled: true });
     return {
       resolved: 'confirmed',
@@ -291,7 +311,8 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
         outUi: actualOutUi,
         fillSource, // 'on_chain' only when the real fill was read; 'quote_estimate' otherwise
         proceedsUsd: d.side === 'sell' && fillSource === 'on_chain' && price ? actualOutUi * price : undefined,
-        costUsd: d.side === 'buy' && solDelta != null && solDelta < 0 && price ? -solDelta * price : undefined,
+        // buy cost basis is the exact ExactIn input recorded at send time (recovery.cost_usd);
+        // do NOT re-derive it from the native delta here (rent/fee asymmetry + price drift).
       },
     };
   }

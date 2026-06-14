@@ -35,12 +35,18 @@ export function createJupiterClient({ getApiKey }) {
           if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500 * attempt)); continue; }
           if (!res.ok) return { ok: false, error: `quote_http_${res.status}` };
           const j = await res.json();
-          if (!j?.outAmount) return { ok: false, error: 'quote_no_route' };
+          // a route is valid ONLY with a finite, strictly-positive outAmount. The string '0' is
+          // truthy and a malformed field is NaN, so a plain falsy check would let a no-liquidity
+          // or garbage quote through -> $0 marks / NaN poisoning sizing & P&L downstream.
+          const outAmount = Number(j?.outAmount);
+          if (!Number.isFinite(outAmount) || outAmount <= 0) return { ok: false, error: 'quote_no_route' };
+          const inAmount = Number(j?.inAmount);
+          const priceImpactPct = Number(j?.priceImpactPct ?? 0) * 100;
           return {
             ok: true,
-            inAmount: Number(j.inAmount),
-            outAmount: Number(j.outAmount),
-            priceImpactPct: Number(j.priceImpactPct ?? 0) * 100,
+            inAmount: Number.isFinite(inAmount) ? inAmount : 0,
+            outAmount,
+            priceImpactPct: Number.isFinite(priceImpactPct) ? priceImpactPct : 0,
             routePlan: Array.isArray(j.routePlan) ? j.routePlan.length : 0,
             raw: j, // full quoteResponse — required by /swap when executing live
           };

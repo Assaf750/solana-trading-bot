@@ -25,23 +25,33 @@ export function detectLeaderSwap({ tx, leaderAddress, quoteMints = DEFAULT_QUOTE
     const meta = tx?.meta;
     if (!meta || meta.err) return { kind: null, reason: meta?.err ? 'tx_failed' : 'no_meta' };
 
-    const pre = new Map();
+    // SUM balances by mint across ALL the leader's token accounts for that mint: a wallet can
+    // hold one mint in several token accounts, so keying by mint alone (last-write-wins) would
+    // mis-compute the delta and the sell fraction / full-exit flag that drive the mirrored sell.
+    const preByMint = new Map();  // mint -> summed pre uiAmount
+    const postByMint = new Map(); // mint -> { amount: summed post uiAmount, decimals }
     for (const b of meta.preTokenBalances || []) {
-      if (b.owner === leaderAddress) pre.set(b.mint, b);
+      if (b.owner !== leaderAddress) continue;
+      preByMint.set(b.mint, (preByMint.get(b.mint) || 0) + Number(b.uiTokenAmount?.uiAmount ?? 0));
     }
-    const deltas = new Map(); // mint -> { delta (ui), post (ui), decimals }
     for (const b of meta.postTokenBalances || []) {
       if (b.owner !== leaderAddress) continue;
-      const preAmt = Number(pre.get(b.mint)?.uiTokenAmount?.uiAmount ?? 0);
-      const postAmt = Number(b.uiTokenAmount?.uiAmount ?? 0);
-      deltas.set(b.mint, { delta: postAmt - preAmt, post: postAmt, decimals: tokenDecimals(b.uiTokenAmount) });
+      const ex = postByMint.get(b.mint);
+      const amt = Number(b.uiTokenAmount?.uiAmount ?? 0);
+      if (ex) ex.amount += amt;
+      else postByMint.set(b.mint, { amount: amt, decimals: tokenDecimals(b.uiTokenAmount) });
     }
-    // mints that vanished entirely from post (account closed on full exit)
-    for (const [mint, b] of pre) {
-      if (!deltas.has(mint)) {
-        const preAmt = Number(b.uiTokenAmount?.uiAmount ?? 0);
-        if (preAmt > 0) deltas.set(mint, { delta: -preAmt, post: 0, decimals: tokenDecimals(b.uiTokenAmount) });
-      }
+    // a mint present in pre but absent from post = account(s) closed on a full exit -> post 0,
+    // and we still need its decimals (carried from the pre row) for base-unit sizing.
+    for (const b of meta.preTokenBalances || []) {
+      if (b.owner !== leaderAddress) continue;
+      if (!postByMint.has(b.mint)) postByMint.set(b.mint, { amount: 0, decimals: tokenDecimals(b.uiTokenAmount) });
+    }
+    const deltas = new Map(); // mint -> { delta (ui), post (ui), decimals }
+    for (const mint of new Set([...preByMint.keys(), ...postByMint.keys()])) {
+      const preAmt = preByMint.get(mint) || 0;
+      const postEntry = postByMint.get(mint) || { amount: 0, decimals: 0 };
+      deltas.set(mint, { delta: postEntry.amount - preAmt, post: postEntry.amount, decimals: postEntry.decimals });
     }
 
     // native SOL delta for the leader (index in accountKeys)

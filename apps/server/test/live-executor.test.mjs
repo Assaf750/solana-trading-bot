@@ -185,17 +185,39 @@ test('live-executor: reconcile resolves a SENT_UNCONFIRMED intent (confirmed) an
   assert.equal(r.detail.side, 'buy');
 });
 
-test('live-executor: reconcile marks a never-landed intent FAILED_SEND (retryable)', async () => {
+test('live-executor: reconcile marks a never-landed intent FAILED_SEND (retryable) only after N misses', async () => {
   const m = buildExecutor({ deps: { rpc: {
     rpc: async (method) => (method === 'getSignatureStatuses' ? { ok: true, result: { value: [null] } } : { ok: true, result: null }),
     getTransaction: async () => ({ ok: true, result: null }),
   } } });
   m.exec._internal.claimIntent('int_rec_gone', { side: 'sell', mint: 'MintR', positionId: 'pos9' });
   m.exec._internal.setIntent('int_rec_gone', 'SENT_UNCONFIRMED', { signature: 'SIGGONE' });
+  // early "not found" passes stay PENDING (the tx may still be propagating) — NOT yet retryable,
+  // so a premature rebroadcast can't double-execute an in-flight tx.
+  assert.equal((await m.exec.reconcile({ intent_id: 'int_rec_gone' })).resolved, 'pending');
+  assert.equal(m.exec._internal.claimIntent('int_rec_gone', { side: 'sell' }).ok, false, 'still blocked while pending');
+  assert.equal((await m.exec.reconcile({ intent_id: 'int_rec_gone' })).resolved, 'pending');
   const r = await m.exec.reconcile({ intent_id: 'int_rec_gone' });
   assert.equal(r.resolved, 'never_landed');
   // now retryable: a fresh claim on the same id succeeds
   assert.equal(m.exec._internal.claimIntent('int_rec_gone', { side: 'sell' }).ok, true);
+});
+
+test('live-executor: an ambiguous send failure keeps the deterministic signature so it stays reconcilable', async () => {
+  const m = buildExecutor({ deps: { rpc: {
+    rpc: async (method) => {
+      if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+      // 5xx / timeout class = MAYBE sent (ambiguous) -> SENT_UNCONFIRMED, must not be lost
+      if (method === 'sendTransaction') return { ok: false, error: 'rpc_http_503' };
+      return { ok: true, result: null };
+    },
+    getTransaction: async () => ({ ok: true, result: null }),
+  } } });
+  const r = await m.exec.executeSwap({ side: 'sell', mint: 'MintY', qtyUi: 5, decimals: 6, intentParts: ['sell', 'posAmb', 'stop_loss_hit'] });
+  assert.equal(r.ok, false);
+  const pend = m.exec.pendingIntents();
+  assert.equal(pend.length, 1, 'the unconfirmed intent is reconcilable (it has a stored signature)');
+  assert.ok(pend[0].signature, 'the deterministic fee-payer signature was persisted BEFORE the ambiguous send');
 });
 
 test('live-executor: FAILED_ON_CHAIN is retryable (a reverted tx moved nothing)', () => {

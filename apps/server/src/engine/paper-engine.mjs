@@ -10,6 +10,11 @@ const EVENTS_FILE = 'engine-events.json';
 const MAX_EVENTS = 200;
 const FEE_EST_USD = 0.05; // conservative per-trade network fee estimate (labeled estimate)
 
+// Money-safety invariant in ONE place: only book realized P&L from a REAL on-chain fill (the
+// native-SOL proceeds were actually read). A finite proceeds of 0 IS real (a rug sale yields ~0);
+// an unreadable/estimate fill is NOT and must be flagged for reconciliation instead.
+const isRealOnChainProceeds = (fill) => fill?.fillSource === 'on_chain' && Number.isFinite(fill?.proceedsUsd);
+
 export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast }) {
   let sub = null;
   let supervisor = null;
@@ -173,9 +178,17 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         pushEvent({ kind: 'live_entry_refused', leader, mint: swap.mint, error: exec.error, refusals: exec.refusals || [] });
         return;
       }
+      // confirmed tx but no tokens credited (unreadable/zero on-chain fill) — do NOT book a
+      // 0-qty phantom position (it would read as instant -100% and churn a sell of nothing).
+      // The intent stays CONFIRMED in the ledger for the operator to inspect.
+      if (!Number.isFinite(exec.outUi) || exec.outUi <= 0) {
+        pushEvent({ kind: 'live_entry_zero_fill', leader, mint: swap.mint, signature: exec.signature, intent_id: exec.intent_id });
+        audit({ audit_scope: 'position', audit_reason: 'live_entry_zero_fill', command_type: null, detail: { mint: swap.mint, signature: exec.signature, intent_id: exec.intent_id } });
+        return;
+      }
       const pos = pf.recordEntry({
         leader_address: leader, wallet_id: wallet.wallet_id, token_mint: swap.mint,
-        // cost basis = ACTUAL SOL spent on-chain (incl. fees) when available, else intended sizeUsd
+        // cost basis = ACTUAL exact swap input (excl. fee/rent) when available, else intended sizeUsd
         qty_ui: exec.outUi, decimals: swap.decimals, cost_usd: exec.costUsd ?? sizeUsd,
         fee_usd_est: FEE_EST_USD, price_impact_pct: exec.priceImpactPct,
         copy_mode: wallet.copy_mode, tp_pct: tp, sl_pct: sl, intent_id: exec.intent_id,
@@ -220,13 +233,13 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       }
       // Only book realized P&L when the REAL on-chain proceeds were read. Otherwise the sell
       // confirmed but proceeds are unknown -> flag for manual reconciliation; never record an estimate.
-      if (exec.fillSource !== 'on_chain' || !Number.isFinite(exec.proceedsUsd)) {
+      if (!isRealOnChainProceeds(exec)) {
         pf.flagNeedsReconciliation(p.position_id, `exit_proceeds_unconfirmed_${reason}`);
         pushEvent({ kind: 'exit_needs_reconciliation', position_id: p.position_id, reason, signature: exec.signature });
         return { ok: false, needs_reconciliation: true };
       }
       const res = pf.recordExit({
-        position_id: p.position_id, fraction, proceeds_usd: exec.proceedsUsd,
+        position_id: p.position_id, fraction, proceeds_usd: Math.max(0, exec.proceedsUsd),
         // proceeds come from the on-chain native-SOL delta, already net of network/priority fees —
         // do NOT subtract an extra fee estimate (that would double-count fees in realized P&L)
         fee_usd_est: 0, price_impact_pct: exec.priceImpactPct, reason,
@@ -260,7 +273,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     let found = false;
     for (const pf of books) {
-      const open = pf.openPositions().filter((p) => p.leader_address === leader && p.token_mint === swap.mint);
+      // skip positions awaiting manual reconciliation — their on-chain exit already happened
+      // (tokens likely gone); re-selling them here would be a duplicate / wasted intent.
+      const open = pf.openPositions().filter((p) => p.leader_address === leader && p.token_mint === swap.mint && !p.needs_reconciliation);
       if (!open.length) continue;
       found = true;
       if (wallet.copy_mode !== 'full_mirror') {
@@ -316,8 +331,8 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         const already = livePortfolio.state().positions.some((p) => p.intent_id === it.intent_id);
         if (!already && Number(r.fill?.outUi) > 0) {
           const pos = livePortfolio.recordEntry({
+            // cost_usd from ...d.recovery is the exact ExactIn input recorded at send time
             ...d.recovery, token_mint: d.mint, qty_ui: r.fill.outUi,
-            cost_usd: r.fill?.costUsd ?? d.recovery.cost_usd, // actual SOL spent when known
             fee_usd_est: FEE_EST_USD, price_impact_pct: 0, intent_id: it.intent_id,
           });
           pushEvent({ kind: 'reconciled_orphan_entry', position_id: pos.position_id, mint: d.mint, signature: it.signature });
@@ -326,10 +341,15 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       } else if (d.side === 'sell' && d.positionId) {
         const open = livePortfolio.openPositions().find((p) => p.position_id === d.positionId);
         if (open) {
+          // the sell may have been a PARTIAL leader trim; derive the fraction actually sold from the
+          // intent's requested token qty vs the still-open qty so we don't over-close the position.
+          const soldQty = Number(d.qtyUi);
+          const fraction = open.qty_ui > 0 && Number.isFinite(soldQty) && soldQty > 0
+            ? Math.min(1, soldQty / open.qty_ui) : 1;
           // ONLY record realized P&L from REAL on-chain proceeds; otherwise flag for manual
           // reconciliation (the sell confirmed but proceeds are unknown) — never fabricate a number.
-          if (r.fill?.fillSource === 'on_chain' && Number.isFinite(r.fill.proceedsUsd) && r.fill.proceedsUsd > 0) {
-            const res = livePortfolio.recordExit({ position_id: d.positionId, fraction: 1, proceeds_usd: r.fill.proceedsUsd, fee_usd_est: 0, price_impact_pct: 0, reason: 'reconciled_exit' });
+          if (isRealOnChainProceeds(r.fill)) {
+            const res = livePortfolio.recordExit({ position_id: d.positionId, fraction, proceeds_usd: Math.max(0, r.fill.proceedsUsd), fee_usd_est: 0, price_impact_pct: 0, reason: 'reconciled_exit' });
             if (res.ok) {
               pushEvent({ kind: 'reconciled_exit', position_id: d.positionId, realized_usd: res.realized_usd, signature: it.signature });
               audit({ audit_scope: 'position', audit_reason: 'reconciled_exit', command_type: null, detail: { position_id: d.positionId, intent_id: it.intent_id, signature: it.signature } });
@@ -470,12 +490,33 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     for (const pf of [portfolio, ...(livePortfolio ? [livePortfolio] : [])]) {
       const p = pf.openPositions().find((x) => x.position_id === position_id);
       if (!p) continue;
+      // a flagged position already exited on-chain (proceeds unread) — a fresh sell would try to
+      // move tokens that are gone. Route the operator to resolve_position (book real proceeds).
+      if (p.needs_reconciliation) return { ok: false, error: 'position_needs_reconciliation', position_id };
       const res = await performExit({ pf, p, fraction: 1, reason: 'manual_close', intentParts: ['sell', p.position_id, 'manual_close'] });
       if (res?.ok) { pushEvent({ kind: 'manual_close', position_id }); return { ok: true, position_id }; }
-      return { ok: false, error: res?.error || 'exit_failed' };
+      return { ok: false, error: res?.error || 'exit_failed', needs_reconciliation: res?.needs_reconciliation };
     }
     return { ok: false, error: 'position_not_found' };
   }
 
-  return { start, stop, status, events, closePosition, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, desiredState } };
+  /** Operator resolution of a needs_reconciliation position: book the REAL proceeds the operator
+   *  read off-chain, close it, clear the flag, and surface the realized P&L (which now feeds the
+   *  daily-loss breaker). The only path that retires a flagged position. */
+  function resolvePosition(position_id, proceeds_usd) {
+    for (const pf of [portfolio, ...(livePortfolio ? [livePortfolio] : [])]) {
+      const p = pf.state().positions.find((x) => x.position_id === position_id);
+      if (!p) continue;
+      if (typeof pf.resolveReconciliation !== 'function') return { ok: false, error: 'unsupported' };
+      const res = pf.resolveReconciliation(position_id, proceeds_usd);
+      if (res.ok) {
+        pushEvent({ kind: 'position_reconciled', position_id, proceeds_usd, realized_usd: res.realized_usd });
+        audit({ audit_scope: 'position', audit_reason: 'position_reconciled', command_type: 'resolve_position', detail: { position_id, proceeds_usd, realized_usd: res.realized_usd } });
+      }
+      return res;
+    }
+    return { ok: false, error: 'position_not_found' };
+  }
+
+  return { start, stop, status, events, closePosition, resolvePosition, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, desiredState } };
 }

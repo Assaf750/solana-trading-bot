@@ -116,6 +116,21 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
       });
     },
+    resolve_position(p) {
+      // operator books the REAL proceeds (read off an explorer) of a position whose on-chain exit
+      // confirmed but whose proceeds couldn't be auto-read (needs_reconciliation): closes it,
+      // clears the flag, records realized P&L. This is the only path that retires a flagged position.
+      if (!paperEngine || typeof paperEngine.resolvePosition !== 'function') {
+        return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      }
+      const proceeds = Number(p?.proceeds_usd);
+      if (!Number.isFinite(proceeds) || proceeds < 0) {
+        return { status: 400, body: { ok: false, error: 'invalid_proceeds_usd' } };
+      }
+      const res = paperEngine.resolvePosition(p?.position_id, proceeds);
+      const notFound = res.error === 'position_not_found' || res.error === 'position_not_open';
+      return { status: res.ok ? 200 : notFound ? 404 : 400, body: res };
+    },
     activate_real_live(p) {
       // THE OWNER'S SWITCH. Every readiness blocker must be gone AND the owner must
       // type the exact confirmation. Anything missing => refusal with the honest list.

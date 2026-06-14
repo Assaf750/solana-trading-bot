@@ -83,9 +83,10 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     if (f >= 1 || p.qty_ui <= 0) {
       p.position_state = 'CLOSED';
       p.qty_ui = 0; p.cost_usd = 0;
-    } else if (Number.isFinite(p.mark_usd)) {
+    } else if (Number.isFinite(p.mark_usd) && p.mark_status === 'valid') {
       // partial exit: shrink the mark to the remaining quantity so unrealized P&L isn't inflated
-      // in the window before the next markPass re-quotes the position.
+      // in the window before the next markPass re-quotes the position. Only rescale a VALID mark —
+      // scaling a stale ('unavailable') mark would compound an already-untrustworthy figure.
       p.mark_usd *= (1 - f);
       p.mark_ts = nowIso();
     }
@@ -122,6 +123,31 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     return { ok: true };
   }
 
+  /** Resolve a needs_reconciliation position with the operator's REAL proceeds (read from an
+   *  explorer): books realized P&L (so the daily-loss breaker sees it), closes the position,
+   *  and clears the flag — the only path that retires a flagged position into the books. */
+  function resolveReconciliation(position_id, proceeds_usd) {
+    const s = load();
+    const p = s.positions.find((x) => x.position_id === position_id && x.position_state === 'OPEN');
+    if (!p) return { ok: false, error: 'position_not_open' };
+    if (!p.needs_reconciliation) return { ok: false, error: 'not_flagged' };
+    if (!Number.isFinite(proceeds_usd) || proceeds_usd < 0) return { ok: false, error: 'invalid_proceeds' };
+    const realized = proceeds_usd - p.cost_usd;
+    const qtySold = p.qty_ui;
+    s.trades.push({
+      trade_id: newId('trd'), position_id, side: 'sell', token_mint: p.token_mint,
+      qty_ui: qtySold, price_usd: qtySold > 0 ? proceeds_usd / qtySold : 0, value_usd: proceeds_usd,
+      fee_usd_est: 0, price_impact_pct: 0, ts: nowIso(), reason: 'manual_reconciliation', simulated,
+    });
+    s.realized_pnl_usd += realized;
+    s.daily.realized_pnl_usd += realized;
+    p.position_state = 'CLOSED';
+    p.qty_ui = 0; p.cost_usd = 0;
+    delete p.needs_reconciliation;
+    save(s);
+    return { ok: true, realized_usd: realized, closed: true };
+  }
+
   function setEntriesBlocked(blocked) {
     const s = load();
     s.daily.entries_blocked = Boolean(blocked);
@@ -145,7 +171,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
 
   return {
     state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
-    recordEntry, recordExit, setMark, setEntriesBlocked, flagNeedsReconciliation, summary,
+    recordEntry, recordExit, setMark, setEntriesBlocked, flagNeedsReconciliation, resolveReconciliation, summary,
   };
 }
 
