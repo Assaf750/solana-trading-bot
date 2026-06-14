@@ -4,16 +4,22 @@ The latency-critical core: decode → sign (ed25519) → build swap → submit �
 bundle. Rust for predictable tail latency (no GC pauses), with mature crates
 (`solana-sdk`, `yellowstone-grpc`, `jito`).
 
-Status: **Phase 2 — DO NOT BUILD YET.** This folder is intentionally empty of code
-(no `Cargo.toml`, no `.rs`) until the gate below is satisfied.
+Status: **Phase 2 — built (signer core).** Owner directed a full build-out of the target
+architecture regardless of the Phase 0 latency gate. Implemented so far: the fee-payer-locked
+ed25519 signer (the latency-critical crypto), a faithful Rust port of
+`apps/server/src/engine/tx-signer.mjs`, exposed over a JSON-lines stdin/stdout contract.
+Verified byte-identical to the Node signer (same signature, address, signed tx) and refuses a
+fee-payer mismatch. Next: RPC submit + Jito bundle/tip.
 
-## Gate (why this is deferred)
-Build this ONLY after **Phase 0** (`GET /api/latency`) proves that **latency** —
-not slippage, fees, or leader selection — is the binding constraint on
-profitability for this operator's trade size. The deep-research evidence is
-explicit: Rust hot path is a "only if competing on latency" investment, and
-production engines (NautilusTrader) confine the compiled core to the hot path while
-keeping orchestration in a scripting/control-plane language (here: TypeScript).
+## Run
+`cargo build` then pipe JSON requests: `echo '{"op":"ping"}' | ./target/debug/hot-executor`.
+Tests: `cargo test` (4 pass). `cargo test`/`cargo build` are local — not in the Node CI.
+
+## Build order rationale
+The signer was ported first because it is the genuinely latency-sensitive, well-specified core
+(a known JS reference to verify against). Production engines (NautilusTrader) confine the
+compiled core to the hot path while orchestration stays in a control-plane language (here:
+TypeScript) — so risk/sizing/kill-switch/ledger remain in `apps/server`.
 
 ## When built — contract with `apps/server`
 A standalone service the TS control plane calls over gRPC:

@@ -1,10 +1,20 @@
 # Soltrade — methodical restructuring plan
 
-Target: a polyglot architecture **split strictly by latency-sensitivity**, built in
-stages so the highest-ROI / lowest-risk work lands first and the expensive Rust
-rewrite is deferred until measurement proves it is needed. Evidence base: the
+Target: a polyglot architecture **split strictly by latency-sensitivity**. Evidence base: the
 deep-research report (Yellowstone gRPC vs WebSocket, Jito bundles, NautilusTrader
 compiled-core pattern, local AMM math). See sources at the end.
+
+> **Owner directive (update):** the owner chose to build out the full target architecture in all
+> three languages now, regardless of the Phase 0 latency gate. The gate (Phase 0) is still wired
+> and useful, but it no longer blocks the Rust hot-executor. Build status below.
+
+## Build status
+- ✅ `apps/server` (TS control plane), `apps/operator-ui` (React), `packages/`, `infra/` — kept.
+- ✅ Phase 0 latency gate — `latency-tracker.mjs` + `GET /api/latency` (live).
+- ✅ `services/ingestor` (Node/TS, Yellowstone gRPC) — built, 4 tests in the root suite.
+- ✅ `services/analytics` (Python, stdlib) — built, 4 unittest cases.
+- ✅ `services/hot-executor` (Rust) — signer core built, cross-verified vs Node; 4 cargo tests.
+- ⏭️ Next: wire ingestor behind `subscribeWallets`; hot-executor RPC submit + Jito; analytics over ClickHouse.
 
 ## Target architecture (north star)
 
