@@ -8,6 +8,8 @@
 //  - Generic RPC: logsSubscribe per address -> signature only -> engine fetches the tx.
 //  Both paths get a 60s keepalive frame (Helius closes idle sockets after 10 min).
 
+import { createGrpcIngestor } from '../../../../services/ingestor/src/grpc-ingestor.mjs';
+
 /** Pure: is this a Helius endpoint (supports enhanced transactionSubscribe)? */
 export function isHeliusHost(url) {
   try { return new URL(url).hostname.toLowerCase().includes('helius'); } catch { return false; }
@@ -56,7 +58,7 @@ export function parseStreamNotification(msg) {
   return null;
 }
 
-export function createRpcClient({ getRpcUrl }) {
+export function createRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor }) {
   async function rpc(method, params) {
     const url = getRpcUrl();
     if (!url) return { ok: false, error: 'rpc_url_unavailable' };
@@ -122,12 +124,23 @@ export function createRpcClient({ getRpcUrl }) {
    * onGap() fires when the stream has been down longer than gapMs. 60s keepalive frame.
    */
   function subscribeWallets({ addresses, onLeaderActivity, onUp, onGap, gapMs = 120000 }) {
+    // Prefer the Yellowstone/Geyser gRPC transport when an endpoint is configured (intra-slot
+    // streaming, reliable under load). Falls back to the universal WebSocket logsSubscribe path —
+    // identical callback contract, so the engine is unchanged either way.
+    const grpc = typeof getGrpcEndpoint === 'function' ? getGrpcEndpoint() : null;
+    if (grpc && grpc.endpoint) {
+      return grpcIngestorFactory({
+        endpoint: grpc.endpoint, token: grpc.token, addresses,
+        onLeaderActivity, onUp, onGap, gapMs,
+      });
+    }
     let ws = null;
     let closed = false;
     let backoff = 1000;
     let downSince = null;
     let gapTimer = null;
     let keepAlive = null;
+    let reconnectTimer = null;
 
     function connect() {
       if (closed) return;
@@ -169,7 +182,7 @@ export function createRpcClient({ getRpcUrl }) {
         downSince = Date.now();
         gapTimer = setTimeout(() => { if (onGap && !closed) onGap(); }, gapMs);
       }
-      setTimeout(connect, backoff);
+      reconnectTimer = setTimeout(connect, backoff);
       backoff = Math.min(backoff * 2, 60000);
     }
 
@@ -178,6 +191,7 @@ export function createRpcClient({ getRpcUrl }) {
       close() {
         closed = true;
         if (gapTimer) clearTimeout(gapTimer);
+        if (reconnectTimer) clearTimeout(reconnectTimer);
         if (keepAlive) clearInterval(keepAlive);
         try { ws?.close(); } catch { /* fine */ }
       },

@@ -35,6 +35,20 @@ const rpc = createRpcClient({
     const r = vault.getSecretForUse(ref.slice(6));
     return r.ok ? r.value : null;
   },
+  // Yellowstone/Geyser gRPC endpoint (preferred ingestion transport when configured). The
+  // endpoint URL and optional x-token are vault refs; null => fall back to WebSocket.
+  getGrpcEndpoint: () => {
+    const p = config.get().providers || {};
+    if (!p.grpc_url_ref?.startsWith('vault:')) return null;
+    const u = vault.getSecretForUse(p.grpc_url_ref.slice(6));
+    if (!u.ok) return null;
+    let token;
+    if (p.grpc_token_ref?.startsWith('vault:')) {
+      const t = vault.getSecretForUse(p.grpc_token_ref.slice(6));
+      token = t.ok ? t.value : undefined;
+    }
+    return { endpoint: u.value, token };
+  },
 });
 const jupiter = createJupiterClient({
   getApiKey: () => {

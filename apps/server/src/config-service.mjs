@@ -59,6 +59,8 @@ const DEFAULTS = {
     rpc_url_ref: null,        // e.g. vault:helius_rpc_url
     stream_ref: null,
     jupiter_key_ref: null,
+    grpc_url_ref: null,       // Yellowstone/Geyser gRPC endpoint (preferred ingestion transport)
+    grpc_token_ref: null,     // optional x-token for the gRPC endpoint
   },
   signer_session: {
     // ALL must be explicitly set (non-null) for the signer to be "ready"
@@ -105,7 +107,7 @@ export function validateConfigPatch(patch) {
     ev: [...EV_FIELDS, 'ev_gate_mode'],
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
-    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref'],
+    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
   };
   for (const [section, value] of Object.entries(patch || {})) {
