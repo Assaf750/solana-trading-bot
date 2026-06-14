@@ -169,3 +169,38 @@ test('live-executor: audit failure before signing aborts (fail-closed, nothing s
   assert.equal(r.error, 'audit_unavailable_before_sign');
   assert.equal(m.calls.sent, 0);
 });
+
+test('live-executor: reconcile resolves a SENT_UNCONFIRMED intent (confirmed) and lists it pending', async () => {
+  const m = buildExecutor({ deps: { rpc: {
+    rpc: async (method) => (method === 'getSignatureStatuses'
+      ? { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } }
+      : { ok: true, result: null }),
+    getTransaction: async () => ({ ok: true, result: { meta: { err: null }, transaction: { message: { accountKeys: [] } } } }),
+  } } });
+  m.exec._internal.claimIntent('int_rec_ok', { side: 'buy', mint: 'MintR', decimals: 6, recovery: { wallet_id: 'w' } });
+  m.exec._internal.setIntent('int_rec_ok', 'SENT_UNCONFIRMED', { signature: 'SIGOK' });
+  assert.ok(m.exec.pendingIntents().some((p) => p.intent_id === 'int_rec_ok'), 'pendingIntents lists the unconfirmed intent');
+  const r = await m.exec.reconcile({ intent_id: 'int_rec_ok' });
+  assert.equal(r.resolved, 'confirmed');
+  assert.equal(r.detail.side, 'buy');
+});
+
+test('live-executor: reconcile marks a never-landed intent FAILED_SEND (retryable)', async () => {
+  const m = buildExecutor({ deps: { rpc: {
+    rpc: async (method) => (method === 'getSignatureStatuses' ? { ok: true, result: { value: [null] } } : { ok: true, result: null }),
+    getTransaction: async () => ({ ok: true, result: null }),
+  } } });
+  m.exec._internal.claimIntent('int_rec_gone', { side: 'sell', mint: 'MintR', positionId: 'pos9' });
+  m.exec._internal.setIntent('int_rec_gone', 'SENT_UNCONFIRMED', { signature: 'SIGGONE' });
+  const r = await m.exec.reconcile({ intent_id: 'int_rec_gone' });
+  assert.equal(r.resolved, 'never_landed');
+  // now retryable: a fresh claim on the same id succeeds
+  assert.equal(m.exec._internal.claimIntent('int_rec_gone', { side: 'sell' }).ok, true);
+});
+
+test('live-executor: FAILED_ON_CHAIN is retryable (a reverted tx moved nothing)', () => {
+  const m = buildExecutor();
+  m.exec._internal.claimIntent('int_foc', { side: 'sell' });
+  m.exec._internal.setIntent('int_foc', 'FAILED_ON_CHAIN', {});
+  assert.equal(m.exec._internal.claimIntent('int_foc', { side: 'sell' }).ok, true);
+});

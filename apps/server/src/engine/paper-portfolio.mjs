@@ -42,7 +42,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
 
   function dailyRealized() { return load().daily.realized_pnl_usd; }
 
-  function recordEntry({ leader_address, wallet_id, token_mint, qty_ui, decimals, cost_usd, fee_usd_est, price_impact_pct, copy_mode, tp_pct, sl_pct }) {
+  function recordEntry({ leader_address, wallet_id, token_mint, qty_ui, decimals, cost_usd, fee_usd_est, price_impact_pct, copy_mode, tp_pct, sl_pct, intent_id = null }) {
     const s = load();
     const position = {
       position_id: newId('pos'),
@@ -53,6 +53,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
       position_state: 'OPEN',
       copy_mode, tp_pct, sl_pct,
       mark_usd: cost_usd, mark_ts: nowIso(), mark_status: 'valid',
+      intent_id, // live intent that opened this position (for SENT_UNCONFIRMED reconciliation)
       simulated,
     };
     s.positions.push(position);

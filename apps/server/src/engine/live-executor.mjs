@@ -23,7 +23,10 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
   // States that PROVABLY never reached the chain — safe to retry (e.g. a stop-loss whose
   // first broadcast hit a transient RPC error). SENT/SENT_PENDING/SENT_UNCONFIRMED/CONFIRMED
   // may have landed, so they stay blocked (no double-spend).
-  const RETRYABLE_STATUSES = new Set(['FAILED_PRE_SEND', 'FAILED_SEND']);
+  // FAILED_ON_CHAIN included: a tx that reverted on-chain provably moved no funds, so a fresh
+  // tx (new blockhash/signature) is safe — without this a stop-loss that slips/reverts once is
+  // permanently un-exitable (its deterministic intent id stays blocked).
+  const RETRYABLE_STATUSES = new Set(['FAILED_PRE_SEND', 'FAILED_SEND', 'FAILED_ON_CHAIN']);
   function claimIntent(intent_id, detail) {
     const l = ledger();
     const existing = l.intents[intent_id];
@@ -100,17 +103,51 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     return { confirmed: false, error: 'confirmation_timeout' };
   }
 
+  /** Read the actual fill of a confirmed tx (token delta for buys, net SOL delta for sells);
+   *  bounded attempts, falls back to the supplied estimate. Shared by execute + reconcile. */
+  async function extractFill({ txSig, side, mint, owner, fallbackOutUi = 0 }) {
+    let actualOutUi = fallbackOutUi;
+    let fillSource = 'quote_estimate';
+    for (let i = 0; i < 3; i += 1) {
+      const tx = await rpc.getTransaction(txSig);
+      if (tx.ok && tx.result) {
+        const meta = tx.result.meta;
+        if (meta && !meta.err) {
+          const target = side === 'buy' ? mint : WSOL_MINT;
+          const pre = (meta.preTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
+          const post = (meta.postTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
+          if (side === 'buy' && post) {
+            actualOutUi = Number(post.uiTokenAmount.uiAmount ?? 0) - Number(pre?.uiTokenAmount?.uiAmount ?? 0);
+            fillSource = 'on_chain';
+          } else if (side === 'sell') {
+            const keys = tx.result.transaction?.message?.accountKeys || [];
+            const idx = keys.findIndex((k) => (typeof k === 'string' ? k : k?.pubkey) === owner);
+            if (idx >= 0) {
+              actualOutUi = (meta.postBalances[idx] - meta.preBalances[idx]) / 1e9; // SOL received (net of fee)
+              fillSource = 'on_chain';
+            }
+          }
+          break;
+        }
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    return { actualOutUi, fillSource };
+  }
+
   /**
    * Execute a real swap. side 'buy': spend sizeUsd worth of SOL into mint.
    * side 'sell': sell qtyUi of mint back to SOL. Returns actual fill data.
    */
-  async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts }, releaseLock = () => {}) {
+  async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts, recovery = null, positionId = null }, releaseLock = () => {}) {
     const notionalUsd = side === 'buy' ? sizeUsd : sizeUsd; // sell passes estimated proceeds in sizeUsd
     const g = gates({ action: side === 'buy' ? 'entry' : 'exit', notionalUsd });
     if (!g.allowed) return { ok: false, error: 'gates_refused', refusals: g.refusals };
 
     const intent_id = intentIdFor(intentParts);
-    const claim = claimIntent(intent_id, { side, mint, sizeUsd, qtyUi });
+    // store enough context to RECONCILE later: decimals (fill extraction), recovery (rebuild an
+    // orphan buy position), positionId (close the right position for a confirmed sell).
+    const claim = claimIntent(intent_id, { side, mint, sizeUsd, qtyUi, decimals, recovery, positionId });
     if (!claim.ok) return { ok: false, error: claim.error };
 
     const kpRes = ownerKeypair();
@@ -188,32 +225,9 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     }
 
     // actual fill amounts from the confirmed tx (bounded attempts; estimate fallback)
-    let actualOutUi = q.outAmount / 10 ** (side === 'buy' ? decimals : 9);
-    let fillSource = 'quote_estimate';
-    for (let i = 0; i < 3; i += 1) {
-      const tx = await rpc.getTransaction(txSig);
-      if (tx.ok && tx.result) {
-        const meta = tx.result.meta;
-        if (meta && !meta.err) {
-          const target = side === 'buy' ? mint : WSOL_MINT;
-          const pre = (meta.preTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
-          const post = (meta.postTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
-          if (side === 'buy' && post) {
-            actualOutUi = Number(post.uiTokenAmount.uiAmount ?? 0) - Number(pre?.uiTokenAmount?.uiAmount ?? 0);
-            fillSource = 'on_chain';
-          } else if (side === 'sell') {
-            const keys = tx.result.transaction?.message?.accountKeys || [];
-            const idx = keys.findIndex((k) => (typeof k === 'string' ? k : k?.pubkey) === owner);
-            if (idx >= 0) {
-              actualOutUi = (meta.postBalances[idx] - meta.preBalances[idx]) / 1e9; // SOL received (net of fee)
-              fillSource = 'on_chain';
-            }
-          }
-          break;
-        }
-      }
-      await new Promise((r) => setTimeout(r, 2000));
-    }
+    const { actualOutUi, fillSource } = await extractFill({
+      txSig, side, mint, owner, fallbackOutUi: q.outAmount / 10 ** (side === 'buy' ? decimals : 9),
+    });
 
     setIntent(intent_id, 'CONFIRMED', { signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource });
     safeAudit({ audit_scope: 'intent', audit_reason: 'live_tx_confirmed', detail: { intent_id, signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource } });
@@ -230,6 +244,44 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
   function intents(limit = 50) {
     const l = ledger();
     return Object.entries(l.intents).slice(-limit).map(([id, v]) => ({ intent_id: id, ...v }));
+  }
+
+  /** Intents that were broadcast but never reached a terminal state — candidates for reconcile. */
+  function pendingIntents() {
+    const l = ledger();
+    return Object.entries(l.intents)
+      .filter(([, v]) => (v.status === 'SENT' || v.status === 'SENT_UNCONFIRMED') && v.signature)
+      .map(([intent_id, v]) => ({ intent_id, status: v.status, signature: v.signature, detail: v.detail || {} }));
+  }
+
+  /**
+   * Authoritatively resolve a broadcast intent against the chain (searchTransactionHistory).
+   *  - confirmed  -> mark CONFIRMED, return the actual fill (so the caller can recover the
+   *                  orphan position / close the phantom-open position)
+   *  - on-chain err -> FAILED_ON_CHAIN (retryable; tx moved nothing)
+   *  - not found    -> FAILED_SEND (retryable; never landed)
+   * Read-only w.r.t. the portfolio — the engine does the position bookkeeping.
+   */
+  async function reconcile({ intent_id }) {
+    const it = ledger().intents[intent_id];
+    if (!it || !it.signature) return { resolved: 'unknown' };
+    const st = await rpc.rpc('getSignatureStatuses', [[it.signature], { searchTransactionHistory: true }]);
+    if (!st.ok) return { resolved: 'pending' }; // RPC down — leave as-is, try again next pass
+    const v = st.result?.value?.[0];
+    if (!v) { setIntent(intent_id, 'FAILED_SEND', { error: 'reconcile_not_found' }); return { resolved: 'never_landed' }; }
+    if (v.err) { setIntent(intent_id, 'FAILED_ON_CHAIN', { error: 'reconcile_tx_failed' }); return { resolved: 'failed_on_chain' }; }
+    if (v.confirmationStatus !== 'confirmed' && v.confirmationStatus !== 'finalized') return { resolved: 'pending' };
+    const d = it.detail || {};
+    const kp = ownerKeypair();
+    const owner = kp.ok ? kp.kp.address : null;
+    const price = await solPriceUsd();
+    const { actualOutUi, fillSource } = await extractFill({ txSig: it.signature, side: d.side, mint: d.mint, owner, fallbackOutUi: 0 });
+    setIntent(intent_id, 'CONFIRMED', { signature: it.signature, actual_out_ui: actualOutUi, fill_source: fillSource, reconciled: true });
+    return {
+      resolved: 'confirmed',
+      detail: d,
+      fill: { outUi: actualOutUi, fillSource, proceedsUsd: d.side === 'sell' && price ? actualOutUi * price : undefined },
+    };
   }
 
   // Serialize the CRITICAL section of real-money swaps (gates→claim→send→recordSigned): the
@@ -250,5 +302,5 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     })();
   }
 
-  return { executeSwap, gates, intents, solPriceUsd, _internal: { intentIdFor, claimIntent, setIntent, solPriceUsd } };
+  return { executeSwap, gates, intents, pendingIntents, reconcile, solPriceUsd, _internal: { intentIdFor, claimIntent, setIntent, solPriceUsd } };
 }

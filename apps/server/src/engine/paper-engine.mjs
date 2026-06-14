@@ -165,19 +165,19 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         // keyed by the leader's on-chain signature so two distinct same-size buys are NOT
         // collapsed into one (idempotent per leader tx, not per amount)
         intentParts: ['buy', leader, swap.mint, signature || String(swap.uiDelta)],
+        // recovery context: lets the reconciler rebuild this position if the buy confirms late
+        // (SENT_UNCONFIRMED) after executeSwap already returned, instead of orphaning real tokens
+        recovery: { leader_address: leader, wallet_id: wallet.wallet_id, decimals: swap.decimals, cost_usd: sizeUsd, copy_mode: wallet.copy_mode, tp_pct: tp, sl_pct: sl },
       });
       if (!exec.ok) {
         pushEvent({ kind: 'live_entry_refused', leader, mint: swap.mint, error: exec.error, refusals: exec.refusals || [] });
-        if (exec.refusals?.some((r) => r.startsWith('signer_'))) {
-          // risk-rejection accounting belongs to the gate layer, not here
-        }
         return;
       }
       const pos = pf.recordEntry({
         leader_address: leader, wallet_id: wallet.wallet_id, token_mint: swap.mint,
         qty_ui: exec.outUi, decimals: swap.decimals, cost_usd: sizeUsd,
         fee_usd_est: FEE_EST_USD, price_impact_pct: exec.priceImpactPct,
-        copy_mode: wallet.copy_mode, tp_pct: tp, sl_pct: sl,
+        copy_mode: wallet.copy_mode, tp_pct: tp, sl_pct: sl, intent_id: exec.intent_id,
       });
       pushEvent({ kind: 'live_entry', leader, mint: swap.mint, position_id: pos.position_id, size_usd: sizeUsd, qty_ui: exec.outUi, signature: exec.signature });
       audit({ audit_scope: 'position', audit_reason: 'live_entry_recorded', command_type: null, detail: { position_id: pos.position_id, mint: swap.mint, size_usd: sizeUsd, signature: exec.signature, simulated: false } });
@@ -211,6 +211,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         side: 'sell', mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals,
         sizeUsd: est.ok ? est.usd : 0, slippageBps: 150,
         intentParts: intentParts || ['sell', p.position_id, reason],
+        positionId: p.position_id, // so a late-confirmed (SENT_UNCONFIRMED) sell can close THIS position
       });
       if (!exec.ok) {
         pushEvent({ kind: 'live_exit_refused', position_id: p.position_id, reason, error: exec.error, refusals: exec.refusals || [] });
@@ -289,8 +290,48 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   // back-compat alias used by tests/probes
   const onSignature = (sig) => onLeaderActivity({ signature: sig, tx: null });
 
+  // ---------- reconcile broadcast-but-unconfirmed live intents (orphan buys / phantom sells) ----------
+  // A live buy/sell that broadcast but whose confirmation timed out (SENT_UNCONFIRMED) is resolved
+  // here against the chain: a late-confirmed BUY rebuilds its position (no orphaned tokens); a
+  // late-confirmed SELL closes the still-open position; a never-landed/reverted intent is marked
+  // retryable so the normal TP/SL loop re-attempts it.
+  async function reconcilePass() {
+    if (!liveExecutor || !livePortfolio || typeof liveExecutor.pendingIntents !== 'function') return;
+    let pending = [];
+    try { pending = liveExecutor.pendingIntents(); } catch { return; }
+    for (const it of pending) {
+      let r;
+      try { r = await liveExecutor.reconcile({ intent_id: it.intent_id }); } catch { continue; }
+      if (!r || r.resolved !== 'confirmed') continue;
+      const d = r.detail || it.detail || {};
+      if (d.side === 'buy' && d.recovery) {
+        const already = livePortfolio.state().positions.some((p) => p.intent_id === it.intent_id);
+        if (!already && Number(r.fill?.outUi) > 0) {
+          const pos = livePortfolio.recordEntry({
+            ...d.recovery, token_mint: d.mint, qty_ui: r.fill.outUi,
+            fee_usd_est: FEE_EST_USD, price_impact_pct: 0, intent_id: it.intent_id,
+          });
+          pushEvent({ kind: 'reconciled_orphan_entry', position_id: pos.position_id, mint: d.mint, signature: it.signature });
+          audit({ audit_scope: 'position', audit_reason: 'reconciled_orphan_entry', command_type: null, detail: { position_id: pos.position_id, intent_id: it.intent_id, signature: it.signature } });
+        }
+      } else if (d.side === 'sell' && d.positionId) {
+        const open = livePortfolio.openPositions().find((p) => p.position_id === d.positionId);
+        if (open) {
+          // prefer the real on-chain proceeds; fall back to last mark (never fabricate a total loss)
+          const proceeds = Number.isFinite(r.fill?.proceedsUsd) && r.fill.proceedsUsd > 0 ? r.fill.proceedsUsd : (open.mark_usd ?? open.cost_usd);
+          const res = livePortfolio.recordExit({ position_id: d.positionId, fraction: 1, proceeds_usd: proceeds, fee_usd_est: 0, price_impact_pct: 0, reason: 'reconciled_exit' });
+          if (res.ok) {
+            pushEvent({ kind: 'reconciled_exit', position_id: d.positionId, realized_usd: res.realized_usd, signature: it.signature });
+            audit({ audit_scope: 'position', audit_reason: 'reconciled_exit', command_type: null, detail: { position_id: d.positionId, intent_id: it.intent_id, signature: it.signature } });
+          }
+        }
+      }
+    }
+  }
+
   // ---------- TP/SL + mark loop (both books; exits routed per book) ----------
   async function markPass() {
+    await reconcilePass().catch(() => { /* contained — never block marks/exits */ });
     const cfg = config.get();
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     for (const pf of books) {
@@ -420,5 +461,5 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { ok: false, error: 'position_not_found' };
   }
 
-  return { start, stop, status, events, closePosition, _internal: { onSignature, markPass, handleLeaderBuy, handleLeaderSell, performExit, desiredState } };
+  return { start, stop, status, events, closePosition, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, desiredState } };
 }
