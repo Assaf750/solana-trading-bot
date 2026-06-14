@@ -13,8 +13,11 @@ compiled-core pattern, local AMM math). See sources at the end.
 - ✅ Phase 0 latency gate — `latency-tracker.mjs` + `GET /api/latency` (live).
 - ✅ `services/ingestor` (Node/TS, Yellowstone gRPC) — built, 4 tests in the root suite.
 - ✅ `services/analytics` (Python, stdlib) — built, 4 unittest cases.
-- ✅ `services/hot-executor` (Rust) — signer core built, cross-verified vs Node; 4 cargo tests.
-- ⏭️ Next: wire ingestor behind `subscribeWallets`; hot-executor RPC submit + Jito; analytics over ClickHouse.
+- ✅ `services/ingestor` — WIRED behind `subscribeWallets` (gRPC transport when configured, WS fallback).
+- ✅ `services/hot-executor` (Rust) — signer (cross-verified vs Node) + submit/bundle/tip
+  request construction; 8 cargo tests. TS does the network POST (idempotency stays in TS).
+- ⏭️ Next: live HTTP submit wiring in TS via the Rust-built bodies; analytics over ClickHouse;
+  optional self-hosted gRPC/ShredStream.
 
 ## Target architecture (north star)
 

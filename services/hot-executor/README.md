@@ -4,12 +4,16 @@ The latency-critical core: decode → sign (ed25519) → build swap → submit �
 bundle. Rust for predictable tail latency (no GC pauses), with mature crates
 (`solana-sdk`, `yellowstone-grpc`, `jito`).
 
-Status: **Phase 2 — built (signer core).** Owner directed a full build-out of the target
-architecture regardless of the Phase 0 latency gate. Implemented so far: the fee-payer-locked
-ed25519 signer (the latency-critical crypto), a faithful Rust port of
-`apps/server/src/engine/tx-signer.mjs`, exposed over a JSON-lines stdin/stdout contract.
-Verified byte-identical to the Node signer (same signature, address, signed tx) and refuses a
-fee-payer mismatch. Next: RPC submit + Jito bundle/tip.
+Status: **Phase 2 — built (signer + submit/bundle/tip construction).** Owner directed a full
+build-out regardless of the Phase 0 latency gate. Implemented:
+- `signer.rs` — fee-payer-locked ed25519 signing, a faithful port of
+  `apps/server/src/engine/tx-signer.mjs`; verified byte-identical to the Node signer.
+- `submit.rs` — JSON-RPC `sendTransaction` body, Jito `sendBundle` body (≤5 tx, atomic, one
+  slot), and tip selection from Jito `getTipFloor` percentiles (1000-lamport floor fallback).
+  PURE: the TS control plane performs the actual POST with its existing RPC client + intent
+  ledger, so idempotency-of-record stays in TS.
+
+Ops (JSON-lines): `ping`, `sign`, `build_submit`, `build_bundle`, `select_tip`.
 
 ## Run
 `cargo build` then pipe JSON requests: `echo '{"op":"ping"}' | ./target/debug/hot-executor`.

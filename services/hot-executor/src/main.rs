@@ -16,6 +16,7 @@
 //!   {"ok":false,"error":"<code>", ...}
 
 mod signer;
+mod submit;
 
 use serde::{Deserialize, Serialize};
 use std::io::{self, BufRead, Write};
@@ -26,6 +27,13 @@ struct Request {
     intent_id: Option<String>,
     unsigned_tx_base64: Option<String>,
     seed: Option<serde_json::Value>,
+    // submit / bundle / tip ops
+    signed_tx_base64: Option<String>,
+    signed_txs: Option<Vec<String>>,
+    skip_preflight: Option<bool>,
+    max_retries: Option<u32>,
+    tip_floor: Option<serde_json::Value>,
+    level: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -41,6 +49,10 @@ struct Response {
     signed_tx_base64: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     signer_address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    request: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tip_lamports: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -107,6 +119,37 @@ fn handle(req: Request) -> Response {
                 }
             }
         }
+        "build_submit" => match req.signed_tx_base64 {
+            Some(tx) => Response {
+                ok: true,
+                intent_id: req.intent_id,
+                request: Some(submit::build_send_transaction_request(
+                    &tx,
+                    req.skip_preflight.unwrap_or(false),
+                    req.max_retries.unwrap_or(3),
+                )),
+                ..Default::default()
+            },
+            None => err("missing_signed_tx_base64"),
+        },
+        "build_bundle" => match req.signed_txs {
+            Some(txs) => match submit::build_jito_bundle_request(&txs) {
+                Ok(body) => Response { ok: true, intent_id: req.intent_id, request: Some(body), ..Default::default() },
+                Err(e) => err(e),
+            },
+            None => err("missing_signed_txs"),
+        },
+        "select_tip" => match req.tip_floor {
+            Some(tf) => {
+                let level = match req.level.as_deref() {
+                    Some("low") => submit::TipLevel::Low,
+                    Some("aggressive") => submit::TipLevel::Aggressive,
+                    _ => submit::TipLevel::Normal,
+                };
+                Response { ok: true, tip_lamports: Some(submit::select_tip_lamports(&tf, level)), ..Default::default() }
+            }
+            None => err("missing_tip_floor"),
+        },
         other => err(&format!("unknown_op_{other}")),
     }
 }
