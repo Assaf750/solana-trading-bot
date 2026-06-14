@@ -290,6 +290,7 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
       max_entry_drift_pct: v('max_entry_drift_pct'), drift_action: c.drift_action ?? '',
       auto_pause_after_losses: v('auto_pause_after_losses'), exit_on_leader_sell: Boolean(c.exit_on_leader_sell),
       trailing_stop_pct: v('trailing_stop_pct'),
+      tp1_pct: v('tp1_pct'), tp1_sell_pct: v('tp1_sell_pct'), breakeven_after_tp1: Boolean(c.breakeven_after_tp1),
     };
   };
   const [d, setD] = useState(() => draftFrom(wallet));
@@ -305,12 +306,13 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
   );
 
   async function save() {
-    const numeric = ['take_profit_pct', 'stop_loss_pct', 'sizing_value', 'max_entry_slippage_vs_leader', 'rebuy_cooldown', 'max_time_in_position', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'auto_pause_after_losses', 'trailing_stop_pct'];
+    const numeric = ['take_profit_pct', 'stop_loss_pct', 'sizing_value', 'max_entry_slippage_vs_leader', 'rebuy_cooldown', 'max_time_in_position', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct'];
     const patch = {};
     for (const k of numeric) patch[k] = d[k] === '' ? null : Number(d[k]); // null clears the override -> falls back to global default
     if (d.sizing_mode) patch.sizing_mode = d.sizing_mode;
     if (d.drift_action) patch.drift_action = d.drift_action;
     patch.exit_on_leader_sell = Boolean(d.exit_on_leader_sell);
+    patch.breakeven_after_tp1 = Boolean(d.breakeven_after_tp1);
     const r = await api.updateWalletConfig(wallet.wallet_id, patch);
     setSaved(r.ok ? 'ok' : (r.data?.errors ? JSON.stringify(r.data.errors).slice(0, 120) : (r.data?.error || 'rejected')));
     if (r.ok) onSaved?.();
@@ -323,6 +325,8 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
         <NumCell k="take_profit_pct" label={ar ? 'جني الربح %' : 'Take-profit %'} />
         <NumCell k="stop_loss_pct" label={ar ? 'وقف الخسارة %' : 'Stop-loss %'} />
         <NumCell k="trailing_stop_pct" label={ar ? 'وقف متحرك %' : 'Trailing stop %'} />
+        <NumCell k="tp1_pct" label={ar ? 'جني جزئي TP1 %' : 'Partial TP1 %'} />
+        <NumCell k="tp1_sell_pct" label={ar ? 'بيع عند TP1 %' : 'Sell at TP1 %'} />
         <label className="stack" style={{ gap: 4 }}>
           <span className="muted fs-xs">{ar ? 'نمط التحجيم' : 'Sizing mode'}</span>
           <select className="search" value={d.sizing_mode} onChange={(e) => set('sizing_mode', e.target.value)} dir="ltr">
@@ -350,6 +354,10 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
         <label className="row" style={{ gap: 8, alignSelf: 'end' }}>
           <input type="checkbox" checked={d.exit_on_leader_sell} onChange={(e) => set('exit_on_leader_sell', e.target.checked)} />
           <span className="fs-xs">{ar ? 'خروج عند بيع القائد' : 'Exit on leader sell'}</span>
+        </label>
+        <label className="row" style={{ gap: 8, alignSelf: 'end' }}>
+          <input type="checkbox" checked={d.breakeven_after_tp1} onChange={(e) => set('breakeven_after_tp1', e.target.checked)} />
+          <span className="fs-xs">{ar ? 'تعادل بعد TP1' : 'Break-even after TP1'}</span>
         </label>
       </div>
       <div className="row" style={{ marginBlockStart: 'var(--s-3)' }}>

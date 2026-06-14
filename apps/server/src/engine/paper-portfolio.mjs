@@ -204,6 +204,15 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     save(s);
   }
 
+  /** Record that a position's first-tier partial take-profit has fired (drives break-even + dedupe). */
+  function markTp1Done(position_id) {
+    const s = load();
+    const p = s.positions.find((x) => x.position_id === position_id);
+    if (!p) return;
+    p.tp1_done = true;
+    save(s);
+  }
+
   function summary() {
     const s = load();
     const open = s.positions.filter((p) => p.position_state === 'OPEN');
@@ -222,7 +231,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
   return {
     state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
     leaderStats, leaderConsecutiveLosses,
-    recordEntry, recordExit, setMark, setEntriesBlocked, flagNeedsReconciliation, resolveReconciliation, summary,
+    recordEntry, recordExit, setMark, setEntriesBlocked, markTp1Done, flagNeedsReconciliation, resolveReconciliation, summary,
   };
 }
 

@@ -62,6 +62,9 @@ const DEFAULTS = {
     exit_on_leader_sell: false,           // front-run the dump: exit on a leader sell even in follow_entry mode
     auto_pause_after_losses: null,        // null = OFF; else auto-unfollow a leader after N consecutive losses
     trailing_stop_pct: null,              // null = trailing stop OFF; else lock in once up X%, exit on an X% give-back from peak
+    tp1_pct: null,                        // null = partial take-profit OFF; else first-tier gain that banks tp1_sell_pct
+    tp1_sell_pct: 50,                     // fraction of the position to sell when tp1_pct is hit
+    breakeven_after_tp1: false,           // after the first tier banks, exit the remainder if it falls back to break-even
   },
   safety: {
     // pre-trade anti-rug screen (fail-closed); each check independently toggleable
@@ -102,7 +105,7 @@ const NUMERIC_BOUNDS = {
   take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
   max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
   max_entry_drift_pct: [0.1, 100000], auto_pause_after_losses: [1, 1000],
-  trailing_stop_pct: [0.1, 100000],
+  trailing_stop_pct: [0.1, 100000], tp1_pct: [0.1, 100000], tp1_sell_pct: [1, 100],
   idle_timeout_ms: [10_000, 86_400_000], max_session_ms: [60_000, 86_400_000],
   max_session_notional_usd: [1, 1e9], lock_after_n_risk_rejections: [1, 100],
 };
@@ -125,7 +128,7 @@ export function validateConfigPatch(patch) {
     hard_risk: HARD_RISK_FIELDS,
     ev: [...EV_FIELDS, 'ev_gate_mode'],
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
-    copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct'],
+    copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct', 'breakeven_after_tp1'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
@@ -144,7 +147,7 @@ export function validateConfigPatch(patch) {
       }
       else if (field === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'drift_action' && !['skip', 'shrink'].includes(v)) errors.push({ field, error: 'invalid_enum' });
-      else if ((field === 'usdc_quote_enabled' || field === 'exit_on_leader_sell') && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
+      else if ((field === 'usdc_quote_enabled' || field === 'exit_on_leader_sell' || field === 'breakeven_after_tp1') && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
       else if (section === 'safety' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
       else if (field.endsWith('_ref')) {
         if (v !== null && (typeof v !== 'string' || !/^vault:[a-z0-9_.-]{2,64}$/i.test(v))) {

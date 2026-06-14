@@ -17,3 +17,26 @@ export function trailingStopHit({ pnlPct, peakPct, trailingPct }) {
   const ddFromPeakPct = (1 - (1 + pnlPct / 100) / (1 + peakPct / 100)) * 100;
   return ddFromPeakPct >= trailingPct;
 }
+
+/**
+ * First-tier (partial) take-profit. Fires once, when P&L first reaches `tp1Pct`, selling a
+ * fraction of the position (the caller applies tp1_sell_pct) and leaving the rest to ride.
+ * `done` = the position's persisted tp1_done flag. Off when tp1Pct is unset/≤0.
+ */
+export function firstTierHit({ pnlPct, tp1Pct, done }) {
+  if (done) return false;
+  if (!Number.isFinite(tp1Pct) || tp1Pct <= 0) return false;
+  if (!Number.isFinite(pnlPct)) return false;
+  return pnlPct >= tp1Pct;
+}
+
+/**
+ * Break-even stop (moonbag protection). After the first tier has banked profit, exit the
+ * remainder if the position falls back to break-even (pnl ≤ 0). Armed only when the position's
+ * tp1_done flag is set AND breakeven_after_tp1 is enabled.
+ */
+export function breakevenStopHit({ pnlPct, tp1Done, breakevenAfterTp1 }) {
+  if (!tp1Done || breakevenAfterTp1 !== true) return false;
+  if (!Number.isFinite(pnlPct)) return false;
+  return pnlPct <= 0;
+}

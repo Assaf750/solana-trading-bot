@@ -6,7 +6,7 @@ import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
 import { checkTokenSafety } from './token-safety.mjs';
 import { checkEvGate } from './ev-gate.mjs';
-import { trailingStopHit } from './exit-rules.mjs';
+import { trailingStopHit, firstTierHit, breakevenStopHit } from './exit-rules.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -488,6 +488,21 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         const peakPct = Math.max(p.peak_pnl_pct ?? pnlPct, pnlPct);
         if (trailingStopHit({ pnlPct, peakPct, trailingPct })) {
           await performExit({ pf, p, fraction: 1, reason: 'trailing_stop_hit' });
+          continue;
+        }
+        // break-even stop on the moonbag (only armed after the first tier banked profit)
+        const breakevenAfterTp1 = (w?.config?.breakeven_after_tp1 ?? cfg.copy_defaults?.breakeven_after_tp1) === true;
+        if (breakevenStopHit({ pnlPct, tp1Done: p.tp1_done, breakevenAfterTp1 })) {
+          await performExit({ pf, p, fraction: 1, reason: 'breakeven_stop' });
+          continue;
+        }
+        // first-tier partial take-profit: bank tp1_sell_pct of the position, let the rest ride
+        const tp1Pct = Number(w?.config?.tp1_pct ?? cfg.copy_defaults?.tp1_pct);
+        if (firstTierHit({ pnlPct, tp1Pct, done: p.tp1_done })) {
+          const sellPct = Number(w?.config?.tp1_sell_pct ?? cfg.copy_defaults?.tp1_sell_pct) || 50;
+          const frac = Math.min(1, Math.max(0.01, sellPct / 100));
+          await performExit({ pf, p, fraction: frac, reason: 'take_profit_tier1' });
+          pf.markTp1Done(p.position_id);
           continue;
         }
         if (pnlPct >= p.tp_pct) {
