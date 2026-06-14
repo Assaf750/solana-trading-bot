@@ -50,20 +50,7 @@ test('REAL-LIVE fails when Hard Risk limits are missing (no implicit infinity)',
   }
 });
 
-test('no config name is outside SSOT / 02-CONFIG', () => {
-  const docs = ['docs/01-SSOT.md', 'docs/02-CONFIG-AND-POLICY-SCHEMA.md']
-    .map((p) => readFileSync(join(ROOT, p), 'utf8')).join('\n');
-  const backtick = new Set();
-  for (const m of docs.matchAll(/`([^`]+)`/g)) {
-    for (const tok of m[1].split(/[^A-Za-z0-9_]+/)) if (tok) backtick.add(tok);
-  }
-  for (const obj of CONFIG_OBJECTS) {
-    assert.ok(backtick.has(obj), `config object not in docs: ${obj}`);
-    for (const field of Object.keys(FIELDS[obj])) {
-      assert.ok(backtick.has(field), `config field not in docs: ${obj}.${field}`);
-    }
-  }
-});
+// (SSOT/02-CONFIG doc cross-check removed — the governance docs are no longer in the repo.)
 
 test('no new threshold: every rule kind is from the whitelist; bounds use only 0 and 100', () => {
   for (const obj of CONFIG_OBJECTS) {

@@ -5,12 +5,9 @@ import * as core from '../src/core-enums.mjs';
 import { CANDIDATE_ENUMS, CANDIDATE_FIELDS } from '../src/candidate-enums.mjs';
 import { FORBIDDEN_NAMES } from '../src/forbidden.mjs';
 import { DEFERRED_CANDIDATES, CLAIMS_FULL_SSOT_COVERAGE } from '../src/coverage.mjs';
-import { runDriftCheck } from '../../../tools/check-ssot-drift.mjs';
 
-test('drift guard passes (no name outside SSOT, no forbidden, candidate prefixes intact)', () => {
-  const { ok, errors } = runDriftCheck();
-  assert.equal(ok, true, 'drift errors:\n' + errors.join('\n'));
-});
+// (SSOT drift-guard test removed — the docs-based SSOT governance gate is no longer used.
+//  The standalone enum / forbidden-registry / coverage invariants below still run.)
 
 test('core enums are frozen and non-empty', () => {
   for (const [name, values] of Object.entries(core.CORE_ENUMS)) {

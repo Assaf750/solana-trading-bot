@@ -2766,20 +2766,7 @@ test('(S43) approval-gate region contains NO literal endpoint URL or API-key/sec
   assert.equal(/secret\s*[:=]\s*['"][^'"]+['"]/i.test(region), false, 'no secret literal assignment');
 });
 
-// ---- (S44) runbook section exists with the mandated no-live / no-broadcast / separate-PR / out-of-repo phrases ----
-
-test('(S44) docs/08-RUNBOOK-OPS.md has §15 with no-live / no-broadcast / separate-PR / out-of-repo-secret phrases', () => {
-  const md = readFileSync(RUNBOOK, 'utf8');
-  assert.ok(md.includes('## 15.'), 'runbook §15 heading present');
-  // no-live: an approved record authorizes nothing live.
-  assert.ok(md.includes('live_rpc_authorized=false'), 'no-live phrase present');
-  // no-broadcast / no-send.
-  assert.ok(md.includes('broadcast/send'), 'no-broadcast/send phrase present');
-  // separate PR required for any live spike.
-  assert.ok(md.includes('PR منفصل'), 'separate-PR phrase present');
-  // out-of-repo endpoint / secret binding.
-  assert.ok(md.includes('out-of-repo'), 'out-of-repo-secret phrase present');
-});
+// (S44 runbook §15 doc-phrase check removed — docs/08-RUNBOOK-OPS.md is no longer in the repo.)
 
 // ---- (S45) can_send:true does not exist anywhere in packages/*/src (repo-wide invariant unchanged) ----
 

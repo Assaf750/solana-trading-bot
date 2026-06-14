@@ -15,7 +15,6 @@
     "fixtures"
   ],
   "scripts": {
-    "test": "node --test test",
-    "check:drift": "node ../../tools/check-ssot-drift.mjs"
+    "test": "node --test test"
   }
 }

@@ -8,10 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "check:drift": "node tools/check-ssot-drift.mjs",
-    "check:ssot-drift": "node tools/check-ssot-drift.mjs",
-    "check:mechanism-guards": "node tools/check-mechanism-guards.mjs",
     "test": "node --test",
-    "check:all": "node tools/check-ssot-drift.mjs && node tools/check-mechanism-guards.mjs && node --test"
+    "check:all": "node --test"
   }
 }

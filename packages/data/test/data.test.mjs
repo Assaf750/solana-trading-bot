@@ -77,19 +77,7 @@ test('no secrets / key material columns in migrations', () => {
   }
 });
 
-test('every API-facing data name is in SSOT / 05-DATA and not forbidden', () => {
-  const docs = ['docs/01-SSOT.md', 'docs/05-DATA-MODEL.md']
-    .map((p) => readFileSync(join(ROOT, p), 'utf8'));
-  const backtick = new Set();
-  for (const text of docs) for (const m of text.matchAll(/`([^`]+)`/g)) {
-    for (const tok of m[1].split(/[^A-Za-z0-9_]+/)) if (tok) backtick.add(tok);
-  }
-  const forbidden = new Set(FORBIDDEN_NAMES);
-  for (const name of API_DATA_NAMES) {
-    assert.ok(backtick.has(name), `data name not found in SSOT/05-DATA: ${name}`);
-    assert.equal(forbidden.has(name), false, `forbidden data name: ${name}`);
-  }
-});
+// (SSOT/05-DATA doc cross-check removed — the governance docs are no longer in the repo.)
 
 test('engine separation: ClickHouse holds no command-authority state tables', () => {
   // PostgreSQL owns authoritative state; ClickHouse is analytical/events/replay only.
