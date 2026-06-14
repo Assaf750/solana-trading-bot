@@ -58,6 +58,13 @@ const DEFAULTS = {
     max_entry_slippage_vs_leader: 5,
     min_mirror_sell_pct: 5,
   },
+  safety: {
+    // pre-trade anti-rug screen (fail-closed); each check independently toggleable
+    enabled: true,
+    require_mint_revoked: true,
+    require_freeze_revoked: true,
+    block_permanent_delegate: true,
+  },
   providers: {
     // refs only — raw keys live in the vault
     rpc_url_ref: null,        // e.g. vault:helius_rpc_url
@@ -112,6 +119,7 @@ export function validateConfigPatch(patch) {
     ev: [...EV_FIELDS, 'ev_gate_mode'],
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
+    safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
   };
@@ -129,6 +137,7 @@ export function validateConfigPatch(patch) {
       }
       else if (field === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'usdc_quote_enabled' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
+      else if (section === 'safety' && typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
       else if (field.endsWith('_ref')) {
         if (v !== null && (typeof v !== 'string' || !/^vault:[a-z0-9_.-]{2,64}$/i.test(v))) {
           errors.push({ field, error: 'must_be_vault_ref_or_null' });

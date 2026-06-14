@@ -4,6 +4,7 @@
 // REAL money never moves here: quotes only, fills simulated, always labeled simulated.
 import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
+import { checkTokenSafety } from './token-safety.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -140,6 +141,14 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       // never a benign pause/EXITS_ONLY/kill/unset-limit block (those would freeze the signer).
       if (isLive && signer && gate.riskRejection) signer.recordRiskRejection();
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: gate.rejections });
+      return;
+    }
+
+    // Token safety (anti-rug) pre-trade screen — reject ruggable mints (live mint/freeze authority,
+    // Token-2022 permanent delegate). Not a risk-cap breach, so it does NOT feed the signer lockout.
+    const safety = await checkTokenSafety({ mint: swap.mint, rpc, cfg });
+    if (!safety.safe) {
+      pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: safety.reasons.map((r) => `token_safety:${r}`) });
       return;
     }
 

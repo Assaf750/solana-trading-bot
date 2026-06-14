@@ -239,9 +239,13 @@ test('paper pipeline E2E: leader buy -> gates -> feasibility -> paper fill; bad 
       : { ok: false, error: 'quote_no_route' },
     usdValueOf: async () => routeHealthy ? { ok: true, usd: 9.6, priceImpactPct: 0.5 } : { ok: false, error: 'quote_no_route' },
   };
+  // rpc mock returns a SAFE mint (authorities revoked) so the anti-rug screen passes
+  const safeMintRpc = { rpc: async (m) => (m === 'getAccountInfo'
+    ? { ok: true, result: { value: { data: { parsed: { type: 'mint', info: { mintAuthority: null, freezeAuthority: null } } } } } }
+    : { ok: true, result: null }) };
   const engine = createPaperEngine({
     config, walletsRegistry, killSwitch, operatingState, vault: { isUnlocked: () => true, getSecretForUse: () => ({ ok: true, value: 'http://x' }) },
-    portfolio, rpc: {}, jupiter, audit: () => {}, broadcast: () => {},
+    portfolio, rpc: safeMintRpc, jupiter, audit: () => {}, broadcast: () => {},
   });
 
   const before = portfolio.openCount();
