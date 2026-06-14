@@ -53,6 +53,7 @@ export const api = {
   testProviderConnection: () => call('POST', '/api/providers/test-connection', {}),
   analyzeWallet: (address) => call('POST', '/api/wallets/analyze', { address }),
   discoverTokenTraders: (mint) => call('POST', '/api/discover/token-traders', { mint }),
+  discoverFromLeaders: () => call('POST', '/api/discover/from-leaders', {}),
   signerImportKey: (secret) => call('POST', '/api/signer/import-key', { secret }),
   signerWallet: () => call('POST', '/api/signer/wallet', {}),
   signerOpenSession: () => call('POST', '/api/signer/open-session', {}),

@@ -119,15 +119,25 @@ export function computeWalletStats(events, { solPriceUsd = null } = {}) {
 
 function round(n, d) { const f = 10 ** d; return Math.round(n * f) / f; }
 
+// Shared SOL/USD price cache (60s) so the bulk "analyze all" loop doesn't re-quote per wallet.
+let solPriceCache = { usd: null, at: 0 };
+async function cachedSolPriceUsd(jupiter) {
+  if (solPriceCache.usd != null && Date.now() - solPriceCache.at < 60000) return solPriceCache.usd;
+  const p = await jupiter.quote({ inputMint: 'So11111111111111111111111111111111111111112', outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', amountBaseUnits: 1e9 });
+  if (p.ok) solPriceCache = { usd: p.outAmount / 1e6, at: Date.now() };
+  return solPriceCache.usd;
+}
+
 /**
  * Fetch + analyze a wallet's recent history. Bounded (maxSignatures), rate-limited by
- * the rpc client. Read-only: getSignaturesForAddress + getTransaction only.
+ * the rpc client. Read-only: getSignaturesForAddress + getTransaction only. A wider window
+ * (150) captures more buy lots so high-volume wallets aren't dropped to insufficient_evidence.
  */
-export async function analyzeWallet({ address, rpc, jupiter, maxSignatures = 80 }) {
+export async function analyzeWallet({ address, rpc, jupiter, maxSignatures = 150 }) {
   const sigRes = await rpc.rpc('getSignaturesForAddress', [address, { limit: Math.min(200, maxSignatures) }]);
   if (!sigRes.ok) return { ok: false, error: sigRes.error };
-  const sigs = (sigRes.result || []).filter((s) => !s.err).map((s) => s.signature);
-  if (!sigs.length) return { ok: true, stats: computeWalletStats([]), fetched: 0 };
+  const sigs = (Array.isArray(sigRes.result) ? sigRes.result : []).filter((s) => !s.err).map((s) => s.signature);
+  if (!sigs.length) return { ok: true, stats: computeWalletStats([]), fetched: 0, signatures_scanned: 0 };
 
   const events = [];
   let fetched = 0;
@@ -141,9 +151,7 @@ export async function analyzeWallet({ address, rpc, jupiter, maxSignatures = 80 
     else if (swap.kind === 'sell') events.push({ kind: 'sell', mint: swap.mint, qtyUi: swap.uiDelta, quoteSol: swap.quoteReceived, ts });
   }
 
-  let solPriceUsd = null;
-  const p = await jupiter.quote({ inputMint: 'So11111111111111111111111111111111111111112', outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', amountBaseUnits: 1e9 });
-  if (p.ok) solPriceUsd = p.outAmount / 1e6;
+  const solPriceUsd = await cachedSolPriceUsd(jupiter);
 
   return { ok: true, fetched, signatures_scanned: sigs.length, stats: computeWalletStats(events, { solPriceUsd }) };
 }

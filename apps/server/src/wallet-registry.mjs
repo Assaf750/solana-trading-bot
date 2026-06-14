@@ -31,8 +31,11 @@ export function createWalletRegistry() {
       return { ok: false, api_error_code: 'CONFIG_VALIDATION_FAILED', error: 'invalid_copy_mode' };
     }
     const state = load();
-    if (state.wallets.some((w) => w.tracked_wallet_address === tracked_wallet_address)) {
-      return { ok: false, api_error_code: 'IDEMPOTENCY_CONFLICT', error: 'wallet_already_registered' };
+    const existing = state.wallets.find((w) => w.tracked_wallet_address === tracked_wallet_address);
+    if (existing) {
+      // return the existing wallet so callers (e.g. the radar Follow button) can act on it
+      // (enable follow) instead of dead-ending on a bare conflict with no id.
+      return { ok: false, api_error_code: 'IDEMPOTENCY_CONFLICT', error: 'wallet_already_registered', wallet: existing };
     }
     const wallet = {
       wallet_id: newId('w'),

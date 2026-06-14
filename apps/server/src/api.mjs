@@ -4,7 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
 
   function readiness() {
@@ -208,6 +208,13 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             return { status: 400, body: { ok: false, error: 'invalid_mint' } };
           }
           const r = await discoverTraders({ mint });
+          return { status: r.ok ? 200 : 502, body: r };
+        }
+        if (path === '/api/discover/from-leaders') {
+          // AUTOMATIC discovery — no mint needed; uses the followed leaders' recent tokens.
+          if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
+          if (typeof discoverFromLeaders !== 'function') return { status: 503, body: { ok: false, error: 'discovery_unavailable' } };
+          const r = await discoverFromLeaders();
           return { status: r.ok ? 200 : 502, body: r };
         }
         if (path === '/api/wallets/analyze') {

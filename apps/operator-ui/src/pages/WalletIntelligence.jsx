@@ -55,8 +55,9 @@ export default function WalletIntelligence() {
     setAnalysis((a) => ({ ...a, [w.wallet_id]: r.ok ? { data: r.data } : { error: r.data?.error || 'failed' } }));
   }
   async function analyzeAll() {
-    const targets = wallets.filter((w) => w.follow_enabled);
-    for (const w of targets) { await analyze(w); } // sequential — respects RPC budget
+    // analyze the currently SHOWN wallets (honors search/filter) so candidates can be
+    // ranked BEFORE following — not only already-followed ones.
+    for (const w of view) { await analyze(w); } // sequential — respects RPC budget
   }
 
   const view = useMemo(() => {
@@ -68,7 +69,15 @@ export default function WalletIntelligence() {
     if (filter === 'followed') list = list.filter((w) => w.follow_enabled);
     else if (filter === 'off') list = list.filter((w) => !w.follow_enabled);
     else if (filter === 'analyzed') list = list.filter((w) => statsOf(w));
-    const num = (w, k) => { const s = statsOf(w); if (!s) return -Infinity; return k === 'win' ? (s.win_rate ?? -Infinity) : k === 'pnl' ? (s.realized_pnl_sol ?? -Infinity) : (s.trades_closed ?? -Infinity); };
+    const num = (w, k) => {
+      const s = statsOf(w);
+      if (!s) return -Infinity;
+      if (k === 'pnl') return s.realized_pnl_sol ?? -Infinity;
+      if (k === 'trades') return s.trades_closed ?? -Infinity;
+      // win: discount low-sample win rates (trades<3) so a lucky 1-trade 100% doesn't outrank a solid record
+      if (s.win_rate == null) return -Infinity;
+      return s.win_rate * Math.min(1, (s.trades_closed || 0) / 3);
+    };
     if (sortKey !== 'recent') list.sort((a, b) => num(b, sortKey) - num(a, sortKey));
     return list;
   }, [wallets, search, filter, sortKey, analysis]);
@@ -76,7 +85,9 @@ export default function WalletIntelligence() {
   const selected = wallets.find((w) => w.wallet_id === selectedId) || null;
   const followedCount = wallets.filter((w) => w.follow_enabled).length;
   const analyzedStats = wallets.map(statsOf).filter(Boolean);
-  const avgWin = analyzedStats.length ? analyzedStats.reduce((a, s) => a + (s.win_rate || 0), 0) / analyzedStats.length : null;
+  // average only over wallets that actually have a win rate (exclude null/no-closed-trades)
+  const ranked = analyzedStats.filter((s) => s.win_rate != null);
+  const avgWin = ranked.length ? ranked.reduce((a, s) => a + s.win_rate, 0) / ranked.length : null;
 
   if (!connected) {
     return (
@@ -118,7 +129,7 @@ export default function WalletIntelligence() {
           ))}
         </div>
         <div className="sep" />
-        <button className="btn" onClick={analyzeAll} disabled={!followedCount}>{ar ? '🔍 تحليل المتابَعة' : '🔍 Analyze followed'}</button>
+        <button className="btn" onClick={analyzeAll} disabled={!view.length}>{ar ? '🔍 تحليل المعروضة' : '🔍 Analyze shown'}</button>
         <button className="btn primary" onClick={() => setShowAdd((v) => !v)}>{ar ? '＋ محفظة' : '＋ Wallet'}</button>
       </div>
 
