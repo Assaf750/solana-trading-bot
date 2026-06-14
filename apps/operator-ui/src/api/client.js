@@ -9,11 +9,19 @@ async function call(method, path, body) {
   // defeating cross-site "simple request" CSRF against the local trading API.
   const headers = { 'x-soltrade-client': '1' };
   if (body !== undefined) headers['content-type'] = 'application/json';
-  const res = await fetch(`${API_BASE}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      // generous ceiling so a hung request can't pin the UI forever (heavy scans still finish);
+      // a true network error / timeout returns a clean {ok:false} instead of throwing.
+      signal: AbortSignal.timeout(120000),
+    });
+  } catch {
+    return { status: 0, ok: false, data: null };
+  }
   let data = null;
   try { data = await res.json(); } catch { data = null; }
   return { status: res.status, ok: res.ok, data };

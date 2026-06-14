@@ -56,8 +56,12 @@ export default function WalletIntelligence() {
   }
   async function analyzeAll() {
     // analyze the currently SHOWN wallets (honors search/filter) so candidates can be
-    // ranked BEFORE following — not only already-followed ones.
-    for (const w of view) { await analyze(w); } // sequential — respects RPC budget
+    // ranked BEFORE following — not only already-followed ones. Capped so a broad filter
+    // can't fire an unbounded RPC burst that competes with the live trading engine.
+    const MAX = 30;
+    const targets = view.slice(0, MAX);
+    for (const w of targets) { await analyze(w); } // sequential — respects RPC budget
+    if (view.length > MAX) note('info', `حُلِّلت أول ${MAX} فقط — ضيّق الفلتر/البحث للمزيد`, `Analyzed first ${MAX} only — narrow the filter/search for more`);
   }
 
   const view = useMemo(() => {

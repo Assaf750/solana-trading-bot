@@ -124,8 +124,8 @@ let solPriceCache = { usd: null, at: 0 };
 async function cachedSolPriceUsd(jupiter) {
   if (solPriceCache.usd != null && Date.now() - solPriceCache.at < 60000) return solPriceCache.usd;
   const p = await jupiter.quote({ inputMint: 'So11111111111111111111111111111111111111112', outputMint: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', amountBaseUnits: 1e9 });
-  if (p.ok) solPriceCache = { usd: p.outAmount / 1e6, at: Date.now() };
-  return solPriceCache.usd;
+  if (p.ok) { solPriceCache = { usd: p.outAmount / 1e6, at: Date.now() }; return solPriceCache.usd; }
+  return null; // refresh failed: return null rather than serving a stale price as current
 }
 
 /**

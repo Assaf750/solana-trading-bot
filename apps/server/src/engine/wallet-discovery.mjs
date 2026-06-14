@@ -7,27 +7,28 @@
 // No money, no execution — discovery is read-only and never a buy signal.
 import { detectLeaderSwap } from './swap-detector.mjs';
 
-/** PURE: distinct owner wallets whose balance in `mint` actually changed in this tx. */
+const CHANGE_EPS = 1e-9; // ignore sub-dust float noise in uiAmount deltas
+
+/** PURE: distinct owner wallets whose total `mint` balance actually changed in this tx.
+ *  Balances are SUMMED per owner (an owner may hold the mint in several token accounts),
+ *  so multi-account owners aren't mis-flagged and an exit (post total 0) counts as a change. */
 export function extractTradersFromTx(txResult, mint) {
   try {
     const meta = txResult?.meta;
     if (!meta || meta.err) return [];
-    const pre = new Map();
-    for (const b of meta.preTokenBalances || []) {
-      if (b.mint === mint && b.owner) pre.set(b.owner, Number(b.uiTokenAmount?.uiAmount ?? 0));
-    }
+    const sumByOwner = (list) => {
+      const m = new Map();
+      for (const b of list || []) {
+        if (b.mint === mint && b.owner) m.set(b.owner, (m.get(b.owner) || 0) + Number(b.uiTokenAmount?.uiAmount ?? 0));
+      }
+      return m;
+    };
+    const pre = sumByOwner(meta.preTokenBalances);
+    const post = sumByOwner(meta.postTokenBalances);
     const owners = new Set();
-    const postOwners = new Set();
-    for (const b of meta.postTokenBalances || []) {
-      if (b.mint !== mint || !b.owner) continue;
-      postOwners.add(b.owner);
-      const before = pre.get(b.owner) ?? 0;
-      const after = Number(b.uiTokenAmount?.uiAmount ?? 0);
-      if (Math.abs(after - before) > 0) owners.add(b.owner); // balance changed => traded
+    for (const owner of new Set([...pre.keys(), ...post.keys()])) {
+      if (Math.abs((post.get(owner) ?? 0) - (pre.get(owner) ?? 0)) > CHANGE_EPS) owners.add(owner);
     }
-    // wallets that FULLY exited in this tx: held the token pre, absent from post.
-    // (Unchanged holders that appear in both pre and post are NOT traders — excluded.)
-    for (const [owner, amt] of pre) if (amt > 0 && !postOwners.has(owner)) owners.add(owner);
     return [...owners];
   } catch {
     return [];
@@ -60,8 +61,9 @@ export async function discoverTokenTraders({ mint, rpc, maxSignatures = 60, maxR
   // they are the swap counterparty, not a wallet worth copying. Only when the sample is big
   // enough to be meaningful (>=10 trade-bearing txs) to avoid false positives on thin tokens.
   const poolCutoff = txWithTraders >= 10 ? txWithTraders * 0.7 : Infinity;
-  const traders = [...counts.entries()]
-    .filter(([, n]) => n < poolCutoff)
+  let kept = [...counts.entries()].filter(([, n]) => n < poolCutoff);
+  if (!kept.length) kept = [...counts.entries()]; // never return empty SOLELY because of the pool filter
+  const traders = kept
     .map(([address, swaps_seen]) => ({ address, swaps_seen }))
     .sort((a, b) => b.swaps_seen - a.swaps_seen)
     .slice(0, maxResults);
@@ -69,10 +71,11 @@ export async function discoverTokenTraders({ mint, rpc, maxSignatures = 60, maxR
   return { ok: true, mint, scanned, signatures_seen: sigs.length, fetch_failures: fetchFailures, traders, provenance: 'on_chain' };
 }
 
-/** PURE-ish: the token mints a wallet recently BOUGHT, most-frequent first. */
+/** PURE-ish: the token mints a wallet recently BOUGHT, most-frequent first.
+ *  Returns null on an RPC failure (so the caller can tell an outage from "no recent buys"). */
 async function recentBuyMints({ address, rpc, maxSignatures = 25 }) {
   const sigRes = await rpc.rpc('getSignaturesForAddress', [address, { limit: Math.min(60, maxSignatures) }]);
-  if (!sigRes.ok) return [];
+  if (!sigRes.ok) return null;
   const sigs = (Array.isArray(sigRes.result) ? sigRes.result : []).filter((s) => !s.err).map((s) => s.signature);
   const freq = new Map();
   for (const sig of sigs) {
@@ -96,10 +99,15 @@ export async function discoverFromLeaders({ leaders, rpc, maxLeaders = 5, mintsP
 
   // 1) tokens the leaders recently bought
   const mintFreq = new Map();
-  for (const leader of leaderList.slice(0, maxLeaders)) {
+  const scanned = leaderList.slice(0, maxLeaders);
+  let leaderFailures = 0;
+  for (const leader of scanned) {
     const mints = await recentBuyMints({ address: leader, rpc });
+    if (mints == null) { leaderFailures += 1; continue; } // RPC failure (not "no buys")
     for (const m of mints.slice(0, mintsPerLeader)) mintFreq.set(m, (mintFreq.get(m) || 0) + 1);
   }
+  // honest failure: if EVERY leader fetch failed, this is an RPC outage, not "no leaders"
+  if (scanned.length > 0 && leaderFailures === scanned.length) return { ok: false, error: 'rpc_fetch_failed' };
   const topMints = [...mintFreq.entries()].sort((a, b) => b[1] - a[1]).slice(0, maxMints).map(([m]) => m);
   if (!topMints.length) {
     return { ok: true, scanned_leaders: Math.min(maxLeaders, leaderList.length), mints_seen: 0, traders: [], provenance: 'on_chain_leader_graph' };

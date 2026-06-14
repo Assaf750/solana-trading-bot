@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
@@ -18,14 +18,26 @@ export default function NewCoinRadar() {
   const [followed, setFollowed] = useState({}); // address -> true | 'error'
   const [regMode, setRegMode] = useState('follow_entry_user_exit'); // copy mode applied on Follow
   const [sortBy, setSortBy] = useState('activity'); // activity | quality
+  const scanId = useRef(0); // bumps on each scan so a stale Analyze-all loop can stop
+
+  // hydrate the followed indicators from the registry so already-followed wallets show ✓
+  useEffect(() => {
+    if (!connected) return;
+    api.wallets().then((r) => {
+      if (!r.ok) return;
+      const m = {};
+      for (const w of (r.data.wallets || [])) if (w.follow_enabled) m[w.tracked_wallet_address] = true;
+      setFollowed(m);
+    });
+  }, [connected]);
 
   async function discover() {
-    setState({ loading: true });
+    setState({ loading: true }); setAnalysis({}); scanId.current += 1;
     const r = await api.discoverTokenTraders(mint.trim());
     setState(r.ok && r.data ? { data: r.data, mode: 'token' } : { error: r.data?.error || 'failed' });
   }
   async function autoDiscover() {
-    setState({ loading: true });
+    setState({ loading: true }); setAnalysis({}); scanId.current += 1;
     const r = await api.discoverFromLeaders();
     setState(r.ok && r.data ? { data: r.data, mode: 'leaders' } : { error: r.data?.error || 'failed' });
   }
@@ -36,7 +48,11 @@ export default function NewCoinRadar() {
     setAnalysis((a) => ({ ...a, [addr]: r.ok && r.data ? { data: r.data.stats } : { error: r.data?.error || 'failed' } }));
   }
   async function analyzeAll() {
-    for (const tr of (state?.data?.traders || [])) { await analyze(tr.address); } // sequential — respects RPC budget
+    const my = scanId.current;
+    for (const tr of (state?.data?.traders || [])) {
+      if (scanId.current !== my) break; // a new scan started — stop writing stale analysis
+      await analyze(tr.address); // sequential — respects RPC budget
+    }
   }
   async function follow(addr) {
     const r = await api.registerWallet({ tracked_wallet_address: addr, label: '', copy_mode: regMode });
@@ -64,6 +80,7 @@ export default function NewCoinRadar() {
     return list;
   }, [state, analysis, sortBy]);
   const metric = (tr) => (tr.swaps_seen ?? tr.shared_tokens ?? 0);
+  const anyAnalyzed = traders.some((t) => analysis[t.address]?.data);
 
   if (!connected) {
     return (
@@ -109,7 +126,7 @@ export default function NewCoinRadar() {
           {traders.length === 0 ? (
             <EmptyState message={leaderMode
               ? (state.data.mints_seen === 0
-                ? (ar ? 'تابِع محفظة قائدة واحدة على الأقل أولاً ليبدأ البحث التلقائي' : 'Follow at least one leader wallet first to seed auto-search')
+                ? (ar ? 'تابِع محفظة قائدة واحدة على الأقل أولاً (استخدم «اكتشف بالعقد» لإيجاد واحدة) ليبدأ البحث التلقائي' : 'Follow at least one leader wallet first (use “Search by contract” to find one) to seed auto-search')
                 : (ar ? 'لم تُرصد محافظ متطابقة بعد' : 'No matching wallets surfaced yet'))
               : (ar ? 'لم تُرصد محافظ — جرّب عقداً أكثر نشاطاً' : 'No wallets found — try a more active coin')} />
           ) : (
@@ -129,6 +146,7 @@ export default function NewCoinRadar() {
                     <button className={sortBy === 'quality' ? 'on' : ''} onClick={() => setSortBy('quality')}>{ar ? 'الجودة' : 'quality'}</button>
                   </div>
                   <button className="btn" onClick={analyzeAll}>{ar ? '🔍 حلّل الكل' : '🔍 Analyze all'}</button>
+                  {sortBy === 'quality' && !anyAnalyzed && <span className="faint fs-xs">{ar ? 'حلّل أولاً للترتيب بالجودة' : 'analyze first to rank by quality'}</span>}
                 </div>
               </div>
               <div className="wlist">

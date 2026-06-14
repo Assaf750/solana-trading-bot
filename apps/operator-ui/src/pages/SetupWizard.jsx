@@ -103,8 +103,11 @@ export default function SetupWizard() {
   async function doWallet() {
     setMsg(null);
     const r = await api.registerWallet({ tracked_wallet_address: walletAddr.trim(), label: walletLabel.trim() });
-    if (!r.ok) { note('danger', `${r.data?.error || r.data?.api_error_code || 'rejected'}`, `${r.data?.error || r.data?.api_error_code || 'rejected'}`); return; }
-    await api.setFollow(r.data.wallet.wallet_id, true);
+    // backend returns the wallet on success AND on IDEMPOTENCY_CONFLICT — recover the id either
+    // way so an already-registered wallet still gets follow enabled (no silent onboarding dead-end).
+    const wallet = r.data?.wallet;
+    if (!wallet?.wallet_id) { note('danger', `${r.data?.error || r.data?.api_error_code || 'rejected'}`, `${r.data?.error || r.data?.api_error_code || 'rejected'}`); return; }
+    await api.setFollow(wallet.wallet_id, true);
     setWalletAddr(''); setWalletLabel('');
     note('ok', 'سُجّلت المحفظة وفُعّلت المتابعة ✓', 'Wallet registered and follow enabled ✓');
     refresh(); loadWallets();

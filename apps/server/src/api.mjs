@@ -6,6 +6,9 @@ import { computeReadiness } from './readiness.mjs';
 
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
+  // Single-flight for the heavy on-chain scans: only one runs at a time so re-clicks can't
+  // stack and compound RPC pressure on the shared client the live trading engine also uses.
+  let discoveryBusy = false;
 
   function readiness() {
     return computeReadiness({ config, vault, killSwitch, signerStatus: signer.status() });
@@ -207,15 +210,19 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
             return { status: 400, body: { ok: false, error: 'invalid_mint' } };
           }
-          const r = await discoverTraders({ mint });
-          return { status: r.ok ? 200 : 502, body: r };
+          if (discoveryBusy) return { status: 429, body: { ok: false, error: 'scan_in_progress' } };
+          discoveryBusy = true;
+          try { const r = await discoverTraders({ mint }); return { status: r.ok ? 200 : 502, body: r }; }
+          finally { discoveryBusy = false; }
         }
         if (path === '/api/discover/from-leaders') {
           // AUTOMATIC discovery — no mint needed; uses the followed leaders' recent tokens.
           if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
           if (typeof discoverFromLeaders !== 'function') return { status: 503, body: { ok: false, error: 'discovery_unavailable' } };
-          const r = await discoverFromLeaders();
-          return { status: r.ok ? 200 : 502, body: r };
+          if (discoveryBusy) return { status: 429, body: { ok: false, error: 'scan_in_progress' } };
+          discoveryBusy = true;
+          try { const r = await discoverFromLeaders(); return { status: r.ok ? 200 : 502, body: r }; }
+          finally { discoveryBusy = false; }
         }
         if (path === '/api/wallets/analyze') {
           // READ-ONLY historical wallet intelligence. Needs unlocked vault (uses the RPC key).
