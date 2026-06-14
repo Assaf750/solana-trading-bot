@@ -4,7 +4,10 @@ Replaces the WebSocket `logsSubscribe`/`transactionSubscribe` ingestion with
 **Yellowstone/Geyser gRPC** (intra-slot streaming, reliable under load). Start with
 a managed gRPC endpoint — do NOT self-host a node yet.
 
-Status: **Phase 1 — to build.** Skeleton only.
+Status: **Phase 1 — built (Node/TS).** `createGrpcIngestor` + pure `parseYellowstoneUpdate`,
+unit-tested with a mock stream. The real `@triton-one/yellowstone-grpc` client is an
+optional dependency, lazy-loaded only at runtime (tests/import never require it). Wire a
+managed gRPC endpoint via `GRPC_ENDPOINT`/`GRPC_TOKEN`/`LEADER_ADDRESSES` and run `npm start`.
 
 ## Contract with `apps/server`
 Emits the SAME event shape the engine already consumes via `subscribeWallets`:

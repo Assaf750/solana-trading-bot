@@ -1,0 +1,15 @@
+{
+  "name": "@soltrade/ingestor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Yellowstone/Geyser gRPC leader-trade ingestion. Emits the same event shape as apps/server subscribeWallets.",
+  "main": "src/index.mjs",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/run.mjs"
+  },
+  "optionalDependencies": {
+    "@triton-one/yellowstone-grpc": "^1.3.0"
+  }
+}

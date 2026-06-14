@@ -3,7 +3,10 @@
 OFFLINE analytics & ML, **never on the hot path**: leader/wallet scoring,
 backtesting, PnL analytics over ClickHouse. Async, decoupled.
 
-Status: **Phase 1 — to build.** Skeleton only.
+Status: **Phase 1 — built (Python, stdlib-only).** `analytics.score_leaders` ranks followed
+leaders from the engine event log; `analytics.backtest` reconstructs the realized equity curve
++ max drawdown. Runs with no `pip install`; tests via stdlib `unittest`
+(`python -m unittest discover -s tests -t .`). Optional `[ml]` extra adds pandas/sklearn/ClickHouse.
 
 ## Responsibilities
 - Score followed wallets (which leaders are worth copying — the real alpha).

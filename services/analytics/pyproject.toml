@@ -1,0 +1,16 @@
+[project]
+name = "soltrade-analytics"
+version = "0.1.0"
+description = "Offline analytics & ML sidecar: leader scoring, backtesting, PnL over ClickHouse."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+ml = ["pandas>=2.0", "scikit-learn>=1.3", "clickhouse-connect>=0.7"]
+
+[project.scripts]
+score-leaders = "analytics.score_leaders:main"
+backtest = "analytics.backtest:main"
+
+[tool.setuptools.packages.find]
+include = ["analytics*"]
