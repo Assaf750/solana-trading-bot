@@ -114,6 +114,12 @@ export default function SetupWizard() {
   }
 
   const pct = Math.round(((activeStep - 1) / 4) * 100);
+  const STEPS = [
+    { n: 1, done: step1Done, label: ar ? 'الخزنة المشفّرة' : 'Encrypted vault' },
+    { n: 2, done: rpcDone, label: ar ? 'مفتاح RPC' : 'RPC key' },
+    { n: 3, done: limitsDone, label: ar ? 'حدود المخاطر' : 'Risk limits' },
+    { n: 4, done: walletDone, label: ar ? 'أول محفظة' : 'First wallet' },
+  ];
 
   return (
     <div className="stack">
@@ -122,8 +128,16 @@ export default function SetupWizard() {
         sub={ar ? 'أربع خطوات حتى يبدأ التداول الورقي تلقائياً — كل سرّ يُشفَّر على جهازك' : 'Four steps until paper trading starts automatically — every secret encrypted on your machine'}
       />
 
-      <Card title={ar ? `التقدّم: ${activeStep > 4 ? 'مكتمل' : `الخطوة ${activeStep} من 4`}` : `Progress: ${activeStep > 4 ? 'complete' : `step ${activeStep} of 4`}`}>
-        <div style={{ background: 'var(--c-bg-elev-2)', borderRadius: 8, height: 10, overflow: 'hidden' }}>
+      <Card title={ar ? `التقدّم: ${activeStep > 4 ? 'مكتمل ✓' : `الخطوة ${activeStep} من 4`}` : `Progress: ${activeStep > 4 ? 'complete ✓' : `step ${activeStep} of 4`}`}>
+        <div className="stepper">
+          {STEPS.map((s) => (
+            <div key={s.n} className={`stp ${s.done ? 'done' : activeStep === s.n ? 'active' : ''}`}>
+              <div className="node" aria-hidden>{s.done ? '✓' : s.n}</div>
+              <span className="stp-label">{s.label}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ background: 'var(--c-bg-elev-2)', borderRadius: 8, height: 6, overflow: 'hidden', marginBlockStart: 'var(--s-3)' }}>
           <div style={{ width: `${pct}%`, height: '100%', background: 'var(--c-ok, #46a758)', transition: 'width .3s' }} />
         </div>
         {msg && <div style={{ marginBlockStart: 10 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
