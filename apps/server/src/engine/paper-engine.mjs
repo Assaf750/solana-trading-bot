@@ -4,6 +4,7 @@
 // REAL money never moves here: quotes only, fills simulated, always labeled simulated.
 import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
+import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
 const EVENTS_FILE = 'engine-events.json';
@@ -24,6 +25,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   const processedSigs = [];
   const processedSet = new Set();
   let lastEventAt = null;
+  const latency = createLatencyTracker(); // Phase 0: measure before any Rust/gRPC investment
 
   function pushEvent(ev) {
     const s = readJson(EVENTS_FILE, { events: [] }).value;
@@ -297,17 +299,28 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   // (no round-trip); null on generic logsSubscribe (we fetch once, deduped).
   async function onLeaderActivity({ signature, tx: txInline }) {
     if (!rememberSig(signature)) return;
-    lastEventAt = Date.now();
+    const recvAt = Date.now();
+    lastEventAt = recvAt;
     let txResult = txInline;
     if (!txResult) {
       const tx = await rpc.getTransaction(signature);
       if (!tx.ok || !tx.result) return;
       txResult = tx.result;
     }
+    // Phase 0 gate: how stale was the leader signal when we received it? Solana blockTime is
+    // in SECONDS; this lag is exactly what a gRPC/ShredStream ingestion upgrade would shrink.
+    const blockTimeMs = Number.isFinite(txResult?.blockTime) ? txResult.blockTime * 1000 : null;
+    let acted = false;
     for (const w of followedWallets()) {
       const swap = detectLeaderSwap({ tx: txResult, leaderAddress: w.tracked_wallet_address });
-      if (swap.kind === 'buy') await handleLeaderBuy({ leader: w.tracked_wallet_address, wallet: w, swap, signature });
-      else if (swap.kind === 'sell') await handleLeaderSell({ leader: w.tracked_wallet_address, wallet: w, swap, signature });
+      if (swap.kind === 'buy') { await handleLeaderBuy({ leader: w.tracked_wallet_address, wallet: w, swap, signature }); acted = true; }
+      else if (swap.kind === 'sell') { await handleLeaderSell({ leader: w.tracked_wallet_address, wallet: w, swap, signature }); acted = true; }
+    }
+    if (acted) {
+      latency.record({
+        ingestion_lag_ms: blockTimeMs != null ? recvAt - blockTimeMs : undefined,
+        decision_ms: Date.now() - recvAt,
+      });
     }
   }
   // back-compat alias used by tests/probes
@@ -518,5 +531,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { ok: false, error: 'position_not_found' };
   }
 
-  return { start, stop, status, events, closePosition, resolvePosition, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, desiredState } };
+  /** Phase 0 latency report (pipeline-lag percentiles). Decides whether the gRPC/Rust
+   *  investment is justified — see docs/RESTRUCTURE_PLAN.md. */
+  function latencyReport() { return latency.summary(); }
+
+  return { start, stop, status, events, closePosition, resolvePosition, latencyReport, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, desiredState } };
 }

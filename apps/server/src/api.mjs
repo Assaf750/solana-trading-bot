@@ -190,6 +190,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/intents') {
           return { status: 200, body: { intents: liveExecutor ? liveExecutor.intents(80) : [] } };
         }
+        if (path === '/api/latency') {
+          // Phase 0 gate: pipeline-lag percentiles (decides the gRPC/Rust investment)
+          return { status: 200, body: paperEngine && typeof paperEngine.latencyReport === 'function' ? paperEngine.latencyReport() : { count: 0, metrics: {} } };
+        }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }
 
