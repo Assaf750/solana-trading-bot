@@ -19,15 +19,15 @@ import Alerts from './pages/Alerts.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
 const NAV = [
-  { sec: { en: 'Start', ar: 'البداية' } },
-  { to: '/setup', key: 'setup', ico: '✦' },
+  { sec: { en: 'Overview', ar: 'النظرة العامة' } },
   { to: '/command', key: 'command', ico: '◈' },
   { sec: { en: 'Trading', ar: 'التداول' } },
   { to: '/workspace', key: 'workspace', ico: '▤' },
   { to: '/radar', key: 'radar', ico: '◎' },
   { to: '/wallets', key: 'wallets', ico: '◇' },
   { to: '/analytics', key: 'analytics', ico: '▦' },
-  { sec: { en: 'Account & System', ar: 'الحساب والنظام' } },
+  { sec: { en: 'Setup & System', ar: 'الإعداد والنظام' } },
+  { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/funds', key: 'funds', ico: '◰' },
   { to: '/settings', key: 'settings', ico: '⚙' },
   { to: '/alerts', key: 'alerts', ico: '⚑' },
@@ -176,7 +176,7 @@ export default function App() {
         <TopBar onOpenCmdk={() => setCmdkOpen(true)} onOpenTweaks={() => setTweaksOpen(true)} />
         <main className="content">
           <Routes>
-            <Route path="/" element={<Navigate to="/setup" replace />} />
+            <Route path="/" element={<Navigate to="/command" replace />} />
             <Route path="/setup" element={<SetupWizard />} />
             <Route path="/command" element={<CommandCenter />} />
             <Route path="/workspace" element={<TradingWorkspace />} />
@@ -187,7 +187,7 @@ export default function App() {
             <Route path="/settings" element={<SettingsSafety />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/help" element={<HelpGlossary />} />
-            <Route path="*" element={<Navigate to="/setup" replace />} />
+            <Route path="*" element={<Navigate to="/command" replace />} />
           </Routes>
         </main>
       </div>
