@@ -15,7 +15,7 @@ function mockSpawn() {
         const req = JSON.parse(line);
         const resp = req.op === 'ping'
           ? { ok: true, op: 'pong' }
-          : { ok: true, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
+          : { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
         stdout.write(`${JSON.stringify(resp)}\n`);
         return true;
       },
@@ -46,6 +46,29 @@ test('hot-executor-client: concurrent requests correlate FIFO', async () => {
   assert.equal(a.signatureB58, 'SIG_A');
   assert.equal(b.signatureB58, 'SIG_B');
   assert.equal(c.signatureB58, 'SIG_C');
+  client.close();
+});
+
+test('hot-executor-client: a mismatched correlation id is refused (not handed back as a signature)', async () => {
+  function badSpawn() {
+    const stdout = new PassThrough();
+    const handlers = {};
+    return {
+      stdout,
+      stdin: {
+        writable: true,
+        // echo a WRONG intent_id to simulate a desynced/stray response line
+        write() { stdout.write(`${JSON.stringify({ ok: true, intent_id: 'WRONG', signature: 'X', signed_tx_base64: 'Y', signer_address: 'Z' })}\n`); return true; },
+        end() {},
+      },
+      on(ev, cb) { handlers[ev] = cb; return this; },
+      kill() {},
+    };
+  }
+  const client = createHotExecutorClient({ binPath: 'mock', spawnFn: badSpawn });
+  const r = await client.sign({ txBase64: 'ABC', seed: Buffer.from([1]) });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'response_mismatch');
   client.close();
 });
 

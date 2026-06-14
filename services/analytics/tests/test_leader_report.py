@@ -59,6 +59,28 @@ class LeaderReportTest(unittest.TestCase):
         self.assertIsNone(parse_ts("nope"))
         self.assertIsNone(parse_ts(None))
 
+    def test_naive_ts_does_not_crash_window(self):
+        # a timezone-naive ts must be normalized to UTC, not raise aware-vs-naive TypeError
+        self.assertIsNotNone(parse_ts("2026-06-14T00:00:00").tzinfo)
+        evs = [
+            {"kind": "paper_entry", "position_id": "p1", "leader": "A"},
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": 5.0, "ts": "2026-06-13T00:00:00"},  # naive
+        ]
+        m = leader_metrics(evs, now=NOW, window_days=7)  # would TypeError before the fix
+        self.assertEqual(len(m), 1)
+        self.assertEqual(m[0].trades, 1)
+
+    def test_partial_exits_count_as_one_position(self):
+        evs = [
+            {"kind": "paper_entry", "position_id": "p1", "leader": "A"},
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": 30.0, "ts": "2026-06-13T00:00:00.000Z"},
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": -10.0, "ts": "2026-06-13T01:00:00.000Z"},
+        ]
+        m = leader_metrics(evs, now=NOW)
+        self.assertEqual(m[0].trades, 1)              # one position
+        self.assertEqual(m[0].total_realized_usd, 20.0)
+        self.assertEqual(m[0].wins, 1)                # net positive => win
+
 
 if __name__ == "__main__":
     unittest.main()

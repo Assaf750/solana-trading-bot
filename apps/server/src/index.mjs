@@ -88,6 +88,8 @@ async function jitoSendBundle(txsBase64) {
     if (!res.ok) return { ok: false, error: `jito_http_${res.status}` };
     const j = await res.json();
     if (j.error) return { ok: false, error: `jito_${j.error.code ?? 'err'}` };
+    // a 200 with no bundle id is NOT an accept — treat as failure so submitSigned falls back to RPC
+    if (!j.result) return { ok: false, error: 'jito_no_bundle_id' };
     return { ok: true, result: j.result };
   } catch (e) {
     return { ok: false, error: `jito_failed_${String(e?.name || 'err')}` };

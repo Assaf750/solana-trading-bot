@@ -15,6 +15,14 @@ out/
 .pnpm-store/
 coverage/
 
+# === Python (services/analytics) ===
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+
 # === Secrets / Local env (NEVER commit — Gate A is non-trading, no secrets) ===
 .env
 .env.*

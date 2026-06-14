@@ -4,13 +4,19 @@
 // keep a single source of truth.
 import { b58encode } from './base58.mjs';
 
-function mapTokenBalance(b) {
+// owner/mint may arrive as a base58 string OR raw bytes depending on the client version — encode
+// bytes, pass strings through, so the swap-detector's string comparison always matches.
+function mapKey(k, b58) {
+  return (k == null || typeof k === 'string') ? k : b58(k);
+}
+
+function mapTokenBalance(b, b58) {
   const ui = b?.uiTokenAmount || {};
   const uiAmount = ui.uiAmount != null ? Number(ui.uiAmount)
     : (ui.uiAmountString != null ? Number(ui.uiAmountString) : 0);
   return {
-    owner: b?.owner,                 // yellowstone delivers owner/mint as base58 strings already
-    mint: b?.mint,
+    owner: mapKey(b?.owner, b58),
+    mint: mapKey(b?.mint, b58),
     uiTokenAmount: { uiAmount, decimals: ui.decimals, amount: ui.amount },
   };
 }
@@ -36,8 +42,8 @@ export function parseYellowstoneUpdate(update, { b58 = b58encode } = {}) {
       err: meta?.err || null,
       preBalances: meta?.preBalances || [],
       postBalances: meta?.postBalances || [],
-      preTokenBalances: (meta?.preTokenBalances || []).map(mapTokenBalance),
-      postTokenBalances: (meta?.postTokenBalances || []).map(mapTokenBalance),
+      preTokenBalances: (meta?.preTokenBalances || []).map((b) => mapTokenBalance(b, b58)),
+      postTokenBalances: (meta?.postTokenBalances || []).map((b) => mapTokenBalance(b, b58)),
     },
   };
   return { signature, tx };

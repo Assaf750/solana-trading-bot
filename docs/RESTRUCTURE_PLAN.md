@@ -58,6 +58,10 @@ ONLY — never share business logic. Rust and Python stay as clean isolated serv
 ### Phase 0 — measure (the gate) · NOW · low risk
 - Instrument the pipeline: `ingestion_lag_ms` (leader tx blockTime → our receipt)
   and `decision_ms` (receipt → order placed). Expose at `GET /api/latency`.
+- KNOWN LIMIT: `ingestion_lag_ms` is recorded only on the generic logsSubscribe path
+  (where getTransaction supplies blockTime). Helius-inline / gRPC updates carry no
+  blockTime, so on those transports only `decision_ms` is recorded — never a fabricated
+  lag. Follow-up: derive a slot-based arrival time for the gRPC/inline transports.
 - DoD: `/api/latency` returns p50/p90/p99/max after real leader events; a few days
   of data answer: *is ingestion lag the bottleneck?*
 - Decides Phase 2: if `ingestion_lag_ms` p90 is large → gRPC + Rust justified; if

@@ -309,6 +309,10 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     }
     // Phase 0 gate: how stale was the leader signal when we received it? Solana blockTime is
     // in SECONDS; this lag is exactly what a gRPC/ShredStream ingestion upgrade would shrink.
+    // NOTE: blockTime is present only on the generic logsSubscribe path (we fetch via
+    // getTransaction). On Helius inline / gRPC it is absent, so ingestion_lag_ms is simply not
+    // recorded there (decision_ms still is) — see docs/RESTRUCTURE_PLAN.md. A slot-based timing
+    // source for those transports is a follow-up; we never record a fabricated lag.
     const blockTimeMs = Number.isFinite(txResult?.blockTime) ? txResult.blockTime * 1000 : null;
     let acted = false;
     for (const w of followedWallets()) {
@@ -348,7 +352,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
             ...d.recovery, token_mint: d.mint, qty_ui: r.fill.outUi,
             fee_usd_est: FEE_EST_USD, price_impact_pct: 0, intent_id: it.intent_id,
           });
-          pushEvent({ kind: 'reconciled_orphan_entry', position_id: pos.position_id, mint: d.mint, signature: it.signature });
+          pushEvent({ kind: 'reconciled_orphan_entry', position_id: pos.position_id, leader: d.recovery.leader_address, mint: d.mint, signature: it.signature });
           audit({ audit_scope: 'position', audit_reason: 'reconciled_orphan_entry', command_type: null, detail: { position_id: pos.position_id, intent_id: it.intent_id, signature: it.signature } });
         }
       } else if (d.side === 'sell' && d.positionId) {

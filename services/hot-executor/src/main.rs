@@ -161,7 +161,9 @@ fn main() {
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
-            Err(_) => break,
+            // a non-UTF8 / transient read error on ONE line must not kill the persistent signer
+            // (that would desync the Node client's FIFO queue and hang every pending request)
+            Err(_) => continue,
         };
         if line.trim().is_empty() {
             continue;

@@ -8,7 +8,7 @@ export function b58encode(input) {
   const b = Buffer.isBuffer(input) ? input : Buffer.from(input);
   let zeros = 0;
   while (zeros < b.length && b[zeros] === 0) zeros += 1;
-  const digits = [0];
+  const digits = []; // NOT [0]: a seed digit would append one extra '1' for an all-zero input
   for (let i = zeros; i < b.length; i += 1) {
     let carry = b[i];
     for (let j = 0; j < digits.length; j += 1) {

@@ -112,7 +112,7 @@ export function validateConfigPatch(patch) {
     ev: [...EV_FIELDS, 'ev_gate_mode'],
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct'],
-    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref'],
+    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
   };
   for (const [section, value] of Object.entries(patch || {})) {

@@ -49,6 +49,35 @@ test('parse: uiAmountString fallback when uiAmount absent', () => {
   assert.equal(r.tx.meta.postTokenBalances[0].uiTokenAmount.uiAmount, 12.5);
 });
 
+test('base58: all-zero input encodes without an extra leading 1 (System Program = 32 ones)', () => {
+  assert.equal(b58encode(Buffer.alloc(32, 0)), '1'.repeat(32));
+  assert.equal(b58encode(Buffer.from([0])), '1');
+  assert.equal(b58encode(Buffer.from([0, 0])), '11');
+});
+
+test('ingestor: a single teardown (error+end+close) schedules exactly ONE reconnect', async () => {
+  let subscribes = 0;
+  const makeStream = () => {
+    const s = new EventEmitter();
+    s.write = (_r, cb) => { if (cb) cb(); return true; };
+    s.end = () => {};
+    return s;
+  };
+  let current;
+  const ing = createGrpcIngestor({
+    endpoint: 'mock:0', addresses: ['L'], initialBackoffMs: 5,
+    clientFactory: () => ({ subscribe: async () => { subscribes += 1; current = makeStream(); return current; } }),
+    onUp: () => {}, onLeaderActivity: () => {}, onGap: () => {},
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(subscribes, 1, 'initial subscribe');
+  // one teardown fires all three events — must NOT schedule three parallel reconnects
+  current.emit('error'); current.emit('end'); current.emit('close');
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(subscribes, 2, 'exactly one reconnect, not 2-3 duplicate streams');
+  ing.close();
+});
+
 test('ingestor: wires a mock gRPC stream -> onUp + onLeaderActivity; close() stops it', async () => {
   const stream = new EventEmitter();
   stream.write = (_req, cb) => { if (cb) cb(); return true; };

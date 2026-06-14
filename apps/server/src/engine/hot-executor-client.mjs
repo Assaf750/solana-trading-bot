@@ -9,7 +9,8 @@ import { createInterface } from 'node:readline';
 export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } = {}) {
   let child = null;
   let rl = null;
-  const queue = []; // FIFO of pending { resolve }
+  let seq = 0;
+  const queue = []; // FIFO of pending { resolve, expectId }
 
   function failAll(reason) {
     const pending = queue.splice(0);
@@ -23,21 +24,29 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     rl.on('line', (line) => {
       const r = queue.shift();
       if (!r) return; // unsolicited line — ignore
-      try { r.resolve(JSON.parse(line)); }
-      catch { r.resolve({ ok: false, error: 'invalid_response' }); }
+      let parsed;
+      try { parsed = JSON.parse(line); }
+      catch { r.resolve({ ok: false, error: 'invalid_response' }); return; }
+      // FIFO desync guard: if we expected a correlation id and the echo doesn't match, refuse the
+      // response rather than hand a mismatched signature back to the money path (caller falls back).
+      if (r.expectId != null && parsed.intent_id != null && parsed.intent_id !== r.expectId) {
+        r.resolve({ ok: false, error: 'response_mismatch' });
+        return;
+      }
+      r.resolve(parsed);
     });
     child.on('exit', () => { child = null; rl = null; failAll('executor_exited'); });
     child.on('error', () => { child = null; rl = null; failAll('executor_error'); });
   }
 
-  function request(obj) {
+  function request(obj, expectId = null) {
     return new Promise((resolve) => {
       try { ensure(); } catch { resolve({ ok: false, error: 'executor_spawn_failed' }); return; }
       if (!child || !child.stdin || child.stdin.writable === false) {
         resolve({ ok: false, error: 'executor_unavailable' });
         return;
       }
-      queue.push({ resolve });
+      queue.push({ resolve, expectId });
       try { child.stdin.write(`${JSON.stringify(obj)}\n`); }
       catch { /* exit/error handler will fail the pending request */ }
     });
@@ -46,7 +55,8 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
   /** Sign a serialized tx via the Rust signer. Returns the same shape as tx-signer.mjs. */
   async function sign({ txBase64, seed }) {
     const seedArr = Buffer.isBuffer(seed) ? [...seed] : seed;
-    const r = await request({ op: 'sign', unsigned_tx_base64: txBase64, seed: seedArr });
+    const id = `c${seq += 1}`; // correlation nonce echoed back as intent_id
+    const r = await request({ op: 'sign', intent_id: id, unsigned_tx_base64: txBase64, seed: seedArr }, id);
     if (r.ok) {
       return { ok: true, signedTxBase64: r.signed_tx_base64, signatureB58: r.signature, signerAddress: r.signer_address };
     }

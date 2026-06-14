@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -29,15 +30,19 @@ class LeaderScore:
 
 
 def _num(v):
-    """Return v if it is a real (non-bool) number, else None — guards against null/NaN-ish junk."""
+    """Return v only if it is a real, FINITE, non-bool number — guards null / NaN / inf
+    (json.loads accepts the bare NaN/Infinity literals, which would poison sums + sort keys)."""
     if isinstance(v, bool):
         return None
-    if isinstance(v, (int, float)):
+    if isinstance(v, (int, float)) and math.isfinite(v):
         return v
     return None
 
 
-def score_leaders(events: Iterable[dict]) -> list[LeaderScore]:
+def positions_realized(events):
+    """position_id -> {leader, total} summing ALL exit chunks for a position. The engine emits one
+    exit event per PARTIAL sell (same position_id), so counting exits would double-count trades;
+    aggregating per position makes one closed/partially-closed position = one trade with net P&L."""
     events = list(events or [])
     pos_leader: dict[str, str] = {}
     for ev in events:
@@ -47,18 +52,27 @@ def score_leaders(events: Iterable[dict]) -> list[LeaderScore]:
             if pid and leader:
                 pos_leader[pid] = leader
 
-    agg = defaultdict(lambda: {"trades": 0, "wins": 0, "total": 0.0})
+    pos: dict[str, dict] = {}
     for ev in events:
         if ev.get("kind") not in EXIT_KINDS:
             continue
         realized = _num(ev.get("realized_usd"))
-        leader = pos_leader.get(ev.get("position_id"))
+        pid = ev.get("position_id")
+        leader = pos_leader.get(pid)
         if leader is None or realized is None:
             continue
-        a = agg[leader]
+        d = pos.setdefault(pid, {"leader": leader, "total": 0.0})
+        d["total"] += float(realized)
+    return pos
+
+
+def score_leaders(events: Iterable[dict]) -> list[LeaderScore]:
+    agg = defaultdict(lambda: {"trades": 0, "wins": 0, "total": 0.0})
+    for d in positions_realized(events).values():
+        a = agg[d["leader"]]
         a["trades"] += 1
-        a["total"] += float(realized)
-        if realized > 0:
+        a["total"] += d["total"]
+        if d["total"] > 0:
             a["wins"] += 1
 
     scores: list[LeaderScore] = []

@@ -39,9 +39,11 @@ def parse_ts(s):
     if not isinstance(s, str):
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+    # normalize naive timestamps to UTC so window comparison never raises aware-vs-naive TypeError
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def leader_metrics(events, now=None, window_days=None):
@@ -60,21 +62,32 @@ def leader_metrics(events, now=None, window_days=None):
     if window_days is not None and now is not None:
         cutoff = now - timedelta(days=window_days)
 
-    agg = defaultdict(lambda: {"r": [], "last": None})
+    # aggregate per POSITION first (partial sells share a position_id -> one trade, net P&L),
+    # applying the recency window per exit chunk; then roll positions up per leader.
+    pos = defaultdict(lambda: {"leader": None, "total": 0.0, "last": None})
     for ev in events:
         if ev.get("kind") not in EXIT_KINDS:
             continue
         realized = _num(ev.get("realized_usd"))
-        leader = pos_leader.get(ev.get("position_id"))
+        pid = ev.get("position_id")
+        leader = pos_leader.get(pid)
         if leader is None or realized is None:
             continue
         ts = parse_ts(ev.get("ts"))
         if cutoff is not None and (ts is None or ts < cutoff):
             continue
-        a = agg[leader]
-        a["r"].append(float(realized))
-        if ts is not None and (a["last"] is None or ts > a["last"]):
-            a["last"] = ts
+        d = pos[pid]
+        d["leader"] = leader
+        d["total"] += float(realized)
+        if ts is not None and (d["last"] is None or ts > d["last"]):
+            d["last"] = ts
+
+    agg = defaultdict(lambda: {"r": [], "last": None})
+    for d in pos.values():
+        a = agg[d["leader"]]
+        a["r"].append(d["total"])
+        if d["last"] is not None and (a["last"] is None or d["last"] > a["last"]):
+            a["last"] = d["last"]
 
     out = []
     for leader, a in agg.items():

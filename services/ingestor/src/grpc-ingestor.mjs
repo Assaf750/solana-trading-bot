@@ -10,14 +10,15 @@ const COMMITMENT_CONFIRMED = 1; // yellowstone CommitmentLevel.CONFIRMED
 export function createGrpcIngestor({
   endpoint, token, addresses,
   onLeaderActivity, onUp, onGap,
-  gapMs = 120000, keepAliveMs = 30000, clientFactory,
+  gapMs = 120000, keepAliveMs = 30000, initialBackoffMs = 1000, clientFactory,
 }) {
   let stream = null;
   let closed = false;
-  let backoff = 1000;
+  let backoff = initialBackoffMs;
   let downSince = null;
   let gapTimer = null;
   let keepAlive = null;
+  let reconnecting = false;
 
   async function makeClient() {
     if (clientFactory) return clientFactory({ endpoint, token });
@@ -49,6 +50,7 @@ export function createGrpcIngestor({
 
   async function connect() {
     if (closed) return;
+    reconnecting = false; // a fresh attempt is now running; allow the next teardown to reschedule
     let client;
     try { client = await makeClient(); } catch { scheduleReconnect(); return; }
     try { stream = await client.subscribe(); } catch { scheduleReconnect(); return; }
@@ -67,7 +69,7 @@ export function createGrpcIngestor({
     try { await writeRequest(stream, buildRequest()); }
     catch { scheduleReconnect(); return; }
 
-    backoff = 1000;
+    backoff = initialBackoffMs;
     downSince = null;
     if (gapTimer) { clearTimeout(gapTimer); gapTimer = null; }
     keepAlive = setInterval(() => { writeRequest(stream, { ping: { id: 1 } }).catch(() => {}); }, keepAliveMs);
@@ -76,7 +78,10 @@ export function createGrpcIngestor({
 
   function scheduleReconnect() {
     if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
-    if (closed) return;
+    // a single teardown fires error+end+close; only ONE reconnect may be in flight, else we spawn
+    // duplicate parallel streams that compound on every cycle.
+    if (closed || reconnecting) return;
+    reconnecting = true;
     if (!downSince) {
       downSince = Date.now();
       gapTimer = setTimeout(() => { if (onGap && !closed) onGap(); }, gapMs);

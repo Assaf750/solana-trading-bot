@@ -39,6 +39,30 @@ class ScoreLeadersTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(score_leaders([]), [])
 
+    def test_partial_exits_count_as_one_trade(self):
+        evs = [
+            {"kind": "paper_entry", "position_id": "p1", "leader": "A"},
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": 10.0},   # partial
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": -4.0},   # partial (same pos)
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": 6.0},    # partial (same pos)
+        ]
+        scores = score_leaders(evs)
+        self.assertEqual(len(scores), 1)
+        self.assertEqual(scores[0].trades, 1)                  # one position, not three exits
+        self.assertEqual(scores[0].total_realized_usd, 12.0)   # 10 - 4 + 6 net
+        self.assertEqual(scores[0].wins, 1)
+
+    def test_nan_and_inf_realized_are_ignored(self):
+        evs = [
+            {"kind": "paper_entry", "position_id": "p1", "leader": "A"},
+            {"kind": "paper_entry", "position_id": "p2", "leader": "A"},
+            {"kind": "paper_exit", "position_id": "p1", "realized_usd": float("nan")},
+            {"kind": "paper_exit", "position_id": "p2", "realized_usd": 50.0},
+        ]
+        scores = score_leaders(evs)
+        self.assertEqual(len(scores), 1)
+        self.assertEqual(scores[0].total_realized_usd, 50.0)   # NaN chunk dropped, not summed
+
 
 class BacktestTest(unittest.TestCase):
     def test_equity_and_drawdown(self):

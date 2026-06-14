@@ -189,7 +189,12 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       amountBaseUnits = Math.floor((sizeUsd / price) * 1e9);
       const bal = await rpc.rpc('getBalance', [owner, { commitment: 'confirmed' }]);
       const lamports = bal.ok ? Number(bal.result?.value ?? 0) : 0;
-      if (!bal.ok || lamports < amountBaseUnits + SOL_RESERVE_LAMPORTS) {
+      // on the Jito backend the bundle also pays a tip leg — reserve it so a tight balance is
+      // refused up front instead of silently degrading to a no-tip RPC send.
+      const cfgExec = config.get().execution || {};
+      const tipReserve = cfgExec.submit_backend === 'jito'
+        ? (Number.isFinite(cfgExec.jito_tip_lamports) ? cfgExec.jito_tip_lamports : 10000) : 0;
+      if (!bal.ok || lamports < amountBaseUnits + SOL_RESERVE_LAMPORTS + tipReserve) {
         setIntent(intent_id, 'FAILED_PRE_SEND', { error: 'insufficient_sol_balance' });
         return { ok: false, error: 'insufficient_sol_balance', balance_sol: lamports / 1e9 };
       }
