@@ -71,6 +71,7 @@ export const api = {
   discoverFromLeaders: () => call('POST', '/api/discover/from-leaders', {}),
   signerImportKey: (secret) => call('POST', '/api/signer/import-key', { secret }),
   signerWallet: () => call('POST', '/api/signer/wallet', {}),
+  holdings: () => call('POST', '/api/holdings', {}),
   signerOpenSession: () => call('POST', '/api/signer/open-session', {}),
   signerLock: () => call('POST', '/api/signer/lock', {}),
   killDisengage: (level = 'global', key = null, confirm) => call('POST', '/api/kill-switch/disengage', { level, key, confirm }),

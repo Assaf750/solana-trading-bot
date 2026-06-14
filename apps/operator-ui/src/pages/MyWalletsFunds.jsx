@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
+import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 
@@ -28,6 +29,7 @@ export default function MyWalletsFunds() {
   const [bounds, setBounds] = useState({ idle_timeout_ms: '', max_session_ms: '', max_session_notional_usd: '', lock_after_n_risk_rejections: '' });
   const [connTest, setConnTest] = useState(null);
   const [walletInfo, setWalletInfo] = useState(null);
+  const [holdings, setHoldings] = useState(null);
 
   async function loadSecrets() {
     const r = await api.secrets();
@@ -83,6 +85,11 @@ export default function MyWalletsFunds() {
     setWalletInfo({ checking: true });
     const r = await api.signerWallet();
     setWalletInfo(r.data);
+  }
+  async function loadHoldings() {
+    setHoldings({ loading: true });
+    const r = await api.holdings();
+    setHoldings(r.ok ? r.data : { error: r.data?.error || 'failed' });
   }
   // auto-check when a signer key is present
   useEffect(() => { if (connected && status?.signer?.key_imported) checkWallet(); }, [connected, status?.signer?.key_imported, status?.signer?.session_active]);
@@ -299,6 +306,46 @@ export default function MyWalletsFunds() {
           <p className="muted" style={{ fontSize: 'var(--fs-sm)', marginBlockStart: 8 }}>
             {ar ? `جلسة نشطة منذ ${signer.session_opened_at} · قيمة موقعة: $${signer.session_signed_notional_usd}` : `Session active since ${signer.session_opened_at} · signed notional: $${signer.session_signed_notional_usd}`}
           </p>
+        )}
+      </Card>
+
+      <Card title={ar ? '💼 أرصدة محفظة التنفيذ' : '💼 Execution wallet holdings'}
+        sub={ar ? 'كل العملات (SPL + Token-2022) في محفظة التوقيع — قراءة فقط من السلسلة.' : 'Every SPL + Token-2022 balance in the signer wallet — read-only, on-chain.'}
+        right={<button className="btn" onClick={loadHoldings} disabled={!signer.key_imported || !vault.vault_unlocked}>{ar ? '🔄 تحديث' : '🔄 Refresh'}</button>}>
+        {!signer.key_imported ? (
+          <p className="muted">{ar ? 'استورد مفتاح التوقيع أولاً.' : 'Import the signer key first.'}</p>
+        ) : !holdings ? (
+          <p className="muted">{ar ? 'اضغط «تحديث» لعرض الأرصدة.' : 'Press “Refresh” to load balances.'}</p>
+        ) : holdings.loading ? (
+          <p className="muted">{ar ? 'جارٍ القراءة…' : 'reading…'}</p>
+        ) : holdings.error ? (
+          <Badge tone="danger">{holdings.error === 'vault_locked' ? (ar ? 'افتح الخزنة أولاً' : 'Unlock vault first') : holdings.error}</Badge>
+        ) : (
+          <>
+            <div className="row" style={{ gap: 'var(--s-3)', marginBlockEnd: 'var(--s-2)', flexWrap: 'wrap' }}>
+              <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{holdings.address?.slice(0, 6)}…{holdings.address?.slice(-6)}</span>
+              <span className="mono" style={{ fontWeight: 700, color: 'var(--c-ok)' }}>{holdings.sol_balance != null ? `${holdings.sol_balance.toFixed(4)} SOL` : '—'}</span>
+              <span className="muted fs-xs">{holdings.tokens?.length || 0} {ar ? 'توكن' : 'tokens'}</span>
+            </div>
+            {(!holdings.tokens || holdings.tokens.length === 0) ? (
+              <EmptyState message={ar ? 'لا عملات SPL في هذه المحفظة' : 'No SPL tokens in this wallet'} />
+            ) : (
+              <div className="table-wrap">
+                <table className="data">
+                  <thead><tr><th className="nosort">token</th><th className="nosort num">{ar ? 'الرصيد' : 'balance'}</th><th className="nosort">type</th></tr></thead>
+                  <tbody>
+                    {holdings.tokens.map((tk) => (
+                      <tr key={tk.mint + tk.program}>
+                        <td><TokenLabel mint={tk.mint} /></td>
+                        <td className="num mono">{tk.amount_ui.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                        <td>{tk.program === 'token-2022' ? <Badge tone="warn">2022</Badge> : <Badge tone="neutral">SPL</Badge>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </Card>
     </div>

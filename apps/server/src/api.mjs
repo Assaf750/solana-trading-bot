@@ -312,6 +312,17 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           }
           return { status: 200, body: { connected, key_imported: true, address: d.address, balance_sol } };
         }
+        if (path === '/api/holdings') {
+          // read-only: all SPL balances of the execution wallet (+ SOL). Needs the RPC key (vault).
+          if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
+          if (!rpc) return { status: 503, body: { ok: false, error: 'rpc_client_unavailable' } };
+          const d = signer.deriveAddress();
+          if (!d.ok) return { status: 200, body: { ok: false, error: d.error, key_imported: signer.status() !== 'missing' } };
+          const { fetchHoldings } = await import('./engine/holdings.mjs');
+          const bal = await rpc.rpc('getBalance', [d.address, { commitment: 'confirmed' }]);
+          const h = await fetchHoldings({ rpc, owner: d.address });
+          return { status: 200, body: { ok: true, address: d.address, sol_balance: bal.ok ? Number(bal.result?.value ?? 0) / 1e9 : null, tokens: h.ok ? h.tokens : [] } };
+        }
         if (path === '/api/signer/import-key') {
           const res = signer.importKey(body?.secret);
           return { status: res.ok ? 200 : 400, body: res };
