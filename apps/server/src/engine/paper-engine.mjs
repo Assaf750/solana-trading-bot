@@ -2,7 +2,7 @@
 // Supervises: leader-wallet ingestion (WS) -> swap detection -> risk gates ->
 // exit feasibility -> paper fill -> TP/SL monitoring. Fail-closed at every step.
 // REAL money never moves here: quotes only, fills simulated, always labeled simulated.
-import { detectLeaderSwap } from './swap-detector.mjs';
+import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -10,7 +10,7 @@ const EVENTS_FILE = 'engine-events.json';
 const MAX_EVENTS = 200;
 const FEE_EST_USD = 0.05; // conservative per-trade network fee estimate (labeled estimate)
 
-export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, rpc, jupiter, audit, broadcast }) {
+export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast }) {
   let sub = null;
   let supervisor = null;
   let markTimer = null;
@@ -69,19 +69,56 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return liveMode() ? livePortfolio : portfolio;
   }
 
+  async function solUsd() {
+    const q = await jupiter.quote({ inputMint: WSOL_MINT, outputMint: USDC_MINT, amountBaseUnits: 1e9 });
+    return q.ok ? q.outAmount / 1e6 : null;
+  }
+
+  /** Resolve trade size in USD honoring the (per-wallet, else global) sizing mode.
+   *  Fail-closed: returns {ok:false} rather than silently mis-sizing a real trade. */
+  async function resolveSizeUsd({ cfg, wallet }) {
+    const wc = wallet.config || {};
+    const mode = wc.sizing_mode || cfg.execution?.sizing_mode || 'fixed_usd';
+    const value = wc.sizing_value ?? cfg.execution?.sizing_value;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return { ok: false, error: 'sizing_value_unset' };
+    }
+    if (mode === 'fixed_usd') return { ok: true, usd: value };
+    if (mode === 'pct_of_capital') {
+      const cap = cfg.execution?.capital_limit;
+      if (typeof cap !== 'number' || !Number.isFinite(cap) || cap <= 0) return { ok: false, error: 'capital_limit_unset' };
+      return { ok: true, usd: (cap * value) / 100 };
+    }
+    if (mode === 'fixed_sol') {
+      const px = await solUsd();
+      if (!px) return { ok: false, error: 'sol_price_unavailable' };
+      return { ok: true, usd: value * px };
+    }
+    return { ok: false, error: `unsupported_sizing_mode_${mode}` };
+  }
+
   // ---------- entry pipeline ----------
-  async function handleLeaderBuy({ leader, wallet, swap }) {
+  async function handleLeaderBuy({ leader, wallet, swap, signature }) {
     const cfg = config.get();
-    const sizeUsd = cfg.execution?.sizing_mode === 'fixed_usd' ? cfg.execution.sizing_value : cfg.execution?.sizing_value || 10;
     const isLive = liveMode();
     const pf = activePf();
+
+    const sized = await resolveSizeUsd({ cfg, wallet });
+    if (!sized.ok) {
+      pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`sizing_${sized.error}`] });
+      return;
+    }
+    const sizeUsd = sized.usd;
 
     const gate = checkEntryGates({
       cfg, portfolio: pf, sizeUsd, tokenMint: swap.mint,
       killBlocked: killSwitch.isBlocked({ mode: isLive ? 'real_live' : 'paper', wallet_id: wallet.wallet_id }).blocked,
       operatingState: operatingState.get().operating_state,
+      entriesBlocked: pf.summary().entries_blocked,
     });
     if (!gate.allowed) {
+      // a risk-gate rejection on the real book feeds the signer's consecutive-rejection lockout
+      if (isLive && signer) signer.recordRiskRejection();
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: gate.rejections });
       return;
     }
@@ -112,7 +149,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       // REAL execution — only through the fully-gated live executor
       const exec = await liveExecutor.executeSwap({
         side: 'buy', mint: swap.mint, sizeUsd, decimals: swap.decimals, slippageBps: slipBps,
-        intentParts: ['buy', leader, swap.mint, String(swap.uiDelta)],
+        // keyed by the leader's on-chain signature so two distinct same-size buys are NOT
+        // collapsed into one (idempotent per leader tx, not per amount)
+        intentParts: ['buy', leader, swap.mint, signature || String(swap.uiDelta)],
       });
       if (!exec.ok) {
         pushEvent({ kind: 'live_entry_refused', leader, mint: swap.mint, error: exec.error, refusals: exec.refusals || [] });
@@ -142,15 +181,17 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     audit({ audit_scope: 'position', audit_reason: 'paper_entry_recorded', command_type: null, detail: { position_id: pos.position_id, mint: swap.mint, size_usd: sizeUsd, simulated: true } });
   }
 
-  /** Exit helper: real sell when the position is live, quoted simulated sell when paper. */
-  async function performExit({ pf, p, fraction, reason }) {
+  /** Exit helper: real sell when the position is live, quoted simulated sell when paper.
+   *  intentParts defaults to (position, reason, day): time-driven exits (TP/SL) dedupe per
+   *  day but stay retryable after a provably-unsent failure (see live-executor RETRYABLE). */
+  async function performExit({ pf, p, fraction, reason, intentParts }) {
     const qtySell = p.qty_ui * fraction;
     if (p.simulated === false && liveExecutor) {
       const est = await jupiter.usdValueOf({ mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals });
       const exec = await liveExecutor.executeSwap({
         side: 'sell', mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals,
         sizeUsd: est.ok ? est.usd : 0, slippageBps: 150,
-        intentParts: ['sell', p.position_id, reason, new Date().toISOString().slice(0, 10)],
+        intentParts: intentParts || ['sell', p.position_id, reason, new Date().toISOString().slice(0, 10)],
       });
       if (!exec.ok) {
         pushEvent({ kind: 'live_exit_refused', position_id: p.position_id, reason, error: exec.error, refusals: exec.refusals || [] });
@@ -176,7 +217,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return res;
   }
 
-  async function handleLeaderSell({ leader, wallet, swap }) {
+  async function handleLeaderSell({ leader, wallet, swap, signature }) {
     // mirror sells act on BOTH books (paper history continues while live runs)
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     let found = false;
@@ -190,7 +231,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       }
       const fraction = swap.fullExit ? 1 : Math.min(1, swap.soldFraction || 1);
       for (const p of open) {
-        await performExit({ pf, p, fraction, reason: swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored' });
+        const reason = swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored';
+        // keyed by the leader's signature so each distinct leader sell mirrors independently
+        await performExit({ pf, p, fraction, reason, intentParts: ['sell', p.position_id, reason, signature || new Date().toISOString().slice(0, 10)] });
       }
     }
     if (!found) pushEvent({ kind: 'leader_sell_no_position', leader, mint: swap.mint });
@@ -209,8 +252,8 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     }
     for (const w of followedWallets()) {
       const swap = detectLeaderSwap({ tx: txResult, leaderAddress: w.tracked_wallet_address });
-      if (swap.kind === 'buy') await handleLeaderBuy({ leader: w.tracked_wallet_address, wallet: w, swap });
-      else if (swap.kind === 'sell') await handleLeaderSell({ leader: w.tracked_wallet_address, wallet: w, swap });
+      if (swap.kind === 'buy') await handleLeaderBuy({ leader: w.tracked_wallet_address, wallet: w, swap, signature });
+      else if (swap.kind === 'sell') await handleLeaderSell({ leader: w.tracked_wallet_address, wallet: w, swap, signature });
     }
   }
   // back-compat alias used by tests/probes
@@ -246,10 +289,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
           operatingState.transition('EXITS_ONLY', 'daily loss limit hit');
           pushEvent({ kind: 'daily_loss_limit_hit', daily_loss_usd: dailyLoss, simulated: pf.summary().simulated });
           audit({ audit_scope: 'position', audit_reason: 'daily_loss_limit_hit', command_type: null, detail: { daily_loss_usd: dailyLoss, simulated: pf.summary().simulated } });
-          if (pf === livePortfolio) {
-            // real money: also engage the per-mode kill switch for real_live entries
-            killSwitch.engage({ level: 'per_mode', key: 'real_live', reason: 'daily_loss_limit_hit' });
-          }
+          // NOTE: deliberately NOT engaging a per_mode real_live kill here — that also blocks
+          // the live signer/gates, freezing the exits EXITS_ONLY is meant to keep open. Entries
+          // are already blocked by EXITS_ONLY + the persisted entries_blocked flag (checkEntryGates).
         }
       }
     }

@@ -317,18 +317,29 @@ export function genSeries(seed, n = 24, bias = 0) {
   return out;
 }
 
-// ---------- Sparkline (inline SVG trend) ----------
-export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0, points = 24 }) {
-  const pts = (data && data.length) ? data : genSeries(seed ?? 'spark', points, bias);
-  const min = Math.min(...pts);
-  const max = Math.max(...pts);
+// ---------- Shared SVG path geometry (line + filled area + last point) ----------
+// `pad` is the vertical inset on both top and bottom. Guards length 0/1 so a single
+// (or empty) series never divides by zero or produces NaN/Infinity path coordinates.
+function buildPath(pts, width, height, pad) {
+  const safe = (pts && pts.length) ? pts : [height / 2];
+  const min = Math.min(...safe);
+  const max = Math.max(...safe);
   const span = (max - min) || 1;
-  const stepX = width / (pts.length - 1);
-  const coords = pts.map((v, i) => [i * stepX, height - ((v - min) / span) * (height - 3) - 1.5]);
+  const stepX = safe.length > 1 ? width / (safe.length - 1) : 0;
+  const coords = safe.map((v, i) => [i * stepX, height - ((v - min) / span) * (height - pad * 2) - pad]);
   const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ');
   const area = `${line} L${width} ${height} L0 ${height} Z`;
-  const last = coords[coords.length - 1];
-  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : '';
+  const last = coords[coords.length - 1] || [0, height / 2];
+  return { line, area, last };
+}
+
+// ---------- Sparkline (inline SVG trend) ----------
+export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0, points = 24 }) {
+  const { line, area, last } = useMemo(() => {
+    const pts = (data && data.length) ? data : genSeries(seed ?? 'spark', points, bias);
+    return buildPath(pts, width, height, 1.5);
+  }, [data, seed, bias, points, width, height]);
+  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : '';
   return (
     <span className={`spark ${cls}`} aria-hidden>
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
@@ -345,16 +356,11 @@ export function MiniChart({ data, tone, seed, bias = 0, height = 60, points = 40
   const rawId = useId();
   const gid = 'mc' + rawId.replace(/[^a-zA-Z0-9]/g, '');
   const width = 260;
-  const pts = (data && data.length) ? data : genSeries(seed ?? 'mc', points, bias);
-  const min = Math.min(...pts);
-  const max = Math.max(...pts);
-  const span = (max - min) || 1;
-  const stepX = width / (pts.length - 1);
-  const coords = pts.map((v, i) => [i * stepX, height - ((v - min) / span) * (height - 8) - 4]);
-  const line = coords.map((c, i) => `${i ? 'L' : 'M'}${c[0].toFixed(1)} ${c[1].toFixed(1)}`).join(' ');
-  const area = `${line} L${width} ${height} L0 ${height} Z`;
-  const last = coords[coords.length - 1];
-  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : '';
+  const { line, area, last } = useMemo(() => {
+    const pts = (data && data.length) ? data : genSeries(seed ?? 'mc', points, bias);
+    return buildPath(pts, width, height, 4);
+  }, [data, seed, bias, points, height]);
+  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : '';
   return (
     <div className={`minichart ${cls}`}>
       {label && <div className="minichart-label">{label}</div>}
@@ -378,8 +384,10 @@ export function FlashValue({ value, format, className = '' }) {
   const prev = useRef(value);
   const [flash, setFlash] = useState('');
   useEffect(() => {
-    if (prev.current != null && value != null && value !== prev.current) {
-      setFlash(value > prev.current ? 'flash-up' : 'flash-down');
+    const cur = prev.current;
+    // Only flash on a real, finite change — NaN/Infinity never trigger a (perpetual) flash.
+    if (Number.isFinite(cur) && Number.isFinite(value) && value !== cur) {
+      setFlash(value > cur ? 'flash-up' : 'flash-down');
       const id = setTimeout(() => setFlash(''), 650);
       prev.current = value;
       return () => clearTimeout(id);

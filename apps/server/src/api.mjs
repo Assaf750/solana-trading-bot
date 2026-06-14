@@ -169,7 +169,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       if (method === 'POST') {
         if (path === '/api/commands') {
           const ct = body?.command_type;
-          if (!ct || typeof commands[ct] !== 'function') {
+          if (!ct || !Object.prototype.hasOwnProperty.call(commands, ct) || typeof commands[ct] !== 'function') {
             return { status: 400, body: { ok: false, api_error_code: 'COMMAND_NOT_ALLOWED_IN_STATE', error: 'unknown_or_unsupported_command_type' } };
           }
           const out = await commands[ct](body || {});

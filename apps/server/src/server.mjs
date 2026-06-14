@@ -2,8 +2,17 @@
 // SSE event stream, static serving of the built operator UI. Zero dependencies.
 import { createServer } from 'node:http';
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { join, extname, normalize } from 'node:path';
+import { join, extname, normalize, sep } from 'node:path';
 import { REPO_ROOT } from './util.mjs';
+
+// Anti-DNS-rebinding: the API is only served to a loopback Host header. A malicious
+// website that rebinds its domain to 127.0.0.1 still sends Host: <attacker-domain>,
+// which fails this check — so it can never reach the trading API.
+function hostAllowed(hostHeader) {
+  if (!hostHeader) return false;
+  const h = String(hostHeader).replace(/:\d+$/, '').toLowerCase();
+  return h === '127.0.0.1' || h === 'localhost' || h === '[::1]' || h === '::1';
+}
 
 const UI_DIST = join(REPO_ROOT, 'apps', 'operator-ui', 'dist');
 const BODY_LIMIT = 64 * 1024;
@@ -26,14 +35,21 @@ export function startServer({ api, host = '127.0.0.1', port = 8787 }) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const path = url.pathname + (url.search || '');
 
-    // dev CORS: allow the Vite dev server on localhost only
+    // dev CORS: allow the Vite dev server on localhost only. The custom header is
+    // advertised so the UI's preflight succeeds; cross-site attackers get no ACAO.
     const origin = req.headers.origin;
     if (origin && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'content-type');
+      res.setHeader('Access-Control-Allow-Headers', 'content-type, x-soltrade-client');
     }
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+    // The API (incl. SSE) is loopback-only — reject any non-localhost Host (DNS rebinding).
+    if (url.pathname.startsWith('/api/') && !hostAllowed(req.headers.host)) {
+      sendJson(res, 403, { ok: false, error_message: 'forbidden_host' });
+      return;
+    }
 
     // SSE stream
     if (url.pathname === '/api/stream') {
@@ -48,6 +64,14 @@ export function startServer({ api, host = '127.0.0.1', port = 8787 }) {
 
     // API
     if (url.pathname.startsWith('/api/')) {
+      // Anti-CSRF: state-changing requests must carry the UI's custom header. A cross-site
+      // page cannot set it without a preflight, which CORS denies for non-localhost origins;
+      // omitting it (to send a "simple" text/plain POST) fails here. Reads (GET) are already
+      // protected from cross-origin reads by the same-origin/CORS policy.
+      if ((req.method === 'POST' || req.method === 'DELETE') && req.headers['x-soltrade-client'] !== '1') {
+        sendJson(res, 403, { ok: false, error_message: 'missing_client_header' });
+        return;
+      }
       let body = null;
       if (req.method === 'POST' || req.method === 'DELETE') {
         body = await readBody(req).catch(() => undefined);
@@ -97,9 +121,10 @@ function serveStatic(pathname, res) {
     return;
   }
   let rel = pathname === '/' ? '/index.html' : pathname;
-  // path traversal guard
+  // path traversal guard — require the resolved path to stay strictly inside UI_DIST
+  // (the trailing separator stops a sibling dir like "dist-evil" from passing startsWith).
   const safe = normalize(join(UI_DIST, rel));
-  if (!safe.startsWith(UI_DIST)) { res.writeHead(403); res.end(); return; }
+  if (safe !== UI_DIST && !safe.startsWith(UI_DIST + sep)) { res.writeHead(403); res.end(); return; }
   let file = safe;
   if (!existsSync(file) || !statSync(file).isFile()) file = join(UI_DIST, 'index.html'); // SPA fallback
   const mime = MIME[extname(file)] || 'application/octet-stream';

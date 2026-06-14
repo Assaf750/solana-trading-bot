@@ -10,7 +10,8 @@ export const REPO_ROOT = join(HERE, '..', '..', '..');
 export const DATA_DIR = process.env.SOLTRADE_DATA_DIR || join(REPO_ROOT, 'data');
 
 export function ensureDataDir() {
-  mkdirSync(DATA_DIR, { recursive: true });
+  // 0700: state (incl. the encrypted vault) is owner-only on POSIX (best-effort on Windows).
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 }
 
 export function newId(prefix) {
@@ -37,7 +38,7 @@ export function writeJson(name, value) {
   ensureDataDir();
   const p = join(DATA_DIR, name);
   const tmp = `${p}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2), 'utf8');
+  writeFileSync(tmp, JSON.stringify(value, null, 2), { encoding: 'utf8', mode: 0o600 });
   renameSync(tmp, p);
 }
 

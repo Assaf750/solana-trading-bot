@@ -1,13 +1,14 @@
 // TweaksPanel.jsx — live visual customization (accent / surface depth / corners /
 // density / type scale / live-data toggles). Presentation only; persisted via useDesignPrefs.
+import { useEffect, useRef } from 'react';
 import { useI18n } from '../i18n/index.jsx';
 import { useDesignPrefs } from './designPrefs.jsx';
 
 const ACCENTS = [
   { id: 'mint', color: '#3ddc97' },
-  { id: 'amber', color: '#f5b14a' },
+  { id: 'amber', color: '#ffc233' },
   { id: 'cyan', color: '#34e0e0' },
-  { id: 'blue', color: '#5aa9ff' },
+  { id: 'blue', color: '#4d8dff' },
   { id: 'magenta', color: '#ff5db1' }
 ];
 const SURFACES = [
@@ -38,6 +39,31 @@ export function TweaksPanel({ open, setOpen }) {
   const { prefs, set, reset } = useDesignPrefs();
   const { lang } = useI18n();
   const ar = lang === 'ar';
+  const panelRef = useRef(null);
+  const restoreRef = useRef(null); // element to return focus to on close
+
+  useEffect(() => {
+    if (!open) return undefined;
+    restoreRef.current = document.activeElement;
+    const focusables = () => (panelRef.current
+      ? Array.from(panelRef.current.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter((el) => !el.disabled && el.offsetParent !== null)
+      : []);
+    const id = setTimeout(() => { const f = focusables(); (f[0] || panelRef.current)?.focus?.(); }, 20);
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
+      if (e.key === 'Tab') { // focus trap: cycle within the panel
+        const f = focusables();
+        if (!f.length) return;
+        const first = f[0]; const last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => { clearTimeout(id); window.removeEventListener('keydown', onKey); restoreRef.current?.focus?.(); };
+  }, [open, setOpen]);
+
   if (!open) return null;
 
   const L = ar
@@ -45,7 +71,7 @@ export function TweaksPanel({ open, setOpen }) {
     : { title: 'Tweaks', identity: 'Identity', accent: 'Accent', surface: 'Surface depth', corners: 'Corners', sharp: 'Sharp', soft: 'Soft', rounded: 'Rounded', scale: 'Density & scale', density: 'Density', compact: 'Compact', comfortable: 'Comfortable', ultra: 'Ultra', type: 'Type scale', live: 'Live data', spark: 'Inline sparklines', glow: 'Ambient glow', motion: 'Live motion', grid: 'Table grid lines', reset: 'Reset to defaults', close: 'Close' };
 
   return (
-    <aside className="tweaks-panel" role="dialog" aria-label={L.title}>
+    <aside className="tweaks-panel" role="dialog" aria-modal="true" aria-label={L.title} ref={panelRef} tabIndex={-1}>
       <div className="tweaks-head">
         <strong>{L.title}</strong>
         <button className="btn sm" onClick={() => setOpen(false)} aria-label={L.close}>✕</button>
@@ -70,22 +96,26 @@ export function TweaksPanel({ open, setOpen }) {
           ))}
         </div>
 
-        <div className="tw-field-label" style={{ marginBlockStart: 'var(--s-3)' }}>{L.surface}</div>
-        <div className="swatches">
-          {SURFACES.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className={`swatch wide ${prefs.surface === s.id ? 'sel' : ''}`}
-              style={{ background: s.color, borderColor: 'var(--c-border-strong)' }}
-              aria-label={s.id}
-              aria-pressed={prefs.surface === s.id}
-              onClick={() => set({ surface: s.id })}
-            >
-              {prefs.surface === s.id && <span className="swatch-check" aria-hidden>✓</span>}
-            </button>
-          ))}
-        </div>
+        {prefs.theme === 'dark' && (
+          <>
+            <div className="tw-field-label" style={{ marginBlockStart: 'var(--s-3)' }}>{L.surface}</div>
+            <div className="swatches">
+              {SURFACES.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`swatch wide ${prefs.surface === s.id ? 'sel' : ''}`}
+                  style={{ background: s.color, borderColor: 'var(--c-border-strong)' }}
+                  aria-label={s.id}
+                  aria-pressed={prefs.surface === s.id}
+                  onClick={() => set({ surface: s.id })}
+                >
+                  {prefs.surface === s.id && <span className="swatch-check" aria-hidden>✓</span>}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
 
         <div className="tw-field-label" style={{ marginBlockStart: 'var(--s-3)' }}>{L.corners}</div>
         <div className="seg" role="group" aria-label={L.corners}>

@@ -11,6 +11,7 @@ export default {
     density: 'الكثافة',
     compact: 'مضغوط',
     comfortable: 'مريح',
+    ultra: 'فائق',
     theme: 'السمة',
     dark: 'داكن',
     light: 'فاتح',

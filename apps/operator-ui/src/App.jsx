@@ -114,6 +114,7 @@ function TopBar({ onOpenCmdk, onOpenTweaks }) {
         <div className="seg" role="group" aria-label={t('app.density')}>
           <button className={density === 'compact' ? 'on' : ''} onClick={() => set({ density: 'compact' })}>{t('app.compact')}</button>
           <button className={density === 'comfortable' ? 'on' : ''} onClick={() => set({ density: 'comfortable' })}>{t('app.comfortable')}</button>
+          <button className={density === 'ultra' ? 'on' : ''} onClick={() => set({ density: 'ultra' })}>{t('app.ultra')}</button>
         </div>
         <span className="muted" style={{ fontSize: 'var(--fs-xs)' }}>{t('app.theme')}</span>
         <div className="seg" role="group" aria-label={t('app.theme')}>

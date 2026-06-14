@@ -11,6 +11,7 @@ export default {
     density: 'Density',
     compact: 'Compact',
     comfortable: 'Comfortable',
+    ultra: 'Ultra',
     theme: 'Theme',
     dark: 'Dark',
     light: 'Light',

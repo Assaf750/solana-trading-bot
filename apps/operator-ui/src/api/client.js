@@ -4,9 +4,14 @@ const DEV = typeof window !== 'undefined' && window.location.port === '5173';
 export const API_BASE = DEV ? 'http://127.0.0.1:8787' : '';
 
 async function call(method, path, body) {
+  // x-soltrade-client marks every request as coming from the real UI. It forces a CORS
+  // preflight for cross-origin callers (which the server only grants to localhost origins),
+  // defeating cross-site "simple request" CSRF against the local trading API.
+  const headers = { 'x-soltrade-client': '1' };
+  if (body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(`${API_BASE}${path}`, {
     method,
-    headers: body !== undefined ? { 'content-type': 'application/json' } : undefined,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   let data = null;

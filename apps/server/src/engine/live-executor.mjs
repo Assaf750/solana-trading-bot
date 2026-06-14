@@ -20,10 +20,14 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
   function intentIdFor(parts) {
     return `int_${createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16)}`;
   }
+  // States that PROVABLY never reached the chain — safe to retry (e.g. a stop-loss whose
+  // first broadcast hit a transient RPC error). SENT/SENT_PENDING/SENT_UNCONFIRMED/CONFIRMED
+  // may have landed, so they stay blocked (no double-spend).
+  const RETRYABLE_STATUSES = new Set(['FAILED_PRE_SEND', 'FAILED_SEND']);
   function claimIntent(intent_id, detail) {
     const l = ledger();
     const existing = l.intents[intent_id];
-    if (existing && existing.status !== 'FAILED_PRE_SEND') {
+    if (existing && !RETRYABLE_STATUSES.has(existing.status)) {
       return { ok: false, error: `intent_duplicate_${existing.status}` };
     }
     l.intents[intent_id] = { status: 'PENDING', ts: nowIso(), detail };
@@ -147,18 +151,19 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       setIntent(intent_id, 'FAILED_PRE_SEND', { error: String(e?.message || 'sign_failed') });
       return { ok: false, error: String(e?.message || 'sign_failed') };
     }
-    signer.recordSigned({ notional_usd: notionalUsd });
 
     setIntent(intent_id, 'SENT_PENDING');
     const sent = await rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
     if (!sent.ok) {
-      // preflight rejections never landed on-chain; safe to mark failed
+      // preflight rejections never landed on-chain; safe to mark failed (and retryable)
       setIntent(intent_id, 'FAILED_SEND', { error: sent.error });
       safeAudit({ audit_scope: 'intent', audit_reason: 'live_send_failed', detail: { intent_id, error: sent.error } });
       return { ok: false, error: `send_failed_${sent.error}` };
     }
     const txSig = sent.result;
     setIntent(intent_id, 'SENT', { signature: txSig });
+    // count notional only after a successful broadcast (failed sends must not consume the cap)
+    signer.recordSigned({ notional_usd: notionalUsd });
     safeAudit({ audit_scope: 'intent', audit_reason: 'live_tx_sent', detail: { intent_id, signature: txSig, side, mint } });
     broadcast({ event_type: 'intent_update', intent_id, signature: txSig, side, mint });
 

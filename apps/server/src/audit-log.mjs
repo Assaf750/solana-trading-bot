@@ -33,7 +33,7 @@ export function appendAudit({ audit_actor, audit_scope, audit_reason, command_ty
     command_type: command_type || null,
     detail: scrub(detail || {}),
   };
-  appendFileSync(join(DATA_DIR, AUDIT_FILE), JSON.stringify(record) + '\n', 'utf8');
+  appendFileSync(join(DATA_DIR, AUDIT_FILE), JSON.stringify(record) + '\n', { encoding: 'utf8', mode: 0o600 });
   return record;
 }
 

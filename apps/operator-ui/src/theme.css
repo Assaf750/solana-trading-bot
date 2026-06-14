@@ -358,7 +358,7 @@ table.data td.num { text-align: end; }
 .wlist { border: 1px solid var(--c-border); border-radius: var(--radius); overflow: hidden; }
 .wrow {
   display: grid; grid-template-columns: 1.4fr 0.8fr 0.7fr 0.7fr 0.6fr auto; gap: var(--s-2);
-  align-items: center; padding: 9px 12px; border-block-end: 1px solid var(--c-border);
+  align-items: center; padding: var(--row-pad, 9px 12px); border-block-end: 1px solid var(--c-border);
   cursor: pointer; font-size: var(--fs-sm); transition: background .1s;
 }
 .wrow:last-child { border-block-end: 0; }
@@ -370,7 +370,7 @@ table.data td.num { text-align: end; }
 .wrow .num { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: end; }
 .wlist-head {
   display: grid; grid-template-columns: 1.4fr 0.8fr 0.7fr 0.7fr 0.6fr auto; gap: var(--s-2);
-  padding: 7px 12px; background: var(--c-bg-elev-2); border-block-end: 1px solid var(--c-border);
+  padding: var(--row-pad, 7px 12px); background: var(--c-bg-elev-2); border-block-end: 1px solid var(--c-border);
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--c-text-dim); font-weight: 700;
 }
 .wlist-head .num, .wrow .num { text-align: end; }
@@ -402,7 +402,10 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 .list-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); padding: 7px 0; border-block-end: 1px solid var(--c-border); }
 .list-row:last-child { border-block-end: 0; }
 
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+  .flash-up, .flash-down, .statbar .pill .led.live, .skeleton { animation: none !important; }
+}
 
 /* ============================================================================
    PRO-TERMINAL ENHANCEMENT LAYER
@@ -412,9 +415,11 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
    ============================================================================ */
 
 /* ---- accent themes (override the mint brand) ---- */
-:root[data-accent="amber"]   { --c-brand:#f5b14a; --c-brand-2:#e8902a; --c-brand-bg:rgba(245,177,74,.13); --c-brand-glow:rgba(245,177,74,.30); }
+/* amber/blue kept distinct from the semantic --c-warn (#f5b14a) / --c-info (#5aa9ff) so a
+   brand-accented element never reads as a warning/info chip */
+:root[data-accent="amber"]   { --c-brand:#ffc233; --c-brand-2:#e89a12; --c-brand-bg:rgba(255,194,51,.13); --c-brand-glow:rgba(255,194,51,.30); }
 :root[data-accent="cyan"]    { --c-brand:#34e0e0; --c-brand-2:#15b9c9; --c-brand-bg:rgba(52,224,224,.13); --c-brand-glow:rgba(52,224,224,.28); }
-:root[data-accent="blue"]    { --c-brand:#5aa9ff; --c-brand-2:#3f7fe0; --c-brand-bg:rgba(90,169,255,.14); --c-brand-glow:rgba(90,169,255,.30); }
+:root[data-accent="blue"]    { --c-brand:#4d8dff; --c-brand-2:#2f6be0; --c-brand-bg:rgba(77,141,255,.14); --c-brand-glow:rgba(77,141,255,.30); }
 :root[data-accent="magenta"] { --c-brand:#ff5db1; --c-brand-2:#e03f8f; --c-brand-bg:rgba(255,93,177,.14); --c-brand-glow:rgba(255,93,177,.30); }
 
 /* ---- surface depth ---- */
@@ -433,6 +438,11 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 /* ---- live-data toggles ---- */
 :root[data-spark="off"] .spark,
 :root[data-spark="off"] .minichart { display: none; }
+/* collapse the now-empty trend column + header so no blank column is left behind */
+:root[data-spark="off"] .trend-cell,
+:root[data-spark="off"] .trend-col { display: none; }
+:root[data-spark="off"] .wlist.has-trend .wlist-head,
+:root[data-spark="off"] .wlist.has-trend .wrow { grid-template-columns: 1.4fr 0.8fr 0.7fr 0.7fr 0.6fr auto; }
 :root[data-glow="off"] .nav-brand::before { box-shadow: none; }
 :root[data-glow="off"] .nav-item a.active::before,
 :root[data-glow="off"] .statbar .pill .led.ok,
@@ -453,6 +463,7 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 .spark .spark-dot  { fill: var(--spark-tone, var(--c-brand)); }
 .spark.pos { --spark-tone: var(--c-ok); }
 .spark.neg { --spark-tone: var(--c-danger); }
+.spark.muted { --spark-tone: var(--c-text-faint); }
 
 /* ---- mini-chart (detail panels) ---- */
 .minichart { inline-size: 100%; }
@@ -464,6 +475,7 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 .minichart .mc-stop-bottom { stop-color: var(--mc-tone, var(--c-brand)); stop-opacity: 0; }
 .minichart.pos { --mc-tone: var(--c-ok); }
 .minichart.neg { --mc-tone: var(--c-danger); }
+.minichart.muted { --mc-tone: var(--c-text-faint); }
 
 /* ---- live flash + breathing LED ---- */
 @keyframes flash-up   { 0% { background: var(--c-ok-bg);     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c-ok) 40%, transparent); } 100% { background: transparent; box-shadow: none; } }

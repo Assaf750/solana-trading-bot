@@ -1,7 +1,7 @@
 // designPrefs.jsx — operator-controlled visual tweaks (accent / surface / corners /
 // density / theme / type-scale / live-data toggles). Applied to <html> data-* attributes
 // and persisted to localStorage. Pure presentation — touches no risk/exec/signer state.
-import { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
+import { createContext, useContext, useLayoutEffect, useState, useMemo, useCallback } from 'react';
 
 const KEY = 'soltrade.design.prefs.v1';
 
@@ -31,7 +31,9 @@ function load() {
 export function DesignPrefsProvider({ children }) {
   const [prefs, setPrefs] = useState(load);
 
-  useEffect(() => {
+  // useLayoutEffect (not useEffect) so persisted non-default theme/surface/accent are
+  // applied to <html> BEFORE first paint — avoids a default-then-saved flash (FOUC) on reload.
+  useLayoutEffect(() => {
     const r = document.documentElement;
     r.dataset.theme = prefs.theme;
     r.dataset.density = prefs.density;

@@ -57,7 +57,7 @@ const liveExecutor = createLiveExecutor({
 
 const paperEngine = createPaperEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
-  livePortfolio, liveExecutor,
+  livePortfolio, liveExecutor, signer,
   rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p),
 });
 

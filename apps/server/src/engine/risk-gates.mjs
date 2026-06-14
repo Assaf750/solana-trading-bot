@@ -1,10 +1,12 @@
 // risk-gates.mjs — PURE entry gate: every paper/live entry passes here first.
 // Hard-Risk limits are binding; missing limits => fail-safe REJECT (no implicit infinity).
-export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState }) {
+export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState, entriesBlocked = false }) {
   const rejections = [];
 
   if (killBlocked) rejections.push('kill_switch_engaged');
   if (operatingState !== 'ACTIVE') rejections.push(`operating_state_${operatingState}_blocks_entry`);
+  // once the daily-loss limit trips this book, entries stay blocked for the rest of the day
+  if (entriesBlocked) rejections.push('entries_blocked_daily_loss');
 
   const hr = cfg.hard_risk || {};
   const need = (f) => typeof hr[f] === 'number' && Number.isFinite(hr[f]);

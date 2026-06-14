@@ -26,8 +26,13 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
   const inputRef = useRef(null);
+  const listRef = useRef(null);
+  const restoreRef = useRef(null); // element to return focus to on close
 
-  const close = () => { setOpen(false); setQ(''); setIdx(0); };
+  const close = () => {
+    setOpen(false); setQ(''); setIdx(0);
+    restoreRef.current?.focus?.(); // return focus to the trigger (a11y)
+  };
 
   const groups = useMemo(() => {
     const screens = SCREENS.map((s) => ({
@@ -75,19 +80,29 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
   useEffect(() => { setIdx(0); }, [q]);
   useEffect(() => {
     if (open) {
+      // Reset on every open so any close path (incl. the Ctrl+K toggle in App) starts clean.
+      restoreRef.current = document.activeElement; // remember the trigger for focus restore
+      setQ('');
+      setIdx(0);
       const id = setTimeout(() => inputRef.current?.focus(), 20);
       return () => clearTimeout(id);
     }
     return undefined;
   }, [open]);
+  // Keep the highlighted row visible when navigating with the arrow keys.
+  useEffect(() => {
+    listRef.current?.querySelector('.cmdk-item.active')?.scrollIntoView({ block: 'nearest' });
+  }, [idx, q]);
 
   if (!open) return null;
 
   const onKey = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); close(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.min(filtered.length - 1, i + 1)); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.max(0, Math.min(filtered.length - 1, i + 1))); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); }
     else if (e.key === 'Enter') { e.preventDefault(); filtered[idx]?.run(); }
+    // focus trap: the input is the only keyboard-interactive control, so keep focus on it
+    else if (e.key === 'Tab') { e.preventDefault(); }
   };
 
   let lastGroup = null;
@@ -105,9 +120,13 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
             aria-label={ar ? 'بحث الأوامر' : 'Search commands'}
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="cmdk-listbox"
+            aria-activedescendant={filtered[idx] ? `cmdk-opt-${idx}` : undefined}
           />
         </div>
-        <div className="cmdk-list">
+        <div className="cmdk-list" ref={listRef} id="cmdk-listbox" role="listbox">
           {filtered.length === 0 && (
             <div className="cmdk-empty">{ar ? 'لا نتائج' : 'No results'}</div>
           )}
@@ -118,8 +137,10 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
               <div key={`${it.label}-${i}`}>
                 {head && <div className="cmdk-group-label">{head}</div>}
                 <div
+                  id={`cmdk-opt-${i}`}
                   className={`cmdk-item ${i === idx ? 'active' : ''}`}
-                  role="button"
+                  role="option"
+                  aria-selected={i === idx}
                   onMouseEnter={() => setIdx(i)}
                   onClick={() => it.run()}
                 >

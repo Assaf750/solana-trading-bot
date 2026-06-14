@@ -132,7 +132,7 @@ export default function TradingWorkspace() {
         <div className="stack" style={{ gap: 'var(--s-3)' }}>
           <div className="wlist has-trend">
             <div className="wlist-head">
-              <span>token / leader</span><span>{ar ? 'الاتجاه' : 'trend'}</span><span>state</span>
+              <span>token / leader</span><span className="trend-col">{ar ? 'الاتجاه' : 'trend'}</span><span>state</span>
               <span className="num">cost</span><span className="num">mark</span><span className="num">P&L</span><span>TP/SL</span>
             </div>
             {view.length === 0 && (
@@ -157,7 +157,7 @@ export default function TradingWorkspace() {
                     <span className="addr" dir="ltr">{ar ? 'قائد' : 'leader'} {shortMint(p.leader_address)} · {ago(p.entry_ts)}</span>
                   </span>
                   <span className="trend-cell">
-                    <Sparkline seed={p.token_mint} tone={pnl >= 0 ? 'pos' : 'neg'} bias={pnl >= 0 ? 1.1 : -1.1} width={66} height={22} />
+                    <Sparkline seed={p.token_mint} tone={mark == null ? 'muted' : pnl >= 0 ? 'pos' : 'neg'} bias={mark == null ? 0 : pnl >= 0 ? 1.1 : -1.1} width={66} height={22} />
                   </span>
                   <span><Badge tone={p.position_state === 'OPEN' ? 'ok' : 'neutral'}>{p.position_state === 'OPEN' ? 'OPEN' : 'CLOSED'}</Badge></span>
                   <span className="num">{usd(p.cost_usd)}</span>
@@ -215,7 +215,7 @@ export default function TradingWorkspace() {
                   const dPnl = (mk ?? selected.cost_usd) - selected.cost_usd;
                   return (
                     <div style={{ marginBlockStart: 'var(--s-3)' }}>
-                      <MiniChart seed={selected.token_mint} tone={dPnl >= 0 ? 'pos' : 'neg'} bias={dPnl >= 0 ? 0.8 : -0.8} height={64} points={48} label={ar ? 'mark · 48 نقطة' : 'mark · 48 ticks'} />
+                      <MiniChart seed={selected.token_mint} tone={mk == null ? 'muted' : dPnl >= 0 ? 'pos' : 'neg'} bias={mk == null ? 0 : dPnl >= 0 ? 0.8 : -0.8} height={64} points={48} label={ar ? 'mark · 48 نقطة' : 'mark · 48 ticks'} />
                     </div>
                   );
                 })()}
