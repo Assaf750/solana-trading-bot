@@ -33,7 +33,8 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     if (existing && !RETRYABLE_STATUSES.has(existing.status)) {
       return { ok: false, error: `intent_duplicate_${existing.status}` };
     }
-    l.intents[intent_id] = { status: 'PENDING', ts: nowIso(), detail };
+    // preserve notional_charged across a retry so a re-broadcast doesn't double-charge the cap
+    l.intents[intent_id] = { status: 'PENDING', ts: nowIso(), detail, notional_charged: existing?.notional_charged === true };
     saveLedger(l);
     return { ok: true };
   }
@@ -108,31 +109,33 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
   async function extractFill({ txSig, side, mint, owner, fallbackOutUi = 0 }) {
     let actualOutUi = fallbackOutUi;
     let fillSource = 'quote_estimate';
+    let solDelta = null; // owner's native SOL change: spent (<0) on a buy, received (>0) on a sell
     for (let i = 0; i < 3; i += 1) {
       const tx = await rpc.getTransaction(txSig);
       if (tx.ok && tx.result) {
         const meta = tx.result.meta;
         if (meta && !meta.err) {
+          const keys = tx.result.transaction?.message?.accountKeys || [];
+          const idx = keys.findIndex((k) => (typeof k === 'string' ? k : k?.pubkey) === owner);
+          if (idx >= 0 && Array.isArray(meta.postBalances) && Array.isArray(meta.preBalances)) {
+            solDelta = (meta.postBalances[idx] - meta.preBalances[idx]) / 1e9;
+          }
           const target = side === 'buy' ? mint : WSOL_MINT;
           const pre = (meta.preTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
           const post = (meta.postTokenBalances || []).find((b) => b.owner === owner && b.mint === target);
           if (side === 'buy' && post) {
             actualOutUi = Number(post.uiTokenAmount.uiAmount ?? 0) - Number(pre?.uiTokenAmount?.uiAmount ?? 0);
             fillSource = 'on_chain';
-          } else if (side === 'sell') {
-            const keys = tx.result.transaction?.message?.accountKeys || [];
-            const idx = keys.findIndex((k) => (typeof k === 'string' ? k : k?.pubkey) === owner);
-            if (idx >= 0) {
-              actualOutUi = (meta.postBalances[idx] - meta.preBalances[idx]) / 1e9; // SOL received (net of fee)
-              fillSource = 'on_chain';
-            }
+          } else if (side === 'sell' && solDelta != null) {
+            actualOutUi = solDelta; // SOL received (net of fee)
+            fillSource = 'on_chain';
           }
           break;
         }
       }
       await new Promise((r) => setTimeout(r, 2000));
     }
-    return { actualOutUi, fillSource };
+    return { actualOutUi, fillSource, solDelta };
   }
 
   /**
@@ -209,9 +212,11 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       return { ok: false, error: `send_failed_${sent.error}` };
     }
     const txSig = sent.result;
-    setIntent(intent_id, 'SENT', { signature: txSig });
-    // count notional only after a successful broadcast (failed sends must not consume the cap)
-    signer.recordSigned({ notional_usd: notionalUsd });
+    // count notional ONCE per intent: a retried (FAILED_*) intent that re-broadcasts must not
+    // double-charge the session cap (that would freeze trading after a few slipping exits).
+    const alreadyCharged = ledger().intents[intent_id]?.notional_charged === true;
+    setIntent(intent_id, 'SENT', { signature: txSig, notional_charged: true });
+    if (!alreadyCharged) signer.recordSigned({ notional_usd: notionalUsd });
     // critical section (gates→claim→send→record) is done — release the serialization lock so the
     // ~60s confirmation poll below does NOT block another swap (e.g. a stop-loss exit) behind it.
     releaseLock();
@@ -225,16 +230,18 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     }
 
     // actual fill amounts from the confirmed tx (bounded attempts; estimate fallback)
-    const { actualOutUi, fillSource } = await extractFill({
+    const { actualOutUi, fillSource, solDelta } = await extractFill({
       txSig, side, mint, owner, fallbackOutUi: q.outAmount / 10 ** (side === 'buy' ? decimals : 9),
     });
+    // real buy cost = SOL actually spent (incl. fees) * price; undefined falls back to intended sizeUsd upstream
+    const costUsd = side === 'buy' && solDelta != null && solDelta < 0 && price ? -solDelta * price : undefined;
 
     setIntent(intent_id, 'CONFIRMED', { signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource });
     safeAudit({ audit_scope: 'intent', audit_reason: 'live_tx_confirmed', detail: { intent_id, signature: txSig, actual_out_ui: actualOutUi, fill_source: fillSource } });
 
     return {
       ok: true, signature: txSig, intent_id,
-      outUi: actualOutUi, fillSource,
+      outUi: actualOutUi, fillSource, costUsd,
       priceImpactPct: q.priceImpactPct,
       solPriceUsd: price,
       proceedsUsd: side === 'sell' ? actualOutUi * price : undefined,
@@ -275,12 +282,17 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     const kp = ownerKeypair();
     const owner = kp.ok ? kp.kp.address : null;
     const price = await solPriceUsd();
-    const { actualOutUi, fillSource } = await extractFill({ txSig: it.signature, side: d.side, mint: d.mint, owner, fallbackOutUi: 0 });
+    const { actualOutUi, fillSource, solDelta } = await extractFill({ txSig: it.signature, side: d.side, mint: d.mint, owner, fallbackOutUi: 0 });
     setIntent(intent_id, 'CONFIRMED', { signature: it.signature, actual_out_ui: actualOutUi, fill_source: fillSource, reconciled: true });
     return {
       resolved: 'confirmed',
       detail: d,
-      fill: { outUi: actualOutUi, fillSource, proceedsUsd: d.side === 'sell' && price ? actualOutUi * price : undefined },
+      fill: {
+        outUi: actualOutUi,
+        fillSource, // 'on_chain' only when the real fill was read; 'quote_estimate' otherwise
+        proceedsUsd: d.side === 'sell' && fillSource === 'on_chain' && price ? actualOutUi * price : undefined,
+        costUsd: d.side === 'buy' && solDelta != null && solDelta < 0 && price ? -solDelta * price : undefined,
+      },
     };
   }
 

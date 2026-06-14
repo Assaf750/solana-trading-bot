@@ -175,7 +175,8 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       }
       const pos = pf.recordEntry({
         leader_address: leader, wallet_id: wallet.wallet_id, token_mint: swap.mint,
-        qty_ui: exec.outUi, decimals: swap.decimals, cost_usd: sizeUsd,
+        // cost basis = ACTUAL SOL spent on-chain (incl. fees) when available, else intended sizeUsd
+        qty_ui: exec.outUi, decimals: swap.decimals, cost_usd: exec.costUsd ?? sizeUsd,
         fee_usd_est: FEE_EST_USD, price_impact_pct: exec.priceImpactPct,
         copy_mode: wallet.copy_mode, tp_pct: tp, sl_pct: sl, intent_id: exec.intent_id,
       });
@@ -217,8 +218,15 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         pushEvent({ kind: 'live_exit_refused', position_id: p.position_id, reason, error: exec.error, refusals: exec.refusals || [] });
         return { ok: false };
       }
+      // Only book realized P&L when the REAL on-chain proceeds were read. Otherwise the sell
+      // confirmed but proceeds are unknown -> flag for manual reconciliation; never record an estimate.
+      if (exec.fillSource !== 'on_chain' || !Number.isFinite(exec.proceedsUsd)) {
+        pf.flagNeedsReconciliation(p.position_id, `exit_proceeds_unconfirmed_${reason}`);
+        pushEvent({ kind: 'exit_needs_reconciliation', position_id: p.position_id, reason, signature: exec.signature });
+        return { ok: false, needs_reconciliation: true };
+      }
       const res = pf.recordExit({
-        position_id: p.position_id, fraction, proceeds_usd: exec.proceedsUsd ?? (est.ok ? est.usd : 0),
+        position_id: p.position_id, fraction, proceeds_usd: exec.proceedsUsd,
         // proceeds come from the on-chain native-SOL delta, already net of network/priority fees —
         // do NOT subtract an extra fee estimate (that would double-count fees in realized P&L)
         fee_usd_est: 0, price_impact_pct: exec.priceImpactPct, reason,
@@ -309,6 +317,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         if (!already && Number(r.fill?.outUi) > 0) {
           const pos = livePortfolio.recordEntry({
             ...d.recovery, token_mint: d.mint, qty_ui: r.fill.outUi,
+            cost_usd: r.fill?.costUsd ?? d.recovery.cost_usd, // actual SOL spent when known
             fee_usd_est: FEE_EST_USD, price_impact_pct: 0, intent_id: it.intent_id,
           });
           pushEvent({ kind: 'reconciled_orphan_entry', position_id: pos.position_id, mint: d.mint, signature: it.signature });
@@ -317,12 +326,18 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       } else if (d.side === 'sell' && d.positionId) {
         const open = livePortfolio.openPositions().find((p) => p.position_id === d.positionId);
         if (open) {
-          // prefer the real on-chain proceeds; fall back to last mark (never fabricate a total loss)
-          const proceeds = Number.isFinite(r.fill?.proceedsUsd) && r.fill.proceedsUsd > 0 ? r.fill.proceedsUsd : (open.mark_usd ?? open.cost_usd);
-          const res = livePortfolio.recordExit({ position_id: d.positionId, fraction: 1, proceeds_usd: proceeds, fee_usd_est: 0, price_impact_pct: 0, reason: 'reconciled_exit' });
-          if (res.ok) {
-            pushEvent({ kind: 'reconciled_exit', position_id: d.positionId, realized_usd: res.realized_usd, signature: it.signature });
-            audit({ audit_scope: 'position', audit_reason: 'reconciled_exit', command_type: null, detail: { position_id: d.positionId, intent_id: it.intent_id, signature: it.signature } });
+          // ONLY record realized P&L from REAL on-chain proceeds; otherwise flag for manual
+          // reconciliation (the sell confirmed but proceeds are unknown) — never fabricate a number.
+          if (r.fill?.fillSource === 'on_chain' && Number.isFinite(r.fill.proceedsUsd) && r.fill.proceedsUsd > 0) {
+            const res = livePortfolio.recordExit({ position_id: d.positionId, fraction: 1, proceeds_usd: r.fill.proceedsUsd, fee_usd_est: 0, price_impact_pct: 0, reason: 'reconciled_exit' });
+            if (res.ok) {
+              pushEvent({ kind: 'reconciled_exit', position_id: d.positionId, realized_usd: res.realized_usd, signature: it.signature });
+              audit({ audit_scope: 'position', audit_reason: 'reconciled_exit', command_type: null, detail: { position_id: d.positionId, intent_id: it.intent_id, signature: it.signature } });
+            }
+          } else {
+            livePortfolio.flagNeedsReconciliation(d.positionId, 'reconciled_exit_proceeds_unconfirmed');
+            pushEvent({ kind: 'exit_needs_reconciliation', position_id: d.positionId, signature: it.signature });
+            audit({ audit_scope: 'position', audit_reason: 'exit_needs_reconciliation', command_type: null, detail: { position_id: d.positionId, intent_id: it.intent_id, signature: it.signature } });
           }
         }
       }
@@ -336,6 +351,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     for (const pf of books) {
       for (const p of pf.openPositions()) {
+        if (p.needs_reconciliation) continue; // true state unknown — don't auto-mark/exit; await manual resolution
         const q = await jupiter.usdValueOf({ mint: p.token_mint, qtyUi: p.qty_ui, decimals: p.decimals });
         if (!q.ok) { pf.setMark(p.position_id, p.mark_usd, 'unavailable'); continue; }
         pf.setMark(p.position_id, q.usd, 'valid');

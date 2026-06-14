@@ -204,3 +204,26 @@ test('live-executor: FAILED_ON_CHAIN is retryable (a reverted tx moved nothing)'
   m.exec._internal.setIntent('int_foc', 'FAILED_ON_CHAIN', {});
   assert.equal(m.exec._internal.claimIntent('int_foc', { side: 'sell' }).ok, true);
 });
+
+test('live-executor: session notional is charged ONCE across a retried (reverted) intent', async () => {
+  let charges = 0;
+  const m = buildExecutor({ deps: {
+    signer: { canSignNow: () => ({ allowed: true }), recordSigned: () => { charges += 1; } },
+    rpc: {
+      rpc: async (method) => {
+        if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+        if (method === 'sendTransaction') return { ok: true, result: 'SiG'.repeat(20) };
+        // tx reverts on-chain every time -> FAILED_ON_CHAIN (retryable)
+        if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ err: { InstructionError: [] }, confirmationStatus: 'confirmed' }] } };
+        return { ok: true, result: null };
+      },
+      getTransaction: async () => ({ ok: true, result: null }),
+    },
+  } });
+  const parts = ['sell', 'posR', 'stop_loss_hit'];
+  const r1 = await m.exec.executeSwap({ side: 'sell', mint: 'MintY', qtyUi: 5, decimals: 6, intentParts: parts });
+  assert.equal(r1.ok, false);
+  const r2 = await m.exec.executeSwap({ side: 'sell', mint: 'MintY', qtyUi: 5, decimals: 6, intentParts: parts });
+  assert.equal(r2.ok, false);
+  assert.equal(charges, 1, 'notional charged exactly once despite the retry re-broadcast');
+});

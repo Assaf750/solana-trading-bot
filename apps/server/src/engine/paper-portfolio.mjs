@@ -83,6 +83,11 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     if (f >= 1 || p.qty_ui <= 0) {
       p.position_state = 'CLOSED';
       p.qty_ui = 0; p.cost_usd = 0;
+    } else if (Number.isFinite(p.mark_usd)) {
+      // partial exit: shrink the mark to the remaining quantity so unrealized P&L isn't inflated
+      // in the window before the next markPass re-quotes the position.
+      p.mark_usd *= (1 - f);
+      p.mark_ts = nowIso();
     }
     s.realized_pnl_usd += realized;
     s.daily.realized_pnl_usd += realized;
@@ -103,6 +108,18 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     p.mark_ts = nowIso();
     p.mark_status = mark_status;
     save(s);
+  }
+
+  /** Mark a position as needing manual reconciliation (e.g. a confirmed on-chain exit whose
+   *  real proceeds couldn't be read). Keeps it out of the auto TP/SL loop; never fabricates P&L. */
+  function flagNeedsReconciliation(position_id, reason) {
+    const s = load();
+    const p = s.positions.find((x) => x.position_id === position_id);
+    if (!p) return { ok: false, error: 'position_not_found' };
+    p.needs_reconciliation = reason || true;
+    p.mark_ts = nowIso();
+    save(s);
+    return { ok: true };
   }
 
   function setEntriesBlocked(blocked) {
@@ -128,7 +145,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
 
   return {
     state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
-    recordEntry, recordExit, setMark, setEntriesBlocked, summary,
+    recordEntry, recordExit, setMark, setEntriesBlocked, flagNeedsReconciliation, summary,
   };
 }
 
