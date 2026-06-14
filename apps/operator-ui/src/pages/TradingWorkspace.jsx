@@ -229,6 +229,8 @@ export default function TradingWorkspace() {
                 </dl>
               </Card>
 
+              {selected.position_state === 'OPEN' && <PositionActions ar={ar} position={selected} onDone={load} />}
+
               <Card title={ar ? `صفقات المركز (${selTrades.length})` : `Position trades (${selTrades.length})`} right={!live && <SimulatedBadge />}>
                 {selTrades.length === 0 ? <p className="muted">{ar ? 'لا صفقات' : 'No trades'}</p> : (
                   <table className="data"><tbody>
@@ -256,5 +258,55 @@ export default function TradingWorkspace() {
                 : 'All numbers come from real market prices (Jupiter) — money is simulated in paper mode; nothing is sent on-chain.')}
       </DangerNote>
     </div>
+  );
+}
+
+// Operator actions on an OPEN position: manual close, or resolve a needs_reconciliation position
+// (book the real proceeds read off an explorer). Both confirm before acting.
+function PositionActions({ ar, position, onDone }) {
+  const flagged = Boolean(position.needs_reconciliation);
+  const [proceeds, setProceeds] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  async function close() {
+    if (!window.confirm(ar ? 'إغلاق هذا المركز بسعر السوق الآن؟' : 'Close this position at market now?')) return;
+    setBusy(true);
+    const r = await api.closePosition(position.position_id);
+    setBusy(false);
+    if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? 'أُغلق ✓' : 'Closed ✓' }); onDone?.(); }
+    else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل الإغلاق' : 'close failed') });
+  }
+  async function resolve() {
+    const v = Number(proceeds);
+    if (!Number.isFinite(v) || v < 0) { setMsg({ tone: 'danger', text: ar ? 'أدخل عائداً صحيحاً ($)' : 'Enter valid proceeds ($)' }); return; }
+    setBusy(true);
+    const r = await api.resolvePosition(position.position_id, v);
+    setBusy(false);
+    if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? 'سُوِّيت ✓' : 'Resolved ✓' }); onDone?.(); }
+    else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشلت التسوية' : 'resolve failed') });
+  }
+
+  return (
+    <Card title={ar ? 'إجراءات المركز' : 'Position actions'}>
+      {flagged ? (
+        <div className="stack" style={{ gap: 'var(--s-2)' }}>
+          <DangerNote tone="warn" locked>
+            {ar ? 'هذا المركز يحتاج تسوية يدوية: خروجه تأكّد على السلسلة لكن العائد غير مقروء. أدخل العائد الفعلي بالدولار من المستكشف.'
+                : 'This position needs manual reconciliation: its exit confirmed on-chain but the proceeds were unreadable. Enter the real USD proceeds from an explorer.'}
+          </DangerNote>
+          <div className="row">
+            <input className="search" type="number" inputMode="decimal" placeholder={ar ? 'العائد بالدولار' : 'proceeds (USD)'} value={proceeds} onChange={(e) => setProceeds(e.target.value)} dir="ltr" />
+            <button className="btn primary" onClick={resolve} disabled={busy}>{ar ? 'تسوية المركز' : 'Resolve position'}</button>
+          </div>
+        </div>
+      ) : (
+        <div className="row">
+          <button className="btn danger" onClick={close} disabled={busy}>{ar ? 'إغلاق المركز الآن' : 'Close position now'}</button>
+          <span className="muted fs-xs">{ar ? 'تصفية يدوية مستقلة عن TP/SL/القائد' : 'manual liquidation, independent of TP/SL/leader'}</span>
+        </div>
+      )}
+      {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
+    </Card>
   );
 }

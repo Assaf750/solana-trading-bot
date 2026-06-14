@@ -39,6 +39,8 @@ export const api = {
   trades: () => call('GET', '/api/trades'),
   livePositions: () => call('GET', '/api/live-positions'),
   engineEvents: () => call('GET', '/api/engine-events'),
+  intents: () => call('GET', '/api/intents'),
+  latency: () => call('GET', '/api/latency'),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),
@@ -46,6 +48,8 @@ export const api = {
   registerWallet: (p) => call('POST', '/api/commands', { command_type: 'register_wallet', ...p }),
   setFollow: (wallet_id, on) => call('POST', '/api/commands', { command_type: on ? 'enable_wallet_follow' : 'disable_wallet_follow', wallet_id }),
   updateWalletConfig: (wallet_id, patch) => call('POST', '/api/commands', { command_type: 'update_wallet_config', wallet_id, patch }),
+  closePosition: (position_id) => call('POST', '/api/commands', { command_type: 'close_position', position_id }),
+  resolvePosition: (position_id, proceeds_usd) => call('POST', '/api/commands', { command_type: 'resolve_position', position_id, proceeds_usd }),
   pauseSystem: () => call('POST', '/api/commands', { command_type: 'pause_system' }),
   resumeSystem: () => call('POST', '/api/commands', { command_type: 'resume_system' }),
   triggerKill: (level = 'global', key = null, reason = 'manual') => call('POST', '/api/commands', { command_type: 'trigger_kill_switch', level, key, reason }),

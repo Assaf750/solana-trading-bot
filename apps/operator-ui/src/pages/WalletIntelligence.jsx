@@ -209,6 +209,8 @@ export default function WalletIntelligence() {
                   )}
                 </Card>
 
+                <WalletConfigEditor ar={ar} wallet={selected} onSaved={load} />
+
                 <Card title={ar ? 'التحليل التاريخي (on-chain)' : 'Historical analysis (on-chain)'}>
                   {(() => {
                     const a = analysis[selected.wallet_id];
@@ -239,6 +241,88 @@ function Stat({ label, value, tone }) {
       <span className="lbl">{label}</span>
       <span className={`val ${tone || ''}`} style={{ fontSize: 'var(--fs-lg)' }}>{value}</span>
     </div>
+  );
+}
+
+// Per-wallet copy settings — these OVERRIDE the global copy_defaults. Empty = use the global default.
+function WalletConfigEditor({ ar, wallet, onSaved }) {
+  const draftFrom = (w) => {
+    const c = w.config || {};
+    const v = (k) => (c[k] ?? '');
+    return {
+      take_profit_pct: v('take_profit_pct'), stop_loss_pct: v('stop_loss_pct'),
+      sizing_mode: c.sizing_mode ?? '', sizing_value: v('sizing_value'),
+      max_entry_slippage_vs_leader: v('max_entry_slippage_vs_leader'), min_mirror_sell_pct: v('min_mirror_sell_pct'),
+      rebuy_cooldown: v('rebuy_cooldown'), max_time_in_position: v('max_time_in_position'),
+      max_entry_drift_pct: v('max_entry_drift_pct'), drift_action: c.drift_action ?? '',
+      auto_pause_after_losses: v('auto_pause_after_losses'), exit_on_leader_sell: Boolean(c.exit_on_leader_sell),
+    };
+  };
+  const [d, setD] = useState(() => draftFrom(wallet));
+  const [saved, setSaved] = useState(null);
+  useEffect(() => { setD(draftFrom(wallet)); setSaved(null); }, [wallet.wallet_id]);
+  const set = (k, val) => setD((s) => ({ ...s, [k]: val }));
+
+  const NumCell = ({ k, label }) => (
+    <label className="stack" style={{ gap: 4 }}>
+      <span className="muted fs-xs">{label}</span>
+      <input className="search" type="number" inputMode="decimal" placeholder={ar ? 'افتراضي' : 'default'} value={d[k]} onChange={(e) => set(k, e.target.value)} dir="ltr" />
+    </label>
+  );
+
+  async function save() {
+    const numeric = ['take_profit_pct', 'stop_loss_pct', 'sizing_value', 'max_entry_slippage_vs_leader', 'rebuy_cooldown', 'max_time_in_position', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'auto_pause_after_losses'];
+    const patch = {};
+    for (const k of numeric) patch[k] = d[k] === '' ? null : Number(d[k]); // null clears the override -> falls back to global default
+    if (d.sizing_mode) patch.sizing_mode = d.sizing_mode;
+    if (d.drift_action) patch.drift_action = d.drift_action;
+    patch.exit_on_leader_sell = Boolean(d.exit_on_leader_sell);
+    const r = await api.updateWalletConfig(wallet.wallet_id, patch);
+    setSaved(r.ok ? 'ok' : (r.data?.errors ? JSON.stringify(r.data.errors).slice(0, 120) : (r.data?.error || 'rejected')));
+    if (r.ok) onSaved?.();
+  }
+
+  return (
+    <Card title={ar ? 'إعدادات النسخ (لكل محفظة)' : 'Copy settings (per-wallet)'}
+      right={<span className="muted fs-xs">{ar ? 'فارغ = الافتراضي العام' : 'empty = global default'}</span>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--s-2)' }}>
+        <NumCell k="take_profit_pct" label={ar ? 'جني الربح %' : 'Take-profit %'} />
+        <NumCell k="stop_loss_pct" label={ar ? 'وقف الخسارة %' : 'Stop-loss %'} />
+        <label className="stack" style={{ gap: 4 }}>
+          <span className="muted fs-xs">{ar ? 'نمط التحجيم' : 'Sizing mode'}</span>
+          <select className="search" value={d.sizing_mode} onChange={(e) => set('sizing_mode', e.target.value)} dir="ltr">
+            <option value="">{ar ? '(افتراضي)' : '(default)'}</option>
+            <option value="fixed_usd">fixed_usd</option>
+            <option value="fixed_sol">fixed_sol</option>
+            <option value="pct_of_capital">pct_of_capital</option>
+          </select>
+        </label>
+        <NumCell k="sizing_value" label={ar ? 'قيمة التحجيم' : 'Sizing value'} />
+        <NumCell k="max_entry_slippage_vs_leader" label={ar ? 'انزلاق الدخول %' : 'Entry slippage %'} />
+        <NumCell k="min_mirror_sell_pct" label={ar ? 'أدنى بيع مرآة %' : 'Min mirror sell %'} />
+        <NumCell k="rebuy_cooldown" label={ar ? 'تهدئة إعادة الشراء (ث)' : 'Rebuy cooldown (s)'} />
+        <NumCell k="max_time_in_position" label={ar ? 'أقصى زمن للمركز (ث)' : 'Max time in pos (s)'} />
+        <NumCell k="max_entry_drift_pct" label={ar ? 'حدّ انحراف الدخول %' : 'Max entry drift %'} />
+        <label className="stack" style={{ gap: 4 }}>
+          <span className="muted fs-xs">{ar ? 'إجراء الانحراف' : 'Drift action'}</span>
+          <select className="search" value={d.drift_action} onChange={(e) => set('drift_action', e.target.value)} dir="ltr">
+            <option value="">{ar ? '(افتراضي)' : '(default)'}</option>
+            <option value="skip">skip</option>
+            <option value="shrink">shrink</option>
+          </select>
+        </label>
+        <NumCell k="auto_pause_after_losses" label={ar ? 'إيقاف بعد N خسائر' : 'Auto-pause after N losses'} />
+        <label className="row" style={{ gap: 8, alignSelf: 'end' }}>
+          <input type="checkbox" checked={d.exit_on_leader_sell} onChange={(e) => set('exit_on_leader_sell', e.target.checked)} />
+          <span className="fs-xs">{ar ? 'خروج عند بيع القائد' : 'Exit on leader sell'}</span>
+        </label>
+      </div>
+      <div className="row" style={{ marginBlockStart: 'var(--s-3)' }}>
+        <button className="btn primary" onClick={save}>{ar ? 'حفظ الإعدادات' : 'Save settings'}</button>
+        {saved === 'ok' && <Badge tone="ok">{ar ? 'حُفظت ✓' : 'Saved ✓'}</Badge>}
+        {saved && saved !== 'ok' && <Badge tone="danger">{saved}</Badge>}
+      </div>
+    </Card>
   );
 }
 
