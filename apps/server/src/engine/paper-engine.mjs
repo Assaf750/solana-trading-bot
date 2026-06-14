@@ -682,6 +682,88 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { ok: false, error: 'position_not_found' };
   }
 
+  /** Operator-initiated MANUAL buy of an arbitrary mint (sniper mode). Runs the SAME gates as a
+   *  copy entry (risk caps, anti-rug, FDV, exit-feasibility) — there is no leader, so no drift/
+   *  rebuy-cooldown. paper or live by mode. leader_address='MANUAL', wallet_id='manual'. */
+  async function manualBuy({ mint, sizeUsd }) {
+    const cfg = config.get();
+    const isLive = liveMode();
+    const pf = activePf();
+    if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return { ok: false, error: 'invalid_mint' };
+    const size = Number(sizeUsd);
+    if (!Number.isFinite(size) || size <= 0) return { ok: false, error: 'invalid_size' };
+
+    const sup = await rpc.rpc('getTokenSupply', [mint, { commitment: 'confirmed' }]);
+    const decimals = sup.ok ? Number(sup.result?.value?.decimals) : NaN;
+    if (!Number.isFinite(decimals)) return { ok: false, error: 'mint_unreadable' };
+
+    const gate = checkEntryGates({
+      cfg, portfolio: pf, sizeUsd: size, tokenMint: mint,
+      killBlocked: killSwitch.isBlocked({ mode: isLive ? 'real_live' : 'paper' }).blocked,
+      operatingState: operatingState.get().operating_state,
+      entriesBlocked: pf.summary().entries_blocked, leaderAddress: 'MANUAL',
+    });
+    if (!gate.allowed) { pushEvent({ kind: 'manual_entry_rejected', mint, rejections: gate.rejections }); return { ok: false, error: 'gates_refused', rejections: gate.rejections }; }
+
+    const safety = await checkTokenSafety({ mint, rpc, cfg });
+    if (!safety.safe) { pushEvent({ kind: 'manual_entry_rejected', mint, rejections: safety.reasons.map((r) => `token_safety:${r}`) }); return { ok: false, error: 'unsafe_token', rejections: safety.reasons }; }
+
+    const slipBps = Math.round((cfg.copy_defaults?.max_entry_slippage_vs_leader || 5) * 100);
+    const buyQuote = await jupiter.paperBuy({ mint, sizeUsd: size, slippageBps: slipBps });
+    if (!buyQuote.ok) { pushEvent({ kind: 'manual_entry_rejected', mint, rejections: [`route_invalid:${buyQuote.error}`] }); return { ok: false, error: buyQuote.error }; }
+    const qtyUi = buyQuote.outAmountBase / 10 ** decimals;
+
+    const mfilt = await checkMarketFilters({ mint, rpc, cfg, priceUsdPerToken: qtyUi > 0 ? size / qtyUi : null });
+    if (!mfilt.ok) { pushEvent({ kind: 'manual_entry_rejected', mint, rejections: mfilt.reasons.map((r) => `market_filter:${r}`) }); return { ok: false, error: 'market_filter', rejections: mfilt.reasons }; }
+
+    const sellCheck = await jupiter.usdValueOf({ mint, qtyUi, decimals });
+    if (!sellCheck.ok) { pushEvent({ kind: 'manual_entry_rejected', mint, rejections: [`exit_feasibility_fail:${sellCheck.error}`] }); return { ok: false, error: sellCheck.error }; }
+
+    const tp = cfg.copy_defaults?.take_profit_pct ?? 50;
+    const sl = cfg.copy_defaults?.stop_loss_pct ?? 30;
+
+    if (isLive && liveExecutor) {
+      const exec = await liveExecutor.executeSwap({
+        side: 'buy', mint, sizeUsd: size, decimals, slippageBps: slipBps,
+        intentParts: ['buy', 'MANUAL', mint, String(Date.now())], // each manual buy is a distinct intent
+        recovery: { leader_address: 'MANUAL', wallet_id: 'manual', decimals, cost_usd: size, copy_mode: 'manual', tp_pct: tp, sl_pct: sl },
+      });
+      if (!exec.ok) { pushEvent({ kind: 'manual_entry_refused', mint, error: exec.error, refusals: exec.refusals || [] }); return { ok: false, error: exec.error, refusals: exec.refusals }; }
+      if (!Number.isFinite(exec.outUi) || exec.outUi <= 0) { pushEvent({ kind: 'manual_entry_zero_fill', mint, signature: exec.signature }); return { ok: false, error: 'zero_fill', signature: exec.signature }; }
+      const pos = pf.recordEntry({
+        leader_address: 'MANUAL', wallet_id: 'manual', token_mint: mint,
+        qty_ui: exec.outUi, decimals, cost_usd: exec.costUsd ?? size, fee_usd_est: FEE_EST_USD,
+        price_impact_pct: exec.priceImpactPct, copy_mode: 'manual', tp_pct: tp, sl_pct: sl, intent_id: exec.intent_id,
+      });
+      pushEvent({ kind: 'manual_entry', mint, position_id: pos.position_id, size_usd: size, qty_ui: exec.outUi, signature: exec.signature });
+      audit({ audit_scope: 'position', audit_reason: 'manual_entry_recorded', command_type: 'manual_buy', detail: { position_id: pos.position_id, mint, size_usd: size, signature: exec.signature, simulated: false } });
+      return { ok: true, position_id: pos.position_id, signature: exec.signature };
+    }
+
+    const pos = pf.recordEntry({
+      leader_address: 'MANUAL', wallet_id: 'manual', token_mint: mint,
+      qty_ui: qtyUi, decimals, cost_usd: size, fee_usd_est: FEE_EST_USD,
+      price_impact_pct: buyQuote.priceImpactPct, copy_mode: 'manual', tp_pct: tp, sl_pct: sl,
+    });
+    pushEvent({ kind: 'manual_entry', mint, position_id: pos.position_id, size_usd: size, qty_ui: qtyUi });
+    audit({ audit_scope: 'position', audit_reason: 'manual_entry_recorded', command_type: 'manual_buy', detail: { position_id: pos.position_id, mint, size_usd: size, simulated: true } });
+    return { ok: true, position_id: pos.position_id };
+  }
+
+  /** Operator-initiated partial/full MANUAL sell of an open position (either book). */
+  async function manualSell({ position_id, fraction = 1 }) {
+    const f = Math.min(1, Math.max(0.01, Number(fraction) || 1));
+    for (const pf of [portfolio, ...(livePortfolio ? [livePortfolio] : [])]) {
+      const p = pf.openPositions().find((x) => x.position_id === position_id);
+      if (!p) continue;
+      if (p.needs_reconciliation) return { ok: false, error: 'position_needs_reconciliation', position_id };
+      const res = await performExit({ pf, p, fraction: f, reason: 'manual_sell', intentParts: ['sell', p.position_id, 'manual_sell', String(Date.now())] });
+      if (res?.ok) { pushEvent({ kind: 'manual_sell', position_id, fraction: f }); return { ok: true, position_id, fraction: f, realized_usd: res.realized_usd, closed: res.closed }; }
+      return { ok: false, error: res?.error || 'exit_failed', needs_reconciliation: res?.needs_reconciliation };
+    }
+    return { ok: false, error: 'position_not_found' };
+  }
+
   /** Phase 0 latency report (pipeline-lag percentiles). Decides whether the gRPC/Rust
    *  investment is justified — see docs/RESTRUCTURE_PLAN.md. */
   function latencyReport() { return latency.summary(); }
@@ -721,5 +803,5 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     return { mode: cfg.mode, leaders, recommendation };
   }
 
-  return { start, stop, status, events, closePosition, resolvePosition, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, leaderInsights, desiredState } };
+  return { start, stop, status, events, closePosition, resolvePosition, manualBuy, manualSell, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, leaderInsights, desiredState } };
 }

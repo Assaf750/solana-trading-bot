@@ -121,6 +121,8 @@ export default function TradingWorkspace() {
         <DangerNote tone="danger" locked>{ar ? 'حد الخسارة اليومي مضروب — لا دخول جديد اليوم (خروج فقط)' : 'Daily loss limit hit — no new entries today (exits only)'}</DangerNote>
       )}
 
+      <ManualTradePanel ar={ar} live={live} onDone={load} />
+
       <div className="filterbar">
         <label>{ar ? 'المراكز' : 'Positions'}</label>
         <div className="seg">
@@ -311,6 +313,13 @@ function PositionActions({ ar, position, onDone }) {
     if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? 'أُغلق ✓' : 'Closed ✓' }); onDone?.(); }
     else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل الإغلاق' : 'close failed') });
   }
+  async function sell(fraction) {
+    setBusy(true);
+    const r = await api.manualSell(position.position_id, fraction);
+    setBusy(false);
+    if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? `بيع ${Math.round(fraction * 100)}% ✓` : `Sold ${Math.round(fraction * 100)}% ✓` }); onDone?.(); }
+    else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل البيع' : 'sell failed') });
+  }
   async function resolve() {
     const v = Number(proceeds);
     if (!Number.isFinite(v) || v < 0) { setMsg({ tone: 'danger', text: ar ? 'أدخل عائداً صحيحاً ($)' : 'Enter valid proceeds ($)' }); return; }
@@ -335,11 +344,48 @@ function PositionActions({ ar, position, onDone }) {
           </div>
         </div>
       ) : (
-        <div className="row">
-          <button className="btn danger" onClick={close} disabled={busy}>{ar ? 'إغلاق المركز الآن' : 'Close position now'}</button>
-          <span className="muted fs-xs">{ar ? 'تصفية يدوية مستقلة عن TP/SL/القائد' : 'manual liquidation, independent of TP/SL/leader'}</span>
+        <div className="stack" style={{ gap: 'var(--s-2)' }}>
+          <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--s-2)' }}>
+            <button className="btn" onClick={() => sell(0.25)} disabled={busy}>{ar ? 'بيع 25%' : 'Sell 25%'}</button>
+            <button className="btn" onClick={() => sell(0.5)} disabled={busy}>{ar ? 'بيع 50%' : 'Sell 50%'}</button>
+            <button className="btn danger" onClick={close} disabled={busy}>{ar ? 'إغلاق كامل' : 'Close 100%'}</button>
+          </div>
+          <span className="muted fs-xs">{ar ? 'بيع يدوي جزئي/كامل مستقل عن TP/SL/القائد' : 'manual partial/full sell, independent of TP/SL/leader'}</span>
         </div>
       )}
+      {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
+    </Card>
+  );
+}
+
+// Manual buy of an arbitrary mint (sniper). Runs the same safety gates server-side.
+function ManualTradePanel({ ar, live, onDone }) {
+  const [mint, setMint] = useState('');
+  const [size, setSize] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const mintOk = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint.trim());
+  const valid = mintOk && Number(size) > 0;
+  async function buy() {
+    if (live && !window.confirm(ar ? '⚠ شراء بمالك الحقيقي الآن؟' : '⚠ Buy with REAL money now?')) return;
+    setBusy(true);
+    const r = await api.manualBuy(mint.trim(), Number(size));
+    setBusy(false);
+    if (r.ok && r.data?.ok) { setMsg({ tone: 'ok', text: ar ? 'تم الشراء ✓' : 'Bought ✓' }); setMint(''); setSize(''); onDone?.(); }
+    else setMsg({ tone: 'danger', text: (r.data?.rejections?.join(' · ')) || r.data?.error || (ar ? 'فشل الشراء' : 'buy failed') });
+  }
+  return (
+    <Card title={ar ? '🎯 تداول يدوي (Snipe)' : '🎯 Manual trade (Snipe)'}
+      sub={ar ? 'اشترِ أي توكن مباشرةً — يمرّ بنفس حواجز الأمان (anti-rug / FDV / حدود المخاطر).' : 'Buy any token directly — runs the same server-side gates (anti-rug / FDV / risk caps).'}
+      right={live ? <Badge tone="danger">{ar ? 'حقيقي' : 'LIVE'}</Badge> : <SimulatedBadge />}>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        <input className="search" dir="ltr" style={{ flex: '2 1 320px' }} placeholder={ar ? 'عنوان التوكن (mint)' : 'token mint address'} value={mint} onChange={(e) => setMint(e.target.value)} />
+        <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" style={{ flex: '1 1 120px' }} placeholder={ar ? 'الحجم $' : 'size $'} value={size} onChange={(e) => setSize(e.target.value)} />
+        <button className={`btn ${live ? 'danger' : 'primary'}`} onClick={buy} disabled={!valid || busy}>
+          {live ? (ar ? '🔴 شراء حقيقي' : '🔴 Buy LIVE') : (ar ? 'شراء (ورقي)' : 'Buy (paper)')}
+        </button>
+      </div>
+      {mintOk && <div style={{ marginBlockStart: 8 }}><TokenLabel mint={mint.trim()} /></div>}
       {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
     </Card>
   );

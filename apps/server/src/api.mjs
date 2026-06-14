@@ -133,6 +133,22 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       const notFound = res.error === 'position_not_found' || res.error === 'position_not_open';
       return { status: res.ok ? 200 : notFound ? 404 : 400, body: res };
     },
+    manual_buy(p) {
+      // operator buys an arbitrary mint directly (not a copy). Same gates as a copy entry.
+      if (!paperEngine || typeof paperEngine.manualBuy !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return paperEngine.manualBuy({ mint: p?.mint, sizeUsd: Number(p?.size_usd) }).then((res) => {
+        if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_buy', command_type: 'manual_buy', detail: { mint: p?.mint, size_usd: p?.size_usd } });
+        return { status: res.ok ? 200 : 400, body: res };
+      });
+    },
+    manual_sell(p) {
+      // operator sells a fraction (default full) of an open position, independent of TP/SL/leader.
+      if (!paperEngine || typeof paperEngine.manualSell !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return paperEngine.manualSell({ position_id: p?.position_id, fraction: p?.fraction }).then((res) => {
+        if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_sell', command_type: 'manual_sell', detail: { position_id: p?.position_id, fraction: p?.fraction } });
+        return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
+      });
+    },
     activate_real_live(p) {
       // THE OWNER'S SWITCH. Every readiness blocker must be gone AND the owner must
       // type the exact confirmation. Anything missing => refusal with the honest list.

@@ -495,3 +495,66 @@ test('mark history: seeded on entry, appends only valid marks, bounded to 48', (
   assert.equal(p.mark_history[p.mark_history.length - 1], 70, 'last appended is the final valid mark (10+60)');
   assert.ok(!p.mark_history.includes(999), 'stale mark not appended');
 });
+
+// ---------- manual trade (sniper mode) ----------
+function manualRpc() {
+  return { rpc: async (m) => {
+    if (m === 'getTokenSupply') return { ok: true, result: { value: { decimals: 6, uiAmount: 1e9 } } };
+    if (m === 'getAccountInfo') return { ok: true, result: { value: { data: { parsed: { type: 'mint', info: { mintAuthority: null, freezeAuthority: null } } } } } };
+    return { ok: true, result: null };
+  } };
+}
+function manualEngine(file, px = 0.001) {
+  const portfolio = createPaperPortfolio({ file });
+  const jupiter = {
+    quote: async () => ({ ok: true, outAmount: 150e6 }),
+    paperBuy: async ({ sizeUsd }) => ({ ok: true, outAmountBase: Math.round((sizeUsd / px) * 1e6), priceImpactPct: 0.2 }),
+    usdValueOf: async ({ qtyUi }) => ({ ok: true, usd: qtyUi * px, priceImpactPct: 0.3 }),
+  };
+  const engine = createPaperEngine({
+    config: fullConfig(), walletsRegistry: createWalletRegistry(), killSwitch: liveKill(), operatingState: activeState(),
+    vault: { isUnlocked: () => true }, portfolio, rpc: manualRpc(), jupiter, audit: () => {}, broadcast: () => {},
+  });
+  return { engine, portfolio };
+}
+
+test('manual buy: opens a paper position through the gates (leader=MANUAL)', async () => {
+  const { engine, portfolio } = manualEngine('pf-manual-buy.json');
+  const r = await engine.manualBuy({ mint: MEME, sizeUsd: 10 });
+  assert.equal(r.ok, true);
+  const pos = portfolio.openPositions().at(-1);
+  assert.equal(pos.leader_address, 'MANUAL');
+  assert.equal(pos.copy_mode, 'manual');
+  assert.equal(pos.cost_usd, 10);
+  assert.ok(engine.events(10).some((e) => e.kind === 'manual_entry'));
+});
+
+test('manual buy: rejects invalid mint / size before touching the chain', async () => {
+  const { engine } = manualEngine('pf-manual-bad.json');
+  assert.equal((await engine.manualBuy({ mint: 'bad', sizeUsd: 10 })).error, 'invalid_mint');
+  assert.equal((await engine.manualBuy({ mint: MEME, sizeUsd: 0 })).error, 'invalid_size');
+  assert.equal((await engine.manualBuy({ mint: MEME, sizeUsd: -5 })).error, 'invalid_size');
+});
+
+test('manual buy: respects the hard-risk position-size cap', async () => {
+  const { engine, portfolio } = manualEngine('pf-manual-cap.json');
+  // cap = 25% of $1000 = $250; a $300 buy must be rejected by the gate
+  const r = await engine.manualBuy({ mint: MEME, sizeUsd: 300 });
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'gates_refused');
+  assert.equal(portfolio.openCount(), 0);
+});
+
+test('manual sell: partial exit keeps the position open', async () => {
+  const { engine, portfolio } = manualEngine('pf-manual-sell.json', 0.001);
+  const pos = portfolio.recordEntry({ leader_address: 'MANUAL', wallet_id: 'manual', token_mint: MEME, qty_ui: 1000, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'manual', tp_pct: 50, sl_pct: 30 });
+  const r = await engine.manualSell({ position_id: pos.position_id, fraction: 0.5 });
+  assert.equal(r.ok, true);
+  assert.equal(r.closed, false);
+  assert.ok(portfolio.openPositions().some((p) => p.position_id === pos.position_id), 'still open after a 50% sell');
+});
+
+test('manual sell: unknown position -> not_found', async () => {
+  const { engine } = manualEngine('pf-manual-sell-nf.json');
+  assert.equal((await engine.manualSell({ position_id: 'nope' })).error, 'position_not_found');
+});
