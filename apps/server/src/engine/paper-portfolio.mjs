@@ -3,6 +3,7 @@
 import { readJson, writeJson, newId, nowIso } from '../util.mjs';
 
 const DEFAULT_FILE = 'paper-portfolio.json';
+const MARK_HISTORY_MAX = 48; // bounded per-position mark series for real (non-synthetic) charts
 
 const EMPTY = {
   simulated: true,
@@ -53,6 +54,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
       position_state: 'OPEN',
       copy_mode, tp_pct, sl_pct,
       mark_usd: cost_usd, mark_ts: nowIso(), mark_status: 'valid',
+      mark_history: [Math.round(cost_usd * 1e6) / 1e6], // seed the real mark series with the entry value
       intent_id, // live intent that opened this position (for SENT_UNCONFIRMED reconciliation)
       simulated,
     };
@@ -110,6 +112,11 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     p.mark_usd = mark_usd;
     p.mark_ts = nowIso();
     p.mark_status = mark_status;
+    // append only REAL (valid, finite) marks to the history -> the UI draws a true price line,
+    // not a synthetic seeded one. Stale ('unavailable') quotes are skipped to avoid flat noise.
+    if (mark_status === 'valid' && Number.isFinite(mark_usd)) {
+      p.mark_history = [...(p.mark_history || []), Math.round(mark_usd * 1e6) / 1e6].slice(-MARK_HISTORY_MAX);
+    }
     save(s);
   }
 

@@ -162,7 +162,7 @@ export default function TradingWorkspace() {
                     <span className="addr" dir="ltr">{ar ? 'قائد' : 'leader'} {shortMint(p.leader_address)} · {ago(p.entry_ts)}</span>
                   </span>
                   <span className="trend-cell">
-                    <Sparkline seed={p.token_mint} tone={mark == null ? 'muted' : pnl >= 0 ? 'pos' : 'neg'} bias={mark == null ? 0 : pnl >= 0 ? 1.1 : -1.1} width={66} height={22} />
+                    <Sparkline data={p.mark_history} seed={p.token_mint} tone={mark == null ? 'muted' : pnl >= 0 ? 'pos' : 'neg'} bias={mark == null ? 0 : pnl >= 0 ? 1.1 : -1.1} width={66} height={22} />
                   </span>
                   <span><Badge tone={p.position_state === 'OPEN' ? 'ok' : 'neutral'}>{p.position_state === 'OPEN' ? 'OPEN' : 'CLOSED'}</Badge></span>
                   <span className="num">{usd(p.cost_usd)}</span>
@@ -220,7 +220,7 @@ export default function TradingWorkspace() {
                   const dPnl = (mk ?? selected.cost_usd) - selected.cost_usd;
                   return (
                     <div style={{ marginBlockStart: 'var(--s-3)' }}>
-                      <MiniChart seed={selected.token_mint} tone={mk == null ? 'muted' : dPnl >= 0 ? 'pos' : 'neg'} bias={mk == null ? 0 : dPnl >= 0 ? 0.8 : -0.8} height={64} points={48} label={ar ? 'mark · 48 نقطة' : 'mark · 48 ticks'} />
+                      <MiniChart data={selected.mark_history} seed={selected.token_mint} tone={mk == null ? 'muted' : dPnl >= 0 ? 'pos' : 'neg'} bias={mk == null ? 0 : dPnl >= 0 ? 0.8 : -0.8} height={64} points={48} label={ar ? `mark · ${selected.mark_history?.length || 0} نقطة حقيقية` : `mark · ${selected.mark_history?.length || 0} real ticks`} />
                     </div>
                   );
                 })()}

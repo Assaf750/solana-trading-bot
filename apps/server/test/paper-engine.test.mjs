@@ -482,3 +482,16 @@ test('leader-insights: ranks leaders and recommends follow/drop/watch from the b
   assert.ok(ins.recommendation.follow.includes(good.tracked_wallet_address));
   assert.ok(ins.recommendation.drop.includes(bad.tracked_wallet_address));
 });
+
+test('mark history: seeded on entry, appends only valid marks, bounded to 48', () => {
+  const pf = createPaperPortfolio({ file: 'pf-markhist.json' });
+  const pos = pf.recordEntry({ leader_address: LEADER, wallet_id: 'w1', token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 10, fee_usd_est: 0, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  const seeded = pf.state().positions.find((x) => x.position_id === pos.position_id);
+  assert.deepEqual(seeded.mark_history, [10], 'seeded with the entry value');
+  for (let i = 1; i <= 60; i += 1) pf.setMark(pos.position_id, 10 + i, 'valid');
+  pf.setMark(pos.position_id, 999, 'unavailable'); // stale -> must NOT append
+  const p = pf.state().positions.find((x) => x.position_id === pos.position_id);
+  assert.ok(p.mark_history.length <= 48, 'bounded');
+  assert.equal(p.mark_history[p.mark_history.length - 1], 70, 'last appended is the final valid mark (10+60)');
+  assert.ok(!p.mark_history.includes(999), 'stale mark not appended');
+});
