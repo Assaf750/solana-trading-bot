@@ -29,10 +29,9 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
   const listRef = useRef(null);
   const restoreRef = useRef(null); // element to return focus to on close
 
-  const close = () => {
-    setOpen(false); setQ(''); setIdx(0);
-    restoreRef.current?.focus?.(); // return focus to the trigger (a11y)
-  };
+  // close just flips `open`; reset + focus-restore happen in the [open] effect so EVERY close
+  // path (Escape, overlay click, item run, and the App-level Ctrl+K toggle) behaves identically.
+  const close = () => setOpen(false);
 
   const groups = useMemo(() => {
     const screens = SCREENS.map((s) => ({
@@ -87,6 +86,9 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
       const id = setTimeout(() => inputRef.current?.focus(), 20);
       return () => clearTimeout(id);
     }
+    // closed (any path): return focus to whatever opened the palette
+    restoreRef.current?.focus?.();
+    restoreRef.current = null;
     return undefined;
   }, [open]);
   // Keep the highlighted row visible when navigating with the arrow keys.

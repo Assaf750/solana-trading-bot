@@ -10,8 +10,11 @@ import { REPO_ROOT } from './util.mjs';
 // which fails this check — so it can never reach the trading API.
 function hostAllowed(hostHeader) {
   if (!hostHeader) return false;
-  const h = String(hostHeader).replace(/:\d+$/, '').toLowerCase();
-  return h === '127.0.0.1' || h === 'localhost' || h === '[::1]' || h === '::1';
+  let h = String(hostHeader).toLowerCase().trim();
+  // strip the port, handling bracketed IPv6 ([::1]:8787), host:port, and bare IPv6 (::1).
+  if (h.startsWith('[')) h = h.slice(1, h.indexOf(']')); // [::1]:8787 -> ::1
+  else if (h.split(':').length === 2) [h] = h.split(':'); // host:port -> host (IPv4/name only)
+  return h === '127.0.0.1' || h === 'localhost' || h === '::1';
 }
 
 const UI_DIST = join(REPO_ROOT, 'apps', 'operator-ui', 'dist');
@@ -35,10 +38,11 @@ export function startServer({ api, host = '127.0.0.1', port = 8787 }) {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const path = url.pathname + (url.search || '');
 
-    // dev CORS: allow the Vite dev server on localhost only. The custom header is
-    // advertised so the UI's preflight succeeds; cross-site attackers get no ACAO.
+    // dev CORS: grant ONLY the Vite dev origin (:5173), not any localhost port — otherwise a
+    // malicious page served from any other localhost:port would get ACAO + a granted preflight
+    // for x-soltrade-client and could drive the API. Prod UI is same-origin (needs no CORS).
     const origin = req.headers.origin;
-    if (origin && /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
+    if (origin && /^https?:\/\/(localhost|127\.0\.0\.1):5173$/.test(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'content-type, x-soltrade-client');
@@ -64,11 +68,12 @@ export function startServer({ api, host = '127.0.0.1', port = 8787 }) {
 
     // API
     if (url.pathname.startsWith('/api/')) {
-      // Anti-CSRF: state-changing requests must carry the UI's custom header. A cross-site
-      // page cannot set it without a preflight, which CORS denies for non-localhost origins;
-      // omitting it (to send a "simple" text/plain POST) fails here. Reads (GET) are already
-      // protected from cross-origin reads by the same-origin/CORS policy.
-      if ((req.method === 'POST' || req.method === 'DELETE') && req.headers['x-soltrade-client'] !== '1') {
+      // Anti-CSRF (deny-by-default): every state-changing method must carry the UI's custom
+      // header. A cross-site page cannot set it without a preflight, which CORS denies for any
+      // non-dev origin; omitting it (to send a "simple" text/plain POST) fails here. Only the
+      // idempotent read methods (GET/HEAD) are exempt — they're protected from cross-origin
+      // reads by the same-origin/CORS policy. New mutating methods are covered automatically.
+      if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers['x-soltrade-client'] !== '1') {
         sendJson(res, 403, { ok: false, error_message: 'missing_client_header' });
         return;
       }

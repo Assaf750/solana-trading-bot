@@ -159,7 +159,7 @@ export default function WalletIntelligence() {
                     <Sparkline seed={w.tracked_wallet_address} tone={s && s.win_rate != null ? (s.win_rate >= 0.5 ? 'pos' : 'neg') : 'muted'} bias={s && s.win_rate != null ? (s.win_rate >= 0.5 ? 1 : -1) : 0} width={60} height={20} />
                   </span>
                   <span><Badge tone={w.copy_mode === 'full_mirror' ? 'warn' : 'info'}>{w.copy_mode === 'full_mirror' ? 'mirror' : 'follow'}</Badge></span>
-                  <span className="num" style={{ color: s ? (s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? (s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—') : '·'}</span>
+                  <span className="num" style={{ color: s && s.win_rate != null ? (s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? (s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—') : '·'}</span>
                   <span className="num" style={{ color: s ? ((s.realized_pnl_sol || 0) >= 0 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? `${s.realized_pnl_sol > 0 ? '+' : ''}${s.realized_pnl_sol}◎` : '·'}</span>
                   <span className="num faint">{s ? s.trades_closed : '·'}</span>
                   <span><button className={`btn toggle ${w.follow_enabled ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFollow(w); }}>{w.follow_enabled ? '✓' : 'off'}</button></span>

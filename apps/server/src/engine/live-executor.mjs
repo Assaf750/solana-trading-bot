@@ -100,7 +100,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
    * Execute a real swap. side 'buy': spend sizeUsd worth of SOL into mint.
    * side 'sell': sell qtyUi of mint back to SOL. Returns actual fill data.
    */
-  async function executeSwap({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts }) {
+  async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts }) {
     const notionalUsd = side === 'buy' ? sizeUsd : sizeUsd; // sell passes estimated proceeds in sizeUsd
     const g = gates({ action: side === 'buy' ? 'entry' : 'exit', notionalUsd });
     if (!g.allowed) return { ok: false, error: 'gates_refused', refusals: g.refusals };
@@ -155,9 +155,16 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     setIntent(intent_id, 'SENT_PENDING');
     const sent = await rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
     if (!sent.ok) {
-      // preflight rejections never landed on-chain; safe to mark failed (and retryable)
-      setIntent(intent_id, 'FAILED_SEND', { error: sent.error });
-      safeAudit({ audit_scope: 'intent', audit_reason: 'live_send_failed', detail: { intent_id, error: sent.error } });
+      // Distinguish PROVABLY-unsent from ambiguous failures. A JSON-RPC error response
+      // (`rpc_<code>`, e.g. preflight/simulation rejection) means the node refused the tx
+      // before submission -> never landed -> FAILED_SEND (retryable). A timeout / HTTP 5xx /
+      // retries-exhausted (`rpc_failed_*`, `rpc_http_*`, `rpc_retries_exhausted`) may have
+      // been forwarded to the cluster -> SENT_UNCONFIRMED (NOT retryable; needs reconciliation,
+      // so an auto-retry can't build a second tx that double-executes).
+      const provablyUnsent = /^rpc_-?\d+$/.test(sent.error || '');
+      const status = provablyUnsent ? 'FAILED_SEND' : 'SENT_UNCONFIRMED';
+      setIntent(intent_id, status, { error: sent.error });
+      safeAudit({ audit_scope: 'intent', audit_reason: 'live_send_failed', detail: { intent_id, error: sent.error, status } });
       return { ok: false, error: `send_failed_${sent.error}` };
     }
     const txSig = sent.result;
@@ -218,5 +225,16 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     return Object.entries(l.intents).slice(-limit).map(([id, v]) => ({ intent_id: id, ...v }));
   }
 
-  return { executeSwap, gates, intents, _internal: { intentIdFor, claimIntent, setIntent, solPriceUsd } };
+  // Serialize all real-money swaps: the signer notional cap is a check-then-act across an
+  // awaited network send, so two concurrent calls (leader stream + TP/SL loop) could both
+  // pass canSignNow against a stale total. A single in-flight chain makes claim→send→record
+  // atomic w.r.t. other swaps, also protecting the intent-ledger read-modify-write.
+  let execChain = Promise.resolve();
+  function executeSwap(args) {
+    const run = execChain.then(() => executeSwapInner(args));
+    execChain = run.then(() => {}, () => {}); // keep the chain alive regardless of outcome
+    return run;
+  }
+
+  return { executeSwap, gates, intents, solPriceUsd, _internal: { intentIdFor, claimIntent, setIntent, solPriceUsd } };
 }

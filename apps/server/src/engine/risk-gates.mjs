@@ -21,6 +21,11 @@ export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocke
   const hasCapital = typeof capital === 'number' && Number.isFinite(capital) && capital > 0;
   if (!hasCapital) rejections.push('capital_limit_missing');
 
+  // `riskRejection` = a GENUINE risk-cap breach (exposure/size/open-count/daily-loss), as
+  // opposed to a benign state/config block (kill/pause/EXITS_ONLY/unset-limits). Only the
+  // former should feed the signer's consecutive-risk-rejection lockout; counting state
+  // blocks would lock the signer during a routine pause and freeze exits.
+  let riskRejection = false;
   if (!rejections.length) {
     if (portfolio.openCount() >= hr.max_open_positions) rejections.push('max_open_positions_reached');
     const maxPos = capital * (hr.max_position_size_pct / 100);
@@ -31,9 +36,10 @@ export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocke
     const dailyLoss = -portfolio.dailyRealized();
     if (dailyLoss >= hr.max_daily_loss_usdt) rejections.push('daily_loss_limit_usdt_hit');
     if (dailyLoss >= capital * (hr.max_daily_loss_pct / 100)) rejections.push('daily_loss_limit_pct_hit');
+    riskRejection = rejections.length > 0; // any push here is a true risk-cap breach
   }
 
-  return { allowed: rejections.length === 0, rejections };
+  return { allowed: rejections.length === 0, rejections, riskRejection };
 }
 
 function round2(n) { return Math.round(n * 100) / 100; }

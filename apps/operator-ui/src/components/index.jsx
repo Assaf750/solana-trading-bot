@@ -333,13 +333,16 @@ function buildPath(pts, width, height, pad) {
   return { line, area, last };
 }
 
+// pos/neg/muted map to a CSS class; anything else (undefined) uses the default brand tone.
+const toneClass = (t) => (t === 'pos' || t === 'neg' || t === 'muted' ? t : '');
+
 // ---------- Sparkline (inline SVG trend) ----------
 export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0, points = 24 }) {
   const { line, area, last } = useMemo(() => {
     const pts = (data && data.length) ? data : genSeries(seed ?? 'spark', points, bias);
     return buildPath(pts, width, height, 1.5);
   }, [data, seed, bias, points, width, height]);
-  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : '';
+  const cls = toneClass(tone);
   return (
     <span className={`spark ${cls}`} aria-hidden>
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
@@ -360,7 +363,7 @@ export function MiniChart({ data, tone, seed, bias = 0, height = 60, points = 40
     const pts = (data && data.length) ? data : genSeries(seed ?? 'mc', points, bias);
     return buildPath(pts, width, height, 4);
   }, [data, seed, bias, points, height]);
-  const cls = tone === 'pos' ? 'pos' : tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : '';
+  const cls = toneClass(tone);
   return (
     <div className={`minichart ${cls}`}>
       {label && <div className="minichart-label">{label}</div>}

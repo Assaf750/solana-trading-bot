@@ -87,6 +87,7 @@ export default function NewCoinRadar() {
                         : a.loading ? <span className="muted">{ar ? 'جارٍ…' : '…'}</span>
                         : a.error ? <Badge tone="danger">{a.error === 'vault_locked' ? 'vault' : 'err'}</Badge>
                         : s?.status === 'insufficient_evidence' ? <span className="faint">{ar ? 'لا دليل' : 'no data'}</span>
+                        : !s ? <span className="faint">—</span>
                         : <span className="mono fs-xs" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                             <Sparkline seed={tr.address} tone={s.win_rate != null ? (s.win_rate >= 0.5 ? 'pos' : 'neg') : 'muted'} bias={s.win_rate != null ? (s.win_rate >= 0.5 ? 1 : -1) : 0} width={46} height={16} />
                             <span style={{ color: s.win_rate == null ? 'var(--c-text-faint)' : s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—'}</span>

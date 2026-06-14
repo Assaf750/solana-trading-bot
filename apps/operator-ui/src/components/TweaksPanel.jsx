@@ -42,26 +42,23 @@ export function TweaksPanel({ open, setOpen }) {
   const panelRef = useRef(null);
   const restoreRef = useRef(null); // element to return focus to on close
 
+  // Non-modal drawer (it shows LIVE previews, so the page must stay interactive — no trap, no
+  // aria-modal). Just: Escape to close, move focus in on open, and return focus to the trigger
+  // on close ONLY if focus is still inside the panel (don't yank focus the user moved elsewhere).
   useEffect(() => {
     if (!open) return undefined;
     restoreRef.current = document.activeElement;
-    const focusables = () => (panelRef.current
-      ? Array.from(panelRef.current.querySelectorAll('button, input, select, textarea, [tabindex]:not([tabindex="-1"])'))
-        .filter((el) => !el.disabled && el.offsetParent !== null)
-      : []);
-    const id = setTimeout(() => { const f = focusables(); (f[0] || panelRef.current)?.focus?.(); }, 20);
-    const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); setOpen(false); return; }
-      if (e.key === 'Tab') { // focus trap: cycle within the panel
-        const f = focusables();
-        if (!f.length) return;
-        const first = f[0]; const last = f[f.length - 1];
-        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-      }
-    };
+    const id = setTimeout(() => {
+      const first = panelRef.current?.querySelector('button, input, select, textarea, [tabindex]:not([tabindex="-1"])');
+      (first || panelRef.current)?.focus?.();
+    }, 20);
+    const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); } };
     window.addEventListener('keydown', onKey);
-    return () => { clearTimeout(id); window.removeEventListener('keydown', onKey); restoreRef.current?.focus?.(); };
+    return () => {
+      clearTimeout(id);
+      window.removeEventListener('keydown', onKey);
+      if (panelRef.current?.contains(document.activeElement)) restoreRef.current?.focus?.();
+    };
   }, [open, setOpen]);
 
   if (!open) return null;
@@ -71,7 +68,7 @@ export function TweaksPanel({ open, setOpen }) {
     : { title: 'Tweaks', identity: 'Identity', accent: 'Accent', surface: 'Surface depth', corners: 'Corners', sharp: 'Sharp', soft: 'Soft', rounded: 'Rounded', scale: 'Density & scale', density: 'Density', compact: 'Compact', comfortable: 'Comfortable', ultra: 'Ultra', type: 'Type scale', live: 'Live data', spark: 'Inline sparklines', glow: 'Ambient glow', motion: 'Live motion', grid: 'Table grid lines', reset: 'Reset to defaults', close: 'Close' };
 
   return (
-    <aside className="tweaks-panel" role="dialog" aria-modal="true" aria-label={L.title} ref={panelRef} tabIndex={-1}>
+    <aside className="tweaks-panel" role="dialog" aria-label={L.title} ref={panelRef} tabIndex={-1}>
       <div className="tweaks-head">
         <strong>{L.title}</strong>
         <button className="btn sm" onClick={() => setOpen(false)} aria-label={L.close}>✕</button>

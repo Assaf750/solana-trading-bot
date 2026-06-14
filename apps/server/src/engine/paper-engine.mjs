@@ -70,6 +70,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   }
 
   async function solUsd() {
+    // reuse the live executor's 60s-cached SOL price when available (avoids an uncached
+    // Jupiter round-trip on every fixed_sol entry); fall back to a direct quote in paper-only.
+    if (liveExecutor?.solPriceUsd) return liveExecutor.solPriceUsd();
     const q = await jupiter.quote({ inputMint: WSOL_MINT, outputMint: USDC_MINT, amountBaseUnits: 1e9 });
     return q.ok ? q.outAmount / 1e6 : null;
   }
@@ -117,8 +120,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       entriesBlocked: pf.summary().entries_blocked,
     });
     if (!gate.allowed) {
-      // a risk-gate rejection on the real book feeds the signer's consecutive-rejection lockout
-      if (isLive && signer) signer.recordRiskRejection();
+      // ONLY a genuine risk-cap breach feeds the signer's consecutive-rejection lockout —
+      // never a benign pause/EXITS_ONLY/kill/unset-limit block (those would freeze the signer).
+      if (isLive && signer && gate.riskRejection) signer.recordRiskRejection();
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: gate.rejections });
       return;
     }
@@ -182,8 +186,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   }
 
   /** Exit helper: real sell when the position is live, quoted simulated sell when paper.
-   *  intentParts defaults to (position, reason, day): time-driven exits (TP/SL) dedupe per
-   *  day but stay retryable after a provably-unsent failure (see live-executor RETRYABLE). */
+   *  intentParts defaults to (position, reason) — a stable key per logical exit. It is NOT
+   *  day-bucketed (that would mint a new intent across UTC midnight and defeat dedup); a
+   *  provably-unsent failure is still retryable via the live-executor RETRYABLE statuses. */
   async function performExit({ pf, p, fraction, reason, intentParts }) {
     const qtySell = p.qty_ui * fraction;
     if (p.simulated === false && liveExecutor) {
@@ -191,7 +196,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       const exec = await liveExecutor.executeSwap({
         side: 'sell', mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals,
         sizeUsd: est.ok ? est.usd : 0, slippageBps: 150,
-        intentParts: intentParts || ['sell', p.position_id, reason, new Date().toISOString().slice(0, 10)],
+        intentParts: intentParts || ['sell', p.position_id, reason],
       });
       if (!exec.ok) {
         pushEvent({ kind: 'live_exit_refused', position_id: p.position_id, reason, error: exec.error, refusals: exec.refusals || [] });
@@ -232,8 +237,10 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       const fraction = swap.fullExit ? 1 : Math.min(1, swap.soldFraction || 1);
       for (const p of open) {
         const reason = swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored';
-        // keyed by the leader's signature so each distinct leader sell mirrors independently
-        await performExit({ pf, p, fraction, reason, intentParts: ['sell', p.position_id, reason, signature || new Date().toISOString().slice(0, 10)] });
+        // keyed by the leader's signature so each distinct leader sell mirrors independently;
+        // if the signature is unavailable, fall back to the stable per-logical-exit key (no date).
+        const intentParts = signature ? ['sell', p.position_id, reason, signature] : ['sell', p.position_id, reason];
+        await performExit({ pf, p, fraction, reason, intentParts });
       }
     }
     if (!found) pushEvent({ kind: 'leader_sell_no_position', leader, mint: swap.mint });
@@ -307,7 +314,13 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       onUp: ({ provider } = {}) => {
         engineState = 'active';
         const op = operatingState.get().operating_state;
-        if (op === 'WARMING_UP' || op === 'EXITS_ONLY') operatingState.transition('ACTIVE', 'stream connected + readiness ok');
+        // Don't auto-resume entries after a daily-loss trip: if either book has entries
+        // blocked, stay EXITS_ONLY (a reconnect must not undo the daily-loss entry block).
+        const entriesBlocked = portfolio.summary().entries_blocked
+          || Boolean(livePortfolio && livePortfolio.summary().entries_blocked);
+        if (op === 'WARMING_UP' || (op === 'EXITS_ONLY' && !entriesBlocked)) {
+          operatingState.transition('ACTIVE', 'stream connected + readiness ok');
+        }
         pushEvent({ kind: 'stream_connected', wallets: addrs.length, provider, enhanced: provider === 'helius' });
       },
       onGap: () => {
