@@ -81,6 +81,19 @@ const DEFAULTS = {
     grpc_url_ref: null,       // Yellowstone/Geyser gRPC endpoint (preferred ingestion transport)
     grpc_token_ref: null,     // optional x-token for the gRPC endpoint
     jito_url_ref: null,       // Jito block-engine base URL (for the jito submit backend)
+    telegram_bot_token_ref: null, // Telegram bot token (for the notifications backend)
+    webhook_url_ref: null,    // generic webhook URL (Discord/Slack/custom) for notifications
+  },
+  notifications: {
+    // best-effort operator alerts; never affect trading. Secrets live in the vault (refs above).
+    enabled: false,
+    telegram_enabled: false,
+    webhook_enabled: false,
+    telegram_chat_id: null,   // plain chat id (not a secret)
+    on_entry: true,
+    on_exit: true,
+    on_kill: true,
+    on_daily_loss: true,
   },
   signer_session: {
     // ALL must be explicitly set (non-null) for the signer to be "ready"
@@ -130,15 +143,20 @@ export function validateConfigPatch(patch) {
     execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct', 'breakeven_after_tp1'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
-    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref'],
+    providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref', 'telegram_bot_token_ref', 'webhook_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
+    notifications: ['enabled', 'telegram_enabled', 'webhook_enabled', 'telegram_chat_id', 'on_entry', 'on_exit', 'on_kill', 'on_daily_loss'],
   };
   for (const [section, value] of Object.entries(patch || {})) {
     if (!sections[section]) { errors.push({ field: section, error: 'unknown_section' }); continue; }
     if (!value || typeof value !== 'object') { errors.push({ field: section, error: 'must_be_object' }); continue; }
     for (const [field, v] of Object.entries(value)) {
       if (!sections[section].includes(field)) { errors.push({ field: `${section}.${field}`, error: 'unknown_field' }); continue; }
-      if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      if (section === 'notifications') {
+        if (field === 'telegram_chat_id') { if (v !== null && typeof v !== 'string') errors.push({ field, error: 'must_be_string_or_null' }); }
+        else if (typeof v !== 'boolean') errors.push({ field, error: 'must_be_boolean' });
+      }
+      else if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital', 'proportional_leader'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'signer_backend' && !['node', 'rust'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'submit_backend' && !['rpc', 'jito'].includes(v)) errors.push({ field, error: 'invalid_enum' });

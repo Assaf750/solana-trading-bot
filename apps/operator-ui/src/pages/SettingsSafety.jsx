@@ -56,6 +56,7 @@ export default function SettingsSafety() {
   const [safety, setSafety] = useState({});
   const [copyDef, setCopyDef] = useState({});
   const [exec, setExec] = useState({});
+  const [notif, setNotif] = useState({});
   const [activePreset, setActivePreset] = useState(null);
   const [saveMsg, setSaveMsg] = useState(null);
   const [confirmLive, setConfirmLive] = useState('');
@@ -94,6 +95,12 @@ export default function SettingsSafety() {
         signer_backend: d.execution?.signer_backend || 'node', submit_backend: d.execution?.submit_backend || 'rpc',
         jito_tip_account: d.execution?.jito_tip_account ?? '', jito_tip_lamports: g(d.execution, 'jito_tip_lamports'),
         sizing_mode: d.execution?.sizing_mode || 'fixed_usd', sizing_value: g(d.execution, 'sizing_value'),
+      });
+      const nf = d.notifications || {};
+      setNotif({
+        enabled: !!nf.enabled, telegram_enabled: !!nf.telegram_enabled, webhook_enabled: !!nf.webhook_enabled,
+        telegram_chat_id: nf.telegram_chat_id ?? '',
+        on_entry: nf.on_entry !== false, on_exit: nf.on_exit !== false, on_kill: nf.on_kill !== false, on_daily_loss: nf.on_daily_loss !== false,
       });
       setActivePreset(null);
     }
@@ -143,6 +150,11 @@ export default function SettingsSafety() {
         jito_tip_account: exec.jito_tip_account === '' ? null : exec.jito_tip_account, jito_tip_lamports: numOrNull(exec.jito_tip_lamports),
         sizing_mode: exec.sizing_mode || 'fixed_usd', sizing_value: numOrNull(exec.sizing_value),
       },
+      notifications: {
+        enabled: !!notif.enabled, telegram_enabled: !!notif.telegram_enabled, webhook_enabled: !!notif.webhook_enabled,
+        telegram_chat_id: notif.telegram_chat_id === '' ? null : String(notif.telegram_chat_id),
+        on_entry: !!notif.on_entry, on_exit: !!notif.on_exit, on_kill: !!notif.on_kill, on_daily_loss: !!notif.on_daily_loss,
+      },
     };
     const r = await api.updateConfig(patch);
     if (r.ok) {
@@ -179,6 +191,7 @@ export default function SettingsSafety() {
     { key: 'strategy', ico: '🎯', label: { en: 'Strategy & copy', ar: 'الاستراتيجية والنسخ' } },
     { key: 'risk', ico: '🛡', label: { en: 'Risk & EV', ar: 'المخاطر و EV' }, badge: complete ? null : 'danger' },
     { key: 'execution', ico: '⚡', label: { en: 'Execution', ar: 'التنفيذ' } },
+    { key: 'notifications', ico: '🔔', label: { en: 'Notifications', ar: 'التنبيهات' } },
     { key: 'activation', ico: '🔴', label: { en: 'Real-live', ar: 'التفعيل الحقيقي' }, badge: blockerN ? 'warn' : 'ok' },
   ];
 
@@ -403,6 +416,51 @@ export default function SettingsSafety() {
               <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" value={exec.sizing_value ?? ''} onChange={(e) => setExec({ ...exec, sizing_value: e.target.value })} />
             </label>
           </div>
+        </Card>
+      )}
+
+      {tab === 'notifications' && (
+        <Card title={ar ? '🔔 التنبيهات' : '🔔 Notifications'}
+          sub={ar ? 'تنبيهات تشغيلية فورية — لا تؤثر على التداول إطلاقاً. الأسرار (رمز البوت/رابط Webhook) تُدخل في «محافظي والأموال».' : 'Best-effort operational alerts — never affect trading. Secrets (bot token / webhook URL) are entered on My Wallets & Funds.'}>
+          <label className="row" style={{ gap: 8, marginBlockEnd: 'var(--s-3)' }}>
+            <input type="checkbox" checked={!!notif.enabled} onChange={(e) => setNotif({ ...notif, enabled: e.target.checked })} />
+            <span><b>{ar ? 'تفعيل التنبيهات' : 'Enable notifications'}</b></span>
+          </label>
+          <div className="grid cols-2" style={{ gap: 'var(--s-3)' }}>
+            <div className="stack" style={{ gap: 'var(--s-2)' }}>
+              <span className="section-title fs-xs">{ar ? 'القنوات' : 'Channels'}</span>
+              <label className="row" style={{ gap: 8 }}>
+                <input type="checkbox" checked={!!notif.telegram_enabled} onChange={(e) => setNotif({ ...notif, telegram_enabled: e.target.checked })} />
+                <span className="fs-sm">Telegram</span>
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? 'معرّف محادثة Telegram (chat id)' : 'Telegram chat id'}</span>
+                <input className="search" dir="ltr" placeholder="123456789" value={notif.telegram_chat_id ?? ''} onChange={(e) => setNotif({ ...notif, telegram_chat_id: e.target.value })} />
+              </label>
+              <label className="row" style={{ gap: 8 }}>
+                <input type="checkbox" checked={!!notif.webhook_enabled} onChange={(e) => setNotif({ ...notif, webhook_enabled: e.target.checked })} />
+                <span className="fs-sm">{ar ? 'Webhook (Discord/Slack/مخصص)' : 'Webhook (Discord/Slack/custom)'}</span>
+              </label>
+            </div>
+            <div className="stack" style={{ gap: 'var(--s-2)' }}>
+              <span className="section-title fs-xs">{ar ? 'الأحداث' : 'Events'}</span>
+              {[
+                ['on_entry', ar ? 'عند الدخول' : 'On entry'],
+                ['on_exit', ar ? 'عند الخروج' : 'On exit'],
+                ['on_kill', ar ? 'عند الإيقاف/التفعيل الحقيقي' : 'On kill / real-live'],
+                ['on_daily_loss', ar ? 'عند حد الخسارة اليومي' : 'On daily-loss limit'],
+              ].map(([k, label]) => (
+                <label key={k} className="row" style={{ gap: 8 }}>
+                  <input type="checkbox" checked={notif[k] !== false} onChange={(e) => setNotif({ ...notif, [k]: e.target.checked })} />
+                  <span className="fs-sm">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <DangerNote tone="info">
+            {ar ? 'لإنشاء بوت Telegram: راسل @BotFather، خذ الرمز، أدخله في «محافظي والأموال»، وضع chat id هنا. الـWebhook يقبل روابط Discord/Slack مباشرة.'
+                : 'To set up Telegram: message @BotFather, get the token, enter it on My Wallets & Funds, and put the chat id here. The webhook accepts Discord/Slack URLs directly.'}
+          </DangerNote>
         </Card>
       )}
 

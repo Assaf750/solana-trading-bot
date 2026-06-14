@@ -18,6 +18,7 @@ import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 import { createTokenMetadata } from './engine/token-metadata.mjs';
+import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
 
@@ -63,6 +64,10 @@ const jupiter = createJupiterClient({
 
 let broadcastRef = () => {};
 
+// best-effort operator notifications (Telegram/webhook). Secrets resolved from the vault at
+// send time; never blocks or affects trading.
+const notifier = createNotifier({ config, getSecret: (name) => vault.getSecretForUse(name) });
+
 // LIVE book + executor — real money path, fully gated (mode + signer session + kill
 // switch + readiness); separate file from the paper book, never mixed
 const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false });
@@ -104,7 +109,7 @@ const liveExecutor = createLiveExecutor({
 const paperEngine = createPaperEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
   livePortfolio, liveExecutor, signer,
-  rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p),
+  rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p), notifier,
 });
 
 const tokenMeta = createTokenMetadata();
@@ -113,7 +118,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
   discoverFromLeaders: () => discoverFromLeadersImpl({

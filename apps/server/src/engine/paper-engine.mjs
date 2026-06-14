@@ -20,7 +20,7 @@ const FEE_EST_USD = 0.05; // conservative per-trade network fee estimate (labele
 // an unreadable/estimate fill is NOT and must be flagged for reconciliation instead.
 const isRealOnChainProceeds = (fill) => fill?.fillSource === 'on_chain' && Number.isFinite(fill?.proceedsUsd);
 
-export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast }) {
+export function createPaperEngine({ config, walletsRegistry, killSwitch, operatingState, vault, portfolio, livePortfolio = null, liveExecutor = null, signer = null, rpc, jupiter, audit, broadcast, notifier = null }) {
   let sub = null;
   let supervisor = null;
   let markTimer = null;
@@ -37,6 +37,26 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     if (s.events.length > MAX_EVENTS) s.events.splice(0, s.events.length - MAX_EVENTS);
     writeJson(EVENTS_FILE, s);
     broadcast({ event_type: 'position_update', engine_event: ev.kind || ev.type || 'event' });
+    maybeNotify(ev);
+  }
+
+  // Forward notable engine events to the operator notifier (best-effort; never throws/blocks).
+  const shortId = (a) => (a ? `${String(a).slice(0, 4)}…${String(a).slice(-4)}` : '');
+  function maybeNotify(ev) {
+    if (!notifier) return;
+    const k = ev.kind;
+    let text = null;
+    if (k === 'paper_entry' || k === 'live_entry') {
+      text = `🟢 ENTRY ${k === 'live_entry' ? 'LIVE' : 'paper'} ${shortId(ev.mint)} ~$${Number(ev.size_usd || 0).toFixed(2)} · leader ${shortId(ev.leader)}`;
+    } else if (k === 'paper_exit' || k === 'live_exit') {
+      const r = Number(ev.realized_usd || 0);
+      text = `${r >= 0 ? '🟢' : '🔴'} EXIT ${k === 'live_exit' ? 'LIVE' : 'paper'} realized $${r.toFixed(2)} · ${ev.reason}`;
+    } else if (k === 'daily_loss_limit_hit') {
+      text = `⛔ Daily loss limit hit: $${Number(ev.daily_loss_usd || 0).toFixed(2)} — new entries blocked (exits only)`;
+    } else if (k === 'leader_auto_paused') {
+      text = `⏸ Leader auto-paused after ${ev.consecutive_losses} losses · ${shortId(ev.leader)}`;
+    }
+    if (text) { try { notifier.notify({ kind: k, text }); } catch { /* never throws into the engine */ } }
   }
 
   function events(limit = 50) {

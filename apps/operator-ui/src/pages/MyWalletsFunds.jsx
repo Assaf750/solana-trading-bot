@@ -12,6 +12,8 @@ const PROVIDER_SLOTS = [
   { name: 'grpc_endpoint', cfgKey: 'grpc_url_ref', ar: 'نقطة gRPC (Yellowstone/Geyser)', en: 'gRPC endpoint (Yellowstone/Geyser)', ph: 'https://…grpc…:443' },
   { name: 'grpc_token', cfgKey: 'grpc_token_ref', ar: 'رمز gRPC (اختياري)', en: 'gRPC x-token (optional)', ph: 'token…' },
   { name: 'jito_block_engine', cfgKey: 'jito_url_ref', ar: 'رابط Jito block-engine', en: 'Jito block-engine URL', ph: 'https://…jito…' },
+  { name: 'telegram_bot_token', cfgKey: 'telegram_bot_token_ref', ar: 'رمز بوت تيليجرام (للتنبيهات)', en: 'Telegram bot token (notifications)', ph: '123456:ABC-DEF…' },
+  { name: 'webhook_url', cfgKey: 'webhook_url_ref', ar: 'رابط Webhook (Discord/Slack)', en: 'Webhook URL (Discord/Slack)', ph: 'https://discord.com/api/webhooks/…' },
 ];
 
 export default function MyWalletsFunds() {

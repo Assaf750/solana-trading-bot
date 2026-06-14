@@ -4,8 +4,9 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders, tokenMeta }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders, tokenMeta, notifier }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
+  const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
   // Single-flight for the heavy on-chain scans: only one runs at a time so re-clicks can't
   // stack and compound RPC pressure on the shared client the live trading engine also uses.
   let discoveryBusy = false;
@@ -103,6 +104,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if ((p?.level || 'global') === 'global') operatingState.transition('KILLED', `kill switch: ${p?.reason || 'manual'}`);
         audit({ audit_scope: 'config', audit_reason: `kill_engaged_${p?.level || 'global'}`, command_type: 'trigger_kill_switch', detail: p || {} });
         emit({ event_type: 'health_update', kill_switch: res.state, operating_state: operatingState.get() });
+        notify('kill_engaged', `🛑 KILL SWITCH engaged (${p?.level || 'global'}) — all trading halted. Reason: ${p?.reason || 'manual'}`);
       }
       return { status: res.ok ? 200 : 400, body: res };
     },
@@ -146,6 +148,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       const v = config._internal.setMode('real_live');
       audit({ audit_scope: 'config', audit_reason: 'REAL_LIVE_ACTIVATED_BY_OWNER', command_type: 'activate_real_live', detail: { config_version: v } });
       emit({ event_type: 'config_update', mode: 'real_live' });
+      notify('real_live_activated', '🔴 REAL-LIVE ACTIVATED — real money is now at risk.');
       return { status: 200, body: { ok: true, mode: 'real_live', config_version: v, warning: 'REAL MONEY IS NOW AT RISK. The kill switch on the Alerts page stops everything instantly.' } };
     },
   };
