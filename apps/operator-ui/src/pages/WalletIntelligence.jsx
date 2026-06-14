@@ -26,12 +26,15 @@ export default function WalletIntelligence() {
   const [regMode, setRegMode] = useState('follow_entry_user_exit');
   const [showAdd, setShowAdd] = useState(false);
 
+  const [insights, setInsights] = useState(null);
   async function load() {
     const r = await api.wallets();
     if (r.ok) {
       setWallets(r.data.wallets || []);
       if (!selectedId && r.data.wallets?.length) setSelectedId(r.data.wallets[0].wallet_id);
     }
+    const ins = await api.leaderInsights();
+    if (ins.ok) setInsights(ins.data || null);
   }
   useEffect(() => { if (connected) load(); }, [connected]);
 
@@ -136,6 +139,36 @@ export default function WalletIntelligence() {
         <button className="btn" onClick={analyzeAll} disabled={!view.length}>{ar ? '🔍 تحليل المعروضة' : '🔍 Analyze shown'}</button>
         <button className="btn primary" onClick={() => setShowAdd((v) => !v)}>{ar ? '＋ محفظة' : '＋ Wallet'}</button>
       </div>
+
+      {insights?.leaders?.some((l) => l.trades > 0) && (
+        <Card title={ar ? 'توصيات القادة (من أداء البوت)' : 'Leader recommendations (from bot performance)'}
+          sub={ar ? 'محسوبة من صفقات هذا البوت المُغلقة — متابعة / إسقاط / مراقبة' : "Computed from this bot's own closed trades — follow / drop / watch"}>
+          <div className="table-wrap">
+            <table className="data">
+              <thead><tr>
+                <th className="nosort">{ar ? 'القائد' : 'leader'}</th><th className="nosort">rec</th>
+                <th className="nosort num">trades</th><th className="nosort num">win%</th><th className="nosort num">PF</th>
+                <th className="nosort num">realized</th><th className="nosort"></th>
+              </tr></thead>
+              <tbody>
+                {insights.leaders.filter((l) => l.trades > 0).map((l) => (
+                  <tr key={l.wallet_id}>
+                    <td><span className="lab">{l.label || short(l.leader)}</span></td>
+                    <td><Badge tone={l.recommendation === 'follow' ? 'ok' : l.recommendation === 'drop' ? 'danger' : 'warn'}>{l.recommendation}</Badge></td>
+                    <td className="num mono">{l.trades}</td>
+                    <td className="num mono">{(l.win_rate * 100).toFixed(0)}%</td>
+                    <td className="num mono">{l.profit_factor == null ? '∞' : l.profit_factor}</td>
+                    <td className="num mono" style={{ color: l.total_realized_usd >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{l.total_realized_usd >= 0 ? '+' : ''}${l.total_realized_usd}</td>
+                    <td>{l.recommendation === 'drop' && l.follow_enabled && (
+                      <button className="btn danger" onClick={async () => { await api.setFollow(l.wallet_id, false); load(); }}>{ar ? 'إيقاف المتابعة' : 'Unfollow'}</button>
+                    )}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       {showAdd && (
         <Card title={ar ? 'تسجيل محفظة متبوعة' : 'Register tracked wallet'}>

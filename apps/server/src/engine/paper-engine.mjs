@@ -618,5 +618,40 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
    *  investment is justified — see docs/RESTRUCTURE_PLAN.md. */
   function latencyReport() { return latency.summary(); }
 
-  return { start, stop, status, events, closePosition, resolvePosition, latencyReport, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, desiredState } };
+  /** Per-leader insights from THIS bot's own realized history (active book) + a follow/drop/watch
+   *  recommendation — closes the analyze->act loop using in-process data (no Python sidecar needed).
+   *  watch = too few trades to judge; drop = enough sample but fails the EV thresholds (or net-loss);
+   *  follow = enough sample and healthy. */
+  function leaderInsights() {
+    const pf = activePf();
+    const cfg = config.get();
+    const empty = { mode: cfg.mode, leaders: [], recommendation: { follow: [], drop: [], watch: [] } };
+    if (!pf || typeof pf.leaderStats !== 'function') return empty;
+    const minSample = Number(cfg.ev?.minimum_sample_size);
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const leaders = walletsRegistry.list().map((w) => {
+      const leader = w.tracked_wallet_address;
+      const s = pf.leaderStats(leader);
+      let recommendation = 'watch';
+      if (Number.isFinite(minSample) && s.trades >= minSample) {
+        recommendation = checkEvGate({ cfg, stats: s }).rejections.length > 0 ? 'drop' : 'follow';
+      } else if (s.trades > 0) {
+        recommendation = s.total_realized < 0 ? 'watch' : 'follow';
+      }
+      return {
+        leader, wallet_id: w.wallet_id, label: w.label || '', follow_enabled: w.follow_enabled,
+        trades: s.trades, win_rate: r2(s.win_rate),
+        profit_factor: Number.isFinite(s.profit_factor) ? r2(s.profit_factor) : null,
+        total_realized_usd: r2(s.total_realized), avg_realized_usd: r2(s.avg_realized),
+        consecutive_losses: typeof pf.leaderConsecutiveLosses === 'function' ? pf.leaderConsecutiveLosses(leader) : 0,
+        score: r2(s.total_realized * (0.5 + 0.5 * s.win_rate)),
+        recommendation,
+      };
+    }).sort((a, b) => b.score - a.score);
+    const recommendation = { follow: [], drop: [], watch: [] };
+    for (const x of leaders) recommendation[x.recommendation].push(x.leader);
+    return { mode: cfg.mode, leaders, recommendation };
+  }
+
+  return { start, stop, status, events, closePosition, resolvePosition, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, resolvePosition, leaderInsights, desiredState } };
 }

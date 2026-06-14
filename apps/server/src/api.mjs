@@ -194,6 +194,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           // Phase 0 gate: pipeline-lag percentiles (decides the gRPC/Rust investment)
           return { status: 200, body: paperEngine && typeof paperEngine.latencyReport === 'function' ? paperEngine.latencyReport() : { count: 0, metrics: {} } };
         }
+        if (path === '/api/leader-insights') {
+          // per-leader realized performance (this bot's book) + follow/drop/watch recommendation
+          return { status: 200, body: paperEngine && typeof paperEngine.leaderInsights === 'function' ? paperEngine.leaderInsights() : { leaders: [], recommendation: { follow: [], drop: [], watch: [] } } };
+        }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }
 

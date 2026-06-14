@@ -41,6 +41,7 @@ export const api = {
   engineEvents: () => call('GET', '/api/engine-events'),
   intents: () => call('GET', '/api/intents'),
   latency: () => call('GET', '/api/latency'),
+  leaderInsights: () => call('GET', '/api/leader-insights'),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),

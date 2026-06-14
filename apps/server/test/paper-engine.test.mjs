@@ -459,3 +459,26 @@ test('auto-pause: OFF by default (no threshold) leaves follow untouched', async 
   await engine._internal.performExit({ pf: portfolio, p, fraction: 1, reason: 'stop_loss_hit' });
   assert.equal(walletsRegistry.list().find((x) => x.wallet_id === w.wallet_id).follow_enabled, true, 'still followed (auto-pause off)');
 });
+
+test('leader-insights: ranks leaders and recommends follow/drop/watch from the bot book', async () => {
+  const config = fullConfig();
+  config.update({ ev: { minimum_sample_size: 3, minimum_profit_factor: 1.5, minimum_exit_success_rate: 0.5, minimum_net_expectancy: 0 } });
+  const portfolio = createPaperPortfolio({ file: 'pf-insights.json' });
+  const reg = createWalletRegistry();
+  const good = reg.register({ tracked_wallet_address: '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAs1', label: 'good' }).wallet;
+  const bad = reg.register({ tracked_wallet_address: 'So11111111111111111111111111111111111111112', label: 'bad' }).wallet;
+  const thin = reg.register({ tracked_wallet_address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', label: 'thin' }).wallet;
+  [good, bad, thin].forEach((w) => reg.setFollow(w.wallet_id, true));
+  seedClosed(portfolio, good.tracked_wallet_address, good.wallet_id, [10, 10, 10, -5]); // PF 30/5=6 -> follow
+  seedClosed(portfolio, bad.tracked_wallet_address, bad.wallet_id, [-5, -5, -5, 2]); // PF 2/15 -> drop
+  seedClosed(portfolio, thin.tracked_wallet_address, thin.wallet_id, [10]);          // 1 trade < sample -> watch/follow
+  const engine = engineWith(config, portfolio, reg);
+  const ins = engine._internal.leaderInsights();
+  const by = Object.fromEntries(ins.leaders.map((x) => [x.leader, x])); // key by address (labels can collide via shared registry)
+  assert.equal(by[good.tracked_wallet_address].recommendation, 'follow');
+  assert.equal(by[bad.tracked_wallet_address].recommendation, 'drop');
+  assert.equal(by[good.tracked_wallet_address].profit_factor, 6);
+  assert.equal(ins.leaders[0].leader, good.tracked_wallet_address, 'ranked by score, best first');
+  assert.ok(ins.recommendation.follow.includes(good.tracked_wallet_address));
+  assert.ok(ins.recommendation.drop.includes(bad.tracked_wallet_address));
+});
