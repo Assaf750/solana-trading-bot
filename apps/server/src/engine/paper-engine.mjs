@@ -106,6 +106,14 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     const isLive = liveMode();
     const pf = activePf();
 
+    // rebuy cooldown: don't open another position for this leader+mint within the configured window
+    const cooldownSec = wallet.config?.rebuy_cooldown;
+    if (Number.isFinite(cooldownSec) && cooldownSec > 0) {
+      const recent = pf.openPositions().find((p) => p.leader_address === leader && p.token_mint === swap.mint
+        && (Date.now() - new Date(p.entry_ts).getTime()) / 1000 < cooldownSec);
+      if (recent) { pushEvent({ kind: 'entry_skipped_rebuy_cooldown', leader, mint: swap.mint }); return; }
+    }
+
     const sized = await resolveSizeUsd({ cfg, wallet });
     if (!sized.ok) {
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`sizing_${sized.error}`] });
@@ -118,6 +126,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       killBlocked: killSwitch.isBlocked({ mode: isLive ? 'real_live' : 'paper', wallet_id: wallet.wallet_id }).blocked,
       operatingState: operatingState.get().operating_state,
       entriesBlocked: pf.summary().entries_blocked,
+      leaderAddress: leader,
     });
     if (!gate.allowed) {
       // ONLY a genuine risk-cap breach feeds the signer's consecutive-rejection lockout —
@@ -190,6 +199,11 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
    *  day-bucketed (that would mint a new intent across UTC midnight and defeat dedup); a
    *  provably-unsent failure is still retryable via the live-executor RETRYABLE statuses. */
   async function performExit({ pf, p, fraction, reason, intentParts }) {
+    // re-confirm the position is still OPEN right before acting — a concurrent exit (TP/SL vs
+    // leader-mirror) may have closed it since the caller snapshotted it; avoids a second real sell.
+    const fresh = pf.openPositions().find((x) => x.position_id === p.position_id);
+    if (!fresh) { pushEvent({ kind: 'exit_skipped_not_open', position_id: p.position_id, reason }); return { ok: false }; }
+    p = fresh;
     const qtySell = p.qty_ui * fraction;
     if (p.simulated === false && liveExecutor) {
       const est = await jupiter.usdValueOf({ mint: p.token_mint, qtyUi: qtySell, decimals: p.decimals });
@@ -204,7 +218,9 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       }
       const res = pf.recordExit({
         position_id: p.position_id, fraction, proceeds_usd: exec.proceedsUsd ?? (est.ok ? est.usd : 0),
-        fee_usd_est: FEE_EST_USD, price_impact_pct: exec.priceImpactPct, reason,
+        // proceeds come from the on-chain native-SOL delta, already net of network/priority fees —
+        // do NOT subtract an extra fee estimate (that would double-count fees in realized P&L)
+        fee_usd_est: 0, price_impact_pct: exec.priceImpactPct, reason,
       });
       if (res.ok) pushEvent({ kind: 'live_exit', position_id: p.position_id, reason, proceeds_usd: exec.proceedsUsd, realized_usd: res.realized_usd, signature: exec.signature });
       return res;
@@ -223,6 +239,14 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   }
 
   async function handleLeaderSell({ leader, wallet, swap, signature }) {
+    const cfg = config.get();
+    const fraction = swap.fullExit ? 1 : Math.min(1, swap.soldFraction || 1);
+    // ignore trivial leader trims below the configured mirror threshold (avoid dust churn/slippage)
+    const minPct = wallet.config?.min_mirror_sell_pct ?? cfg.copy_defaults?.min_mirror_sell_pct ?? 5;
+    if (wallet.copy_mode === 'full_mirror' && !swap.fullExit && fraction * 100 < minPct) {
+      pushEvent({ kind: 'leader_partial_sell_below_min', leader, mint: swap.mint, fraction_pct: Number((fraction * 100).toFixed(1)), min_pct: minPct });
+      return;
+    }
     // mirror sells act on BOTH books (paper history continues while live runs)
     const books = [portfolio, ...(livePortfolio ? [livePortfolio] : [])];
     let found = false;
@@ -234,7 +258,6 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         pushEvent({ kind: 'leader_sell_risk_modifier_only', leader, mint: swap.mint, note: 'follow_entry_user_exit ignores leader sells by policy' });
         return;
       }
-      const fraction = swap.fullExit ? 1 : Math.min(1, swap.soldFraction || 1);
       for (const p of open) {
         const reason = swap.fullExit ? 'leader_full_exit_mirrored' : 'leader_partial_sell_mirrored';
         // keyed by the leader's signature so each distinct leader sell mirrors independently;
@@ -279,6 +302,13 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         const op = operatingState.get().operating_state;
         const exitsAllowed = op === 'ACTIVE' || op === 'EXITS_ONLY' || op === 'PAUSED';
         if (!exitsAllowed) continue;
+        // max time in position (per-wallet): auto-exit a stale position regardless of P&L
+        const w = walletsRegistry.list().find((x) => x.wallet_id === p.wallet_id);
+        const maxAge = w?.config?.max_time_in_position;
+        if (Number.isFinite(maxAge) && maxAge > 0 && (Date.now() - new Date(p.entry_ts).getTime()) / 1000 > maxAge) {
+          await performExit({ pf, p, fraction: 1, reason: 'max_time_in_position' });
+          continue;
+        }
         if (pnlPct >= p.tp_pct) {
           await performExit({ pf, p, fraction: 1, reason: 'take_profit_hit' });
         } else if (pnlPct <= -p.sl_pct) {
@@ -377,5 +407,18 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     };
   }
 
-  return { start, stop, status, events, _internal: { onSignature, markPass, handleLeaderBuy, handleLeaderSell, performExit, desiredState } };
+  /** Operator-initiated full exit of one position (either book). Gives a manual liquidation
+   *  path independent of TP/SL/leader signals, and lets the operator clear a stuck position. */
+  async function closePosition(position_id) {
+    for (const pf of [portfolio, ...(livePortfolio ? [livePortfolio] : [])]) {
+      const p = pf.openPositions().find((x) => x.position_id === position_id);
+      if (!p) continue;
+      const res = await performExit({ pf, p, fraction: 1, reason: 'manual_close', intentParts: ['sell', p.position_id, 'manual_close'] });
+      if (res?.ok) { pushEvent({ kind: 'manual_close', position_id }); return { ok: true, position_id }; }
+      return { ok: false, error: res?.error || 'exit_failed' };
+    }
+    return { ok: false, error: 'position_not_found' };
+  }
+
+  return { start, stop, status, events, closePosition, _internal: { onSignature, markPass, handleLeaderBuy, handleLeaderSell, performExit, desiredState } };
 }

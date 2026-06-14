@@ -1,6 +1,6 @@
 // risk-gates.mjs — PURE entry gate: every paper/live entry passes here first.
 // Hard-Risk limits are binding; missing limits => fail-safe REJECT (no implicit infinity).
-export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState, entriesBlocked = false }) {
+export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState, entriesBlocked = false, leaderAddress = null }) {
   const rejections = [];
 
   if (killBlocked) rejections.push('kill_switch_engaged');
@@ -36,6 +36,22 @@ export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocke
     const dailyLoss = -portfolio.dailyRealized();
     if (dailyLoss >= hr.max_daily_loss_usdt) rejections.push('daily_loss_limit_usdt_hit');
     if (dailyLoss >= capital * (hr.max_daily_loss_pct / 100)) rejections.push('daily_loss_limit_pct_hit');
+    // total drawdown (realized + open unrealized) vs capital — does NOT reset daily, so it also
+    // catches a loss that straddles the UTC daily-reset boundary
+    if (Number.isFinite(hr.max_total_drawdown_pct) && typeof portfolio.summary === 'function') {
+      const sum = portfolio.summary();
+      const drawdownUsd = -((sum.realized_pnl_usd || 0) + (sum.unrealized_pnl_usd || 0));
+      if (drawdownUsd >= capital * (hr.max_total_drawdown_pct / 100)) rejections.push('max_total_drawdown_hit');
+    }
+    // creator/source concentration — proxied by the copied LEADER (no on-chain creator metadata)
+    if (leaderAddress && Number.isFinite(hr.max_creator_exposure_pct) && typeof portfolio.leaderExposureUsd === 'function') {
+      const leadExp = portfolio.leaderExposureUsd(leaderAddress) + sizeUsd;
+      const maxLead = capital * (hr.max_creator_exposure_pct / 100);
+      if (leadExp > maxLead) rejections.push(`creator_exposure_${round2(leadExp)}_exceeds_${round2(maxLead)}`);
+    }
+    // KNOWN GAP: max_cluster_exposure_pct / max_correlated_meme_exposure_pct require token
+    // cluster/correlation classification that on-chain reads alone don't provide — they are
+    // validated/required for activation but NOT yet enforced here. Do not assume they bind.
     riskRejection = rejections.length > 0; // any push here is a true risk-cap breach
   }
 

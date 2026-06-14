@@ -29,10 +29,15 @@ export function createKillSwitch() {
   /** True if ANY applicable level blocks the given scope. */
   function isBlocked({ mode, wallet_id, strategy } = {}) {
     const s = load();
+    // global is mandatory: a missing/undefined global reads as ENGAGED (fail-safe).
     if (s.global?.engaged !== false) return { blocked: true, level: 'global' };
-    if (mode && s.per_mode?.[mode]?.engaged) return { blocked: true, level: 'per_mode' };
-    if (wallet_id && s.per_wallet?.[wallet_id]?.engaged) return { blocked: true, level: 'per_wallet' };
-    if (strategy && s.per_strategy?.[strategy]?.engaged) return { blocked: true, level: 'per_strategy' };
+    // sub-levels are sparse maps (an entry exists only once set). A PRESENT entry blocks unless
+    // engaged is STRICTLY false — so a corrupt/partial entry (missing engaged) fails safe (blocked)
+    // instead of silently failing open, while an absent entry correctly means "no kill for that scope".
+    const eng = (e) => e && e.engaged !== false;
+    if (mode && eng(s.per_mode?.[mode])) return { blocked: true, level: 'per_mode' };
+    if (wallet_id && eng(s.per_wallet?.[wallet_id])) return { blocked: true, level: 'per_wallet' };
+    if (strategy && eng(s.per_strategy?.[strategy])) return { blocked: true, level: 'per_strategy' };
     return { blocked: false, level: null };
   }
 

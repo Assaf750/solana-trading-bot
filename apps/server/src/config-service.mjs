@@ -180,7 +180,10 @@ export function createConfigService() {
     return cfg.config_version;
   }
 
-  return { get, update, setMode };
+  // setMode bypasses validation/readiness/confirm — those live in the activate_real_live handler.
+  // Expose it under _internal (not the casual surface) so it can't be flipped to real_live by a
+  // stray caller wired with the config instance.
+  return { get, update, _internal: { setMode } };
 }
 
 /** Hard-Risk completeness: every field present AND finite. No implicit infinity. */

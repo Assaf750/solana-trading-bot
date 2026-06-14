@@ -32,6 +32,12 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
       .reduce((a, p) => a + (p.mark_usd ?? p.cost_usd), 0);
   }
 
+  // open exposure to all positions copied from one leader (creator/source-concentration proxy)
+  function leaderExposureUsd(leader) {
+    return openPositions().filter((p) => p.leader_address === leader)
+      .reduce((a, p) => a + (p.mark_usd ?? p.cost_usd), 0);
+  }
+
   function openCount() { return openPositions().length; }
 
   function dailyRealized() { return load().daily.realized_pnl_usd; }
@@ -64,6 +70,9 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     const s = load();
     const p = s.positions.find((x) => x.position_id === position_id && x.position_state === 'OPEN');
     if (!p) return { ok: false, error: 'position_not_open' };
+    // reject a non-finite payout — a NaN realized would permanently poison lifetime + daily P&L
+    // (persisted) and silently disable the daily-loss circuit breaker (NaN >= cap is always false).
+    if (!Number.isFinite(proceeds_usd)) return { ok: false, error: 'invalid_proceeds' };
     const f = Math.min(1, Math.max(0, fraction));
     const qtySold = p.qty_ui * f;
     const costPart = p.cost_usd * f;
@@ -117,7 +126,7 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
   }
 
   return {
-    state, openPositions, openCount, tokenExposureUsd, dailyRealized,
+    state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
     recordEntry, recordExit, setMark, setEntriesBlocked, summary,
   };
 }

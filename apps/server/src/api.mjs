@@ -106,6 +106,16 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       }
       return { status: res.ok ? 200 : 400, body: res };
     },
+    close_position(p) {
+      // operator-initiated full exit of one position (manual liquidation / clear a stuck position)
+      if (!paperEngine || typeof paperEngine.closePosition !== 'function') {
+        return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      }
+      return paperEngine.closePosition(p?.position_id).then((res) => {
+        if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_close', command_type: 'close_position', detail: { position_id: p?.position_id } });
+        return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
+      });
+    },
     activate_real_live(p) {
       // THE OWNER'S SWITCH. Every readiness blocker must be gone AND the owner must
       // type the exact confirmation. Anything missing => refusal with the honest list.
@@ -118,7 +128,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         audit({ audit_scope: 'config', audit_reason: 'real_live_activation_refused', command_type: 'activate_real_live', detail: { blockers } });
         return { status: 409, body: { ok: false, api_error_code: 'REAL_LIVE_CONFIG_INVALID', blockers, readiness: r } };
       }
-      const v = config.setMode('real_live');
+      const v = config._internal.setMode('real_live');
       audit({ audit_scope: 'config', audit_reason: 'REAL_LIVE_ACTIVATED_BY_OWNER', command_type: 'activate_real_live', detail: { config_version: v } });
       emit({ event_type: 'config_update', mode: 'real_live' });
       return { status: 200, body: { ok: true, mode: 'real_live', config_version: v, warning: 'REAL MONEY IS NOW AT RISK. The kill switch on the Alerts page stops everything instantly.' } };
@@ -268,7 +278,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         }
         if (path === '/api/real-live/deactivate') {
           // back to paper — always allowed, never blocked (de-risking direction)
-          const v = config.setMode('paper');
+          const v = config._internal.setMode('paper');
           audit({ audit_scope: 'config', audit_reason: 'real_live_deactivated_back_to_paper', command_type: null, detail: { config_version: v } });
           emit({ event_type: 'config_update', mode: 'paper' });
           return { status: 200, body: { ok: true, mode: 'paper', config_version: v } };

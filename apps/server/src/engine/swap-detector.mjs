@@ -11,6 +11,15 @@ export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 export const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const DEFAULT_QUOTES = new Set([WSOL_MINT, USDC_MINT]);
 
+// decimals from a uiTokenAmount, deriving from raw amount/uiAmount when the field is absent
+// (some enhanced/partial payloads omit it) so downstream base-unit sizing isn't computed against 0.
+function tokenDecimals(u) {
+  if (Number.isFinite(u?.decimals)) return u.decimals;
+  const raw = Number(u?.amount); const ui = Number(u?.uiAmount);
+  if (raw > 0 && ui > 0) return Math.round(Math.log10(raw / ui));
+  return 0;
+}
+
 export function detectLeaderSwap({ tx, leaderAddress, quoteMints = DEFAULT_QUOTES }) {
   try {
     const meta = tx?.meta;
@@ -25,13 +34,13 @@ export function detectLeaderSwap({ tx, leaderAddress, quoteMints = DEFAULT_QUOTE
       if (b.owner !== leaderAddress) continue;
       const preAmt = Number(pre.get(b.mint)?.uiTokenAmount?.uiAmount ?? 0);
       const postAmt = Number(b.uiTokenAmount?.uiAmount ?? 0);
-      deltas.set(b.mint, { delta: postAmt - preAmt, post: postAmt, decimals: b.uiTokenAmount?.decimals ?? 0 });
+      deltas.set(b.mint, { delta: postAmt - preAmt, post: postAmt, decimals: tokenDecimals(b.uiTokenAmount) });
     }
     // mints that vanished entirely from post (account closed on full exit)
     for (const [mint, b] of pre) {
       if (!deltas.has(mint)) {
         const preAmt = Number(b.uiTokenAmount?.uiAmount ?? 0);
-        if (preAmt > 0) deltas.set(mint, { delta: -preAmt, post: 0, decimals: b.uiTokenAmount?.decimals ?? 0 });
+        if (preAmt > 0) deltas.set(mint, { delta: -preAmt, post: 0, decimals: tokenDecimals(b.uiTokenAmount) });
       }
     }
 

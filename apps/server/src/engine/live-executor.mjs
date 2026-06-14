@@ -63,8 +63,12 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     if (solPriceCache.usd && Date.now() - solPriceCache.at < 60000) return solPriceCache.usd;
     const q = await jupiter.quote({ inputMint: WSOL_MINT, outputMint: USDC_MINT, amountBaseUnits: 1e9 });
     if (!q.ok) return null;
-    solPriceCache = { usd: q.outAmount / 1e6, at: Date.now() };
-    return solPriceCache.usd;
+    const usd = q.outAmount / 1e6;
+    // plausibility band: a glitched/manipulated SOL-USDC quote must NOT silently mis-size every
+    // buy (amountBaseUnits = sizeUsd/price). Reject anything outside a sane SOL price range.
+    if (!Number.isFinite(usd) || usd < 1 || usd > 100000) return null;
+    solPriceCache = { usd, at: Date.now() };
+    return usd;
   }
 
   /** Full gate chain. action: 'entry' | 'exit'. Fail-closed: any uncertainty refuses. */
@@ -100,7 +104,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
    * Execute a real swap. side 'buy': spend sizeUsd worth of SOL into mint.
    * side 'sell': sell qtyUi of mint back to SOL. Returns actual fill data.
    */
-  async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts }) {
+  async function executeSwapInner({ side, mint, sizeUsd = 0, qtyUi = 0, decimals = 6, slippageBps = 100, intentParts }, releaseLock = () => {}) {
     const notionalUsd = side === 'buy' ? sizeUsd : sizeUsd; // sell passes estimated proceeds in sizeUsd
     const g = gates({ action: side === 'buy' ? 'entry' : 'exit', notionalUsd });
     if (!g.allowed) return { ok: false, error: 'gates_refused', refusals: g.refusals };
@@ -171,6 +175,9 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     setIntent(intent_id, 'SENT', { signature: txSig });
     // count notional only after a successful broadcast (failed sends must not consume the cap)
     signer.recordSigned({ notional_usd: notionalUsd });
+    // critical section (gates→claim→send→record) is done — release the serialization lock so the
+    // ~60s confirmation poll below does NOT block another swap (e.g. a stop-loss exit) behind it.
+    releaseLock();
     safeAudit({ audit_scope: 'intent', audit_reason: 'live_tx_sent', detail: { intent_id, signature: txSig, side, mint } });
     broadcast({ event_type: 'intent_update', intent_id, signature: txSig, side, mint });
 
@@ -225,15 +232,22 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     return Object.entries(l.intents).slice(-limit).map(([id, v]) => ({ intent_id: id, ...v }));
   }
 
-  // Serialize all real-money swaps: the signer notional cap is a check-then-act across an
-  // awaited network send, so two concurrent calls (leader stream + TP/SL loop) could both
-  // pass canSignNow against a stale total. A single in-flight chain makes claim→send→record
-  // atomic w.r.t. other swaps, also protecting the intent-ledger read-modify-write.
-  let execChain = Promise.resolve();
+  // Serialize the CRITICAL section of real-money swaps (gates→claim→send→recordSigned): the
+  // signer notional cap is a check-then-act across an awaited send, so two concurrent calls
+  // (leader stream + TP/SL loop) could otherwise both pass canSignNow against a stale total.
+  // The lock is released right after recordSigned (see releaseLock), so the long confirmation
+  // poll runs UNLOCKED and never starves another swap (e.g. a stop-loss) behind it.
+  let execLock = Promise.resolve();
   function executeSwap(args) {
-    const run = execChain.then(() => executeSwapInner(args));
-    execChain = run.then(() => {}, () => {}); // keep the chain alive regardless of outcome
-    return run;
+    let release = () => {};
+    const myTurn = new Promise((r) => { release = r; });
+    const prev = execLock;
+    execLock = myTurn;
+    return (async () => {
+      await prev.catch(() => {});
+      try { return await executeSwapInner(args, release); }
+      finally { release(); } // safety net for paths that return before recordSigned
+    })();
   }
 
   return { executeSwap, gates, intents, solPriceUsd, _internal: { intentIdFor, claimIntent, setIntent, solPriceUsd } };
