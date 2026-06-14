@@ -55,3 +55,18 @@ export function buildTipTransferTx({ owner, tipAccount, lamports, recentBlockhas
   const tx = Buffer.concat([shortvec(1), Buffer.alloc(64), message]);
   return tx.toString('base64');
 }
+
+/**
+ * Pick the Jito tip in lamports. `floor` is the tip-floor row (values in SOL, keys like
+ * landed_tips_50th_percentile). Falls back to `fixedLamports` when the floor/percentile is
+ * unavailable, and clamps to `maxLamports` when set. Pure — no network.
+ */
+export function selectTipLamports({ floor, percentile = 50, fixedLamports = 10000, maxLamports = null }) {
+  const fixed = Number.isFinite(fixedLamports) && fixedLamports > 0 ? Math.floor(fixedLamports) : 10000;
+  const pct = [25, 50, 75, 95, 99].includes(percentile) ? percentile : 50;
+  const sol = floor ? Number(floor[`landed_tips_${pct}th_percentile`]) : NaN;
+  if (!Number.isFinite(sol) || sol <= 0) return fixed; // no live floor -> fixed fallback
+  let lamports = Math.floor(sol * 1e9);
+  if (Number.isFinite(maxLamports) && maxLamports > 0) lamports = Math.min(lamports, Math.floor(maxLamports));
+  return Math.max(1, lamports);
+}

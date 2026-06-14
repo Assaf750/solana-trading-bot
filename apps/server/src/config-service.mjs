@@ -49,7 +49,10 @@ const DEFAULTS = {
     signer_backend: 'node',        // 'node' (in-process) | 'rust' (services/hot-executor)
     submit_backend: 'rpc',         // 'rpc' (sendTransaction) | 'jito' (bundle + tip; falls back to rpc)
     jito_tip_account: null,        // base58 Jito tip account (required for the jito backend)
-    jito_tip_lamports: 10000,      // tip per bundle (lamports)
+    jito_tip_lamports: 10000,      // fixed tip per bundle (lamports), and the fallback for dynamic
+    jito_tip_mode: 'fixed',        // 'fixed' | 'dynamic' (dynamic reads the live Jito tip floor)
+    jito_tip_percentile: 50,       // dynamic: which landed-tips percentile (25/50/75/95/99)
+    jito_tip_max_lamports: null,   // dynamic: cap (null = bounded only by jito_tip_lamports fallback)
   },
   copy_defaults: {
     copy_mode: 'follow_entry_user_exit',  // safe default; full_mirror is per-wallet explicit
@@ -120,6 +123,7 @@ const NUMERIC_BOUNDS = {
   minimum_lower_confidence_bound: [-1e9, 1e9], minimum_sample_size: [1, 1e6],
   minimum_exit_success_rate: [0, 1], max_expected_drawdown_pct: [0.1, 100],
   capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9], jito_tip_lamports: [1000, 1e9],
+  jito_tip_percentile: [1, 100], jito_tip_max_lamports: [1000, 1e9],
   take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
   max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
   max_entry_drift_pct: [0.1, 100000], auto_pause_after_losses: [1, 1000],
@@ -145,7 +149,7 @@ export function validateConfigPatch(patch) {
   const sections = {
     hard_risk: HARD_RISK_FIELDS,
     ev: [...EV_FIELDS, 'ev_gate_mode'],
-    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports'],
+    execution: ['capital_limit', 'sizing_mode', 'sizing_value', 'usdc_quote_enabled', 'signer_backend', 'submit_backend', 'jito_tip_account', 'jito_tip_lamports', 'jito_tip_mode', 'jito_tip_percentile', 'jito_tip_max_lamports'],
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct', 'breakeven_after_tp1'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
     lists: ['token_blacklist', 'token_whitelist'],
@@ -171,6 +175,7 @@ export function validateConfigPatch(patch) {
       else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital', 'proportional_leader'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'signer_backend' && !['node', 'rust'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'submit_backend' && !['rpc', 'jito'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'jito_tip_mode' && !['fixed', 'dynamic'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'jito_tip_account') {
         if (v !== null && (typeof v !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v))) errors.push({ field, error: 'must_be_base58_or_null' });
       }

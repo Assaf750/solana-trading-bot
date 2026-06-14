@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify as edVerify, createPublicKey } from 'node:crypto';
 import { b58encode, b58decode } from '../src/engine/base58.mjs';
-import { buildTipTransferTx } from '../src/engine/jito-tip-tx.mjs';
+import { buildTipTransferTx, selectTipLamports } from '../src/engine/jito-tip-tx.mjs';
 import { keypairFromSeed, signSerializedTransaction } from '../src/engine/tx-signer.mjs';
 
 function freshSeed() {
@@ -50,4 +50,21 @@ test('jito tip tx: rejects bad key lengths and non-positive lamports', () => {
   const owner = b58encode(Buffer.alloc(32, 7));
   assert.throws(() => buildTipTransferTx({ owner: '1', tipAccount: tip, lamports: 1, recentBlockhash: bh }), /bad_key_length/);
   assert.throws(() => buildTipTransferTx({ owner, tipAccount: tip, lamports: 0, recentBlockhash: bh }), /bad_lamports/);
+});
+
+test('selectTipLamports: dynamic picks the chosen percentile (SOL -> lamports)', () => {
+  const floor = { landed_tips_50th_percentile: 0.00001, landed_tips_75th_percentile: 0.00005 };
+  assert.equal(selectTipLamports({ floor, percentile: 50, fixedLamports: 10000 }), 10000); // 0.00001 SOL
+  assert.equal(selectTipLamports({ floor, percentile: 75, fixedLamports: 10000 }), 50000);
+});
+
+test('selectTipLamports: clamps to maxLamports', () => {
+  const floor = { landed_tips_95th_percentile: 0.01 }; // 10,000,000 lamports
+  assert.equal(selectTipLamports({ floor, percentile: 95, fixedLamports: 10000, maxLamports: 200000 }), 200000);
+});
+
+test('selectTipLamports: falls back to fixed when floor missing/invalid', () => {
+  assert.equal(selectTipLamports({ floor: null, percentile: 50, fixedLamports: 12345 }), 12345);
+  assert.equal(selectTipLamports({ floor: { landed_tips_50th_percentile: 0 }, fixedLamports: 7000 }), 7000);
+  assert.equal(selectTipLamports({ floor: {}, fixedLamports: undefined }), 10000); // default fixed
 });

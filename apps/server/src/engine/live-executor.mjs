@@ -5,15 +5,32 @@
 import { createHash } from 'node:crypto';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 import { seedFromStoredSecret, keypairFromSeed, signSerializedTransaction } from './tx-signer.mjs';
-import { buildTipTransferTx } from './jito-tip-tx.mjs';
+import { buildTipTransferTx, selectTipLamports } from './jito-tip-tx.mjs';
 import { WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 
 const INTENTS_FILE = 'intent-ledger.json';
 const SOL_RESERVE_LAMPORTS = 0.05 * 1e9; // never spend the fee/rent reserve
 const SIGNER_SECRET_NAME = 'signer_keypair';
 
-export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null, jitoSendBundle = null }) {
+export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null, jitoSendBundle = null, getJitoTipFloor = null }) {
   let solPriceCache = { usd: null, at: 0 };
+
+  // Resolve the Jito tip in lamports: dynamic reads the live tip floor (with a fixed fallback),
+  // fixed uses the configured lamports. Never throws — degrades to the fixed value.
+  async function resolveTipLamports(exec) {
+    const fixed = Number.isFinite(exec?.jito_tip_lamports) ? exec.jito_tip_lamports : 10000;
+    if (exec?.jito_tip_mode !== 'dynamic' || typeof getJitoTipFloor !== 'function') return fixed;
+    let floor = null;
+    try { floor = await getJitoTipFloor(); } catch { floor = null; }
+    return selectTipLamports({ floor, percentile: exec.jito_tip_percentile ?? 50, fixedLamports: fixed, maxLamports: exec.jito_tip_max_lamports ?? null });
+  }
+
+  // Worst-case tip to RESERVE in the balance check (no network): the dynamic cap, else fixed.
+  function maxTipReserveLamports(exec) {
+    const fixed = Number.isFinite(exec?.jito_tip_lamports) ? exec.jito_tip_lamports : 10000;
+    if (exec?.jito_tip_mode !== 'dynamic') return fixed;
+    return Number.isFinite(exec?.jito_tip_max_lamports) ? exec.jito_tip_max_lamports : fixed;
+  }
 
   // ---------- intent ledger (idempotency: a retry can NEVER duplicate an on-chain tx) ----------
   function ledger() { return readJson(INTENTS_FILE, { intents: {} }).value; }
@@ -102,7 +119,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
         const bh = await rpc.rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
         const blockhash = bh.ok ? bh.result?.value?.blockhash : null;
         if (blockhash) {
-          const tipLamports = Number.isFinite(cfg.execution?.jito_tip_lamports) ? cfg.execution.jito_tip_lamports : 10000;
+          const tipLamports = await resolveTipLamports(cfg.execution);
           const tipTx = buildTipTransferTx({ owner, tipAccount: cfg.execution.jito_tip_account, lamports: tipLamports, recentBlockhash: blockhash });
           const tipSigned = signSerializedTransaction({ txBase64: tipTx, seed });
           const res = await jitoSendBundle([signedTxBase64, tipSigned.signedTxBase64]);
@@ -192,8 +209,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       // on the Jito backend the bundle also pays a tip leg — reserve it so a tight balance is
       // refused up front instead of silently degrading to a no-tip RPC send.
       const cfgExec = config.get().execution || {};
-      const tipReserve = cfgExec.submit_backend === 'jito'
-        ? (Number.isFinite(cfgExec.jito_tip_lamports) ? cfgExec.jito_tip_lamports : 10000) : 0;
+      const tipReserve = cfgExec.submit_backend === 'jito' ? maxTipReserveLamports(cfgExec) : 0;
       if (!bal.ok || lamports < amountBaseUnits + SOL_RESERVE_LAMPORTS + tipReserve) {
         setIntent(intent_id, 'FAILED_PRE_SEND', { error: 'insufficient_sol_balance' });
         return { ok: false, error: 'insufficient_sol_balance', balance_sol: lamports / 1e9 };

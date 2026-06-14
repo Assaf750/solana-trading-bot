@@ -95,6 +95,7 @@ export default function SettingsSafety() {
       setExec({
         signer_backend: d.execution?.signer_backend || 'node', submit_backend: d.execution?.submit_backend || 'rpc',
         jito_tip_account: d.execution?.jito_tip_account ?? '', jito_tip_lamports: g(d.execution, 'jito_tip_lamports'),
+        jito_tip_mode: d.execution?.jito_tip_mode || 'fixed', jito_tip_percentile: g(d.execution, 'jito_tip_percentile'), jito_tip_max_lamports: g(d.execution, 'jito_tip_max_lamports'),
         sizing_mode: d.execution?.sizing_mode || 'fixed_usd', sizing_value: g(d.execution, 'sizing_value'),
       });
       const nf = d.notifications || {};
@@ -156,6 +157,7 @@ export default function SettingsSafety() {
         capital_limit: capital === '' ? null : Number(capital),
         signer_backend: exec.signer_backend || 'node', submit_backend: exec.submit_backend || 'rpc',
         jito_tip_account: exec.jito_tip_account === '' ? null : exec.jito_tip_account, jito_tip_lamports: numOrNull(exec.jito_tip_lamports),
+        jito_tip_mode: exec.jito_tip_mode || 'fixed', jito_tip_percentile: numOrNull(exec.jito_tip_percentile), jito_tip_max_lamports: numOrNull(exec.jito_tip_max_lamports),
         sizing_mode: exec.sizing_mode || 'fixed_usd', sizing_value: numOrNull(exec.sizing_value),
       },
       notifications: {
@@ -433,9 +435,29 @@ export default function SettingsSafety() {
               <input className="search" dir="ltr" placeholder={ar ? 'مطلوب لـjito' : 'required for jito'} value={exec.jito_tip_account ?? ''} onChange={(e) => setExec({ ...exec, jito_tip_account: e.target.value })} />
             </label>
             <label className="stack" style={{ gap: 4 }}>
-              <span className="muted fs-xs">jito_tip_lamports</span>
+              <span className="muted fs-xs">{ar ? 'الإكرامية الثابتة (lamports)' : 'jito_tip_lamports (fixed / fallback)'}</span>
               <input className="search" type="number" inputMode="decimal" dir="ltr" value={exec.jito_tip_lamports ?? ''} onChange={(e) => setExec({ ...exec, jito_tip_lamports: e.target.value })} />
             </label>
+            <label className="stack" style={{ gap: 4 }}>
+              <span className="muted fs-xs">{ar ? 'نمط الإكرامية' : 'Tip mode'}</span>
+              <select className="search" dir="ltr" value={exec.jito_tip_mode || 'fixed'} onChange={(e) => setExec({ ...exec, jito_tip_mode: e.target.value })}>
+                <option value="fixed">fixed</option><option value="dynamic">dynamic (tip floor)</option>
+              </select>
+            </label>
+            {exec.jito_tip_mode === 'dynamic' && (
+              <>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="muted fs-xs">{ar ? 'مئين الإكرامية' : 'Tip percentile'}</span>
+                  <select className="search" dir="ltr" value={exec.jito_tip_percentile ?? 50} onChange={(e) => setExec({ ...exec, jito_tip_percentile: e.target.value })}>
+                    <option value="25">25th</option><option value="50">50th</option><option value="75">75th</option><option value="95">95th</option><option value="99">99th</option>
+                  </select>
+                </label>
+                <label className="stack" style={{ gap: 4 }}>
+                  <span className="muted fs-xs">{ar ? 'سقف الإكرامية الديناميكية (lamports)' : 'Dynamic tip cap (lamports)'}</span>
+                  <input className="search" type="number" inputMode="decimal" dir="ltr" placeholder={ar ? 'اختياري' : 'optional'} value={exec.jito_tip_max_lamports ?? ''} onChange={(e) => setExec({ ...exec, jito_tip_max_lamports: e.target.value })} />
+                </label>
+              </>
+            )}
             <label className="stack" style={{ gap: 4 }}>
               <span className="muted fs-xs">{ar ? 'نمط التحجيم العام' : 'Global sizing mode'}</span>
               <select className="search" dir="ltr" value={exec.sizing_mode || 'fixed_usd'} onChange={(e) => setExec({ ...exec, sizing_mode: e.target.value })}>

@@ -101,9 +101,21 @@ async function jitoSendBundle(txsBase64) {
     return { ok: false, error: `jito_failed_${String(e?.name || 'err')}` };
   }
 }
+// Live Jito tip floor (dynamic-tip mode). Public endpoint; best-effort with a short timeout —
+// any failure makes resolveTipLamports fall back to the fixed jito_tip_lamports.
+async function getJitoTipFloor() {
+  try {
+    const res = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', { signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const j = await res.json();
+    return Array.isArray(j) ? j[0] : j;
+  } catch {
+    return null;
+  }
+}
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,
-  audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle,
+  audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle, getJitoTipFloor,
 });
 
 const paperEngine = createPaperEngine({
