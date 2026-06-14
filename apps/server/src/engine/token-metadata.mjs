@@ -9,7 +9,7 @@ const BATCH = 50;                     // mints per upstream request (comma-separ
 const MAX_CACHE = 5000;               // bound the cache so the Radar's ever-changing mints can't grow it forever
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-export function createTokenMetadata({ fetchImpl = fetch, now = () => Date.now() } = {}) {
+export function createTokenMetadata({ fetchImpl = fetch, now = () => Date.now(), dasResolve = null } = {}) {
   const cache = new Map(); // mint -> { meta: {symbol,name,icon}|null, exp: epoch_ms }
   let last = 0;
   let chain = Promise.resolve();
@@ -67,7 +67,12 @@ export function createTokenMetadata({ fetchImpl = fetch, now = () => Date.now() 
       const batch = missing.slice(i, i + BATCH);
       const found = await throttled(() => fetchBatch(batch));
       for (const m of batch) {
-        const meta = found[m] || null;
+        let meta = found[m] || null;
+        // Jupiter miss -> optional Helius DAS fallback (covers new mints Jupiter hasn't listed).
+        // Degrades to null on a non-Helius RPC / locked vault / error.
+        if (!meta && typeof dasResolve === 'function') {
+          try { meta = await dasResolve(m); } catch { meta = null; }
+        }
         cache.set(m, { meta, exp: now() + (meta ? TTL_MS : NEG_TTL_MS) });
         if (meta) result[m] = meta;
       }

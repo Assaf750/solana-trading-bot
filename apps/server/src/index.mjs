@@ -18,6 +18,7 @@ import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 import { createTokenMetadata } from './engine/token-metadata.mjs';
+import { createDas } from './engine/helius-das.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -124,7 +125,10 @@ const paperEngine = createPaperEngine({
   rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p), notifier,
 });
 
-const tokenMeta = createTokenMetadata();
+// DAS enriches token display metadata for mints Jupiter doesn't list (Helius-only, degrades to
+// null elsewhere); used as a fallback inside the cached token-metadata resolver.
+const das = createDas({ rpc });
+const tokenMeta = createTokenMetadata({ dasResolve: (mint) => das.getAssetMeta(mint) });
 
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,

@@ -78,3 +78,21 @@ test('token-metadata: negative cache expires, then a later listing resolves', as
   assert.equal((await md.resolve([BONK]))[BONK].symbol, 'Bonk');
   assert.equal(counter.calls, 2);
 });
+
+test('token-metadata: DAS fallback fills a Jupiter miss and is cached', async () => {
+  let dasCalls = 0;
+  const md = createTokenMetadata({
+    fetchImpl: mockFetch({}), // Jupiter knows nothing
+    dasResolve: async (mint) => { dasCalls += 1; return mint === BONK ? { symbol: 'Bonk', name: 'Bonk', icon: 'b.png' } : null; },
+  });
+  const out = await md.resolve([BONK]);
+  assert.deepEqual(out[BONK], { symbol: 'Bonk', name: 'Bonk', icon: 'b.png' });
+  await md.resolve([BONK]); // cached -> no second DAS call
+  assert.equal(dasCalls, 1);
+});
+
+test('token-metadata: a throwing DAS fallback degrades to a miss (never throws)', async () => {
+  const md = createTokenMetadata({ fetchImpl: mockFetch({}), dasResolve: async () => { throw new Error('das down'); } });
+  const out = await md.resolve([USDC]);
+  assert.deepEqual(out, {});
+});
