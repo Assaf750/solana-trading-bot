@@ -3,72 +3,74 @@
    RTL-aware (logical properties). All class names stable for the 9 pages. */
 
 :root {
-  /* layered near-black surfaces (depth via elevation, not borders alone) */
-  --c-bg: #0a0b0d;
-  --c-bg-elev: #121316;
-  --c-bg-elev-2: #1a1c20;
-  --c-bg-elev-3: #22252b;
-  --c-border: #23262c;
-  --c-border-strong: #343943;
-  --c-text: #f4f6f8;
-  --c-text-dim: #98a0ab;
-  --c-text-faint: #5f6873;
+  /* "luxury terminal / instrument lab" — warm charcoal surfaces, depth via elevation */
+  --c-bg: #0a0b0e;
+  --c-bg-elev: #111317;
+  --c-bg-elev-2: #181a1f;
+  --c-bg-elev-3: #21242b;
+  --c-border: #242730;
+  --c-border-strong: #353a45;
+  --c-text: #ece6da;        /* bone — warm off-white */
+  --c-text-dim: #9b978d;
+  --c-text-faint: #62605a;
 
-  /* signature brand accent — emerald/mint with glow */
-  --c-brand: #3ddc97;
-  --c-brand-2: #21c2a8;
-  --c-brand-bg: rgba(61, 220, 151, 0.12);
-  --c-brand-glow: rgba(61, 220, 151, 0.25);
+  /* signature brand accent — molten copper with a phosphor glow */
+  --c-brand: #ff6a3d;
+  --c-brand-2: #ff9152;
+  --c-brand-bg: rgba(255, 106, 61, 0.13);
+  --c-brand-glow: rgba(255, 106, 61, 0.32);
 
   /* semantic — always paired with icon/label, never color alone */
-  --c-ok: #46c97d;
-  --c-ok-bg: rgba(70, 201, 125, 0.13);
+  --c-ok: #6cc59a;          /* jade — live / positive */
+  --c-ok-bg: rgba(108, 197, 154, 0.13);
   --c-warn: #f5b14a;
   --c-warn-bg: rgba(245, 177, 74, 0.13);
-  --c-danger: #f0545b;
-  --c-danger-bg: rgba(240, 84, 91, 0.13);
-  --c-info: #5aa9ff;
-  --c-info-bg: rgba(90, 169, 255, 0.13);
+  --c-danger: #e5484d;
+  --c-danger-bg: rgba(229, 72, 77, 0.13);
+  --c-info: #6aa9e8;
+  --c-info-bg: rgba(106, 169, 232, 0.13);
   --c-sim: #b08bff;
   --c-sim-bg: rgba(176, 139, 255, 0.15);
-  --c-neutral: #8b95a1;
-  --c-neutral-bg: rgba(139, 149, 161, 0.12);
+  --c-neutral: #8b8a83;
+  --c-neutral-bg: rgba(139, 138, 131, 0.12);
 
-  /* typography — scaled by the Tweaks "type scale" control */
+  /* typography — Fraunces (editorial display) × Archivo (body) × JetBrains Mono (data) */
   --type-scale: 1;
   --fs-xs: calc(11px * var(--type-scale));
   --fs-sm: calc(12px * var(--type-scale));
   --fs-md: calc(13px * var(--type-scale));
   --fs-lg: calc(15px * var(--type-scale));
   --fs-xl: calc(19px * var(--type-scale));
-  --fs-2xl: calc(26px * var(--type-scale));
-  --font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, "Noto Sans Arabic", sans-serif;
+  --fs-2xl: calc(30px * var(--type-scale));
+  --font: "Archivo", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Noto Sans Arabic", "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Fraunces", "Noto Sans Arabic", Georgia, "Times New Roman", serif;
   --mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
 
   /* spacing 4/8 grid */
   --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 22px; --s-6: 32px;
 
-  --radius: 10px;
-  --radius-sm: 7px;
-  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 18px 50px -24px rgba(0, 0, 0, 0.7);
+  --shadow-sm: 0 2px 10px rgba(0, 0, 0, 0.4);
 
   --nav-w: 236px;
 }
 
 :root[data-theme="light"] {
-  --c-bg: #f3f5f8;
-  --c-bg-elev: #ffffff;
-  --c-bg-elev-2: #f0f3f6;
-  --c-bg-elev-3: #e7ebf0;
-  --c-border: #e1e6ec;
-  --c-border-strong: #cbd3dc;
-  --c-text: #11161c;
-  --c-text-dim: #545d68;
-  --c-text-faint: #828c98;
-  --shadow: 0 6px 24px rgba(20, 30, 50, 0.12);
-  --shadow-sm: 0 2px 8px rgba(20, 30, 50, 0.08);
+  /* warm paper — the luxe identity in daylight */
+  --c-bg: #f4f1ea;
+  --c-bg-elev: #fffefb;
+  --c-bg-elev-2: #efeae0;
+  --c-bg-elev-3: #e5dfd2;
+  --c-border: #e2dccf;
+  --c-border-strong: #ccc4b3;
+  --c-text: #1b1811;
+  --c-text-dim: #6a655b;
+  --c-text-faint: #9a948a;
+  --shadow: 0 16px 44px -22px rgba(60, 40, 20, 0.22);
+  --shadow-sm: 0 2px 8px rgba(60, 40, 20, 0.1);
 }
 
 :root[data-density="compact"] { --row-pad: 4px 9px; --card-pad: 12px; }
@@ -79,8 +81,8 @@ html, body, #root { height: 100%; margin: 0; }
 
 body {
   background:
-    radial-gradient(1200px 600px at 78% -10%, rgba(61, 220, 151, 0.06), transparent 60%),
-    radial-gradient(900px 500px at 0% 0%, rgba(90, 169, 255, 0.05), transparent 55%),
+    radial-gradient(1100px 560px at 82% -8%, rgba(255, 106, 61, 0.08), transparent 60%),
+    radial-gradient(820px 480px at 2% 4%, rgba(108, 197, 154, 0.045), transparent 55%),
     var(--c-bg);
   background-attachment: fixed;
   color: var(--c-text);
@@ -90,8 +92,16 @@ body {
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
+/* film grain — gives the charcoal surfaces a tactile, instrument-panel texture */
+body::after {
+  content: ""; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: 0.04; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-glow="off"] body::after { display: none; }
+:root[data-theme="light"] body::after { mix-blend-mode: multiply; opacity: 0.025; }
 
-::selection { background: var(--c-brand-glow); color: #fff; }
+::selection { background: var(--c-brand); color: #160a05; }
 :focus-visible { outline: 2px solid var(--c-brand); outline-offset: 1px; }
 
 /* scrollbars */
@@ -116,7 +126,7 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
   position: sticky; inset-block-start: 0; block-size: 100vh; overflow-y: auto;
 }
 .nav-brand {
-  font-size: var(--fs-lg); font-weight: 800; letter-spacing: -0.02em;
+  font-family: var(--mono); font-size: var(--fs-lg); font-weight: 700; letter-spacing: -0.01em;
   display: flex; align-items: center; gap: var(--s-2); margin-block-end: 2px;
 }
 .nav-brand::before {
@@ -181,8 +191,8 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .content { padding: var(--s-5); max-inline-size: 1560px; width: 100%; }
 
 .page-head { margin-block-end: var(--s-5); }
-.page-head h1 { font-size: var(--fs-2xl); }
-.page-head .sub { color: var(--c-text-dim); font-size: var(--fs-md); margin-block-start: var(--s-1); }
+.page-head h1 { font-family: var(--font-display); font-weight: 500; font-size: var(--fs-2xl); letter-spacing: -0.02em; line-height: 1.05; }
+.page-head .sub { color: var(--c-text-dim); font-size: var(--fs-md); margin-block-start: var(--s-2); max-inline-size: 70ch; }
 .page-head-tags { display: flex; gap: var(--s-2); flex-wrap: wrap; margin-block-start: var(--s-3); align-items: center; }
 
 /* ---- controls ---- */
@@ -316,12 +326,12 @@ table.data td.num { text-align: end; }
 /* ---- modal ---- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.66); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; z-index: 100; padding: var(--s-4); }
 .modal { background: var(--c-bg-elev); border: 1px solid var(--c-border-strong); border-radius: var(--radius); box-shadow: var(--shadow); max-inline-size: 480px; inline-size: 100%; padding: var(--s-5); }
-.modal h3 { font-size: var(--fs-xl); margin-block-end: var(--s-3); }
+.modal h3 { font-family: var(--font-display); font-weight: 500; font-size: var(--fs-2xl); margin-block-end: var(--s-3); }
 .modal-actions { display: flex; gap: var(--s-2); justify-content: flex-end; margin-block-start: var(--s-5); }
 
 .status-chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600; padding: 4px 10px; border-radius: 100px; border: 1px solid var(--c-border-strong); background: var(--c-bg-elev-2); }
 
-.section-title { font-size: var(--fs-lg); font-weight: 650; margin: var(--s-5) 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); }
+.section-title { font-family: var(--font-display); font-size: var(--fs-xl); font-weight: 500; letter-spacing: -0.01em; margin: var(--s-5) 0 var(--s-3); display: flex; align-items: center; gap: var(--s-2); }
 .muted { color: var(--c-text-dim); }
 .faint { color: var(--c-text-faint); }
 .mono { font-family: var(--mono); }
