@@ -8,6 +8,7 @@ import { checkTokenSafety } from './token-safety.mjs';
 import { checkEvGate } from './ev-gate.mjs';
 import { trailingStopHit, firstTierHit, breakevenStopHit } from './exit-rules.mjs';
 import { proportionalLeaderUsd } from './sizing.mjs';
+import { checkMarketFilters } from './market-filters.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -235,6 +236,14 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         }
       }
     }
+
+    // Optional FDV (market-cap) band — quality filter; skips (allows) when supply/price unreadable.
+    const mfilt = await checkMarketFilters({ mint: swap.mint, rpc, cfg, priceUsdPerToken: qtyUi > 0 ? sizeUsd / qtyUi : null });
+    if (!mfilt.ok) {
+      pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: mfilt.reasons.map((r) => `market_filter:${r}`) });
+      return;
+    }
+    if (mfilt.skipped?.length) pushEvent({ kind: 'market_filter_skipped', leader, mint: swap.mint, skipped: mfilt.skipped });
 
     const sellCheck = await jupiter.usdValueOf({ mint: swap.mint, qtyUi, decimals: swap.decimals });
     if (!sellCheck.ok) {

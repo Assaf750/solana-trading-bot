@@ -58,6 +58,7 @@ export default function SettingsSafety() {
   const [exec, setExec] = useState({});
   const [notif, setNotif] = useState({});
   const [lists, setLists] = useState({ token_blacklist: '', token_whitelist: '' });
+  const [market, setMarket] = useState({});
   const [activePreset, setActivePreset] = useState(null);
   const [saveMsg, setSaveMsg] = useState(null);
   const [confirmLive, setConfirmLive] = useState('');
@@ -108,6 +109,7 @@ export default function SettingsSafety() {
         token_blacklist: (d.lists?.token_blacklist || []).join('\n'),
         token_whitelist: (d.lists?.token_whitelist || []).join('\n'),
       });
+      setMarket({ min_fdv_usd: g(d.market_filters, 'min_fdv_usd'), max_fdv_usd: g(d.market_filters, 'max_fdv_usd') });
       setActivePreset(null);
     }
   }
@@ -168,6 +170,10 @@ export default function SettingsSafety() {
       lists: {
         token_blacklist: parseMints(lists.token_blacklist),
         token_whitelist: parseMints(lists.token_whitelist),
+      },
+      market_filters: {
+        min_fdv_usd: numOrNull(market.min_fdv_usd),
+        max_fdv_usd: numOrNull(market.max_fdv_usd),
       },
     };
     const r = await api.updateConfig(patch);
@@ -410,6 +416,23 @@ export default function SettingsSafety() {
             </div>
             <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>
               {ar ? 'تُحفظ العناوين الصالحة فقط (base58) وتُزال التكرارات تلقائياً.' : 'Only valid base58 addresses are saved; duplicates are removed automatically.'}
+            </p>
+          </Card>
+
+          <Card title={ar ? 'مرشّحات السوق (FDV)' : 'Market filters (FDV)'}
+            sub={ar ? 'نطاق التقييم المخفّف (العرض الكلّي × السعر) عند الدخول. فارغ = مغلق. مرشّح جودة — يتخطّى عند تعذّر القراءة، وليس فحص أمان حاسم.' : 'Fully-diluted valuation band (total supply × price) at entry. Empty = off. A quality filter — skips when data is unreadable; not a fail-closed safety check.'}>
+            <div className="grid cols-2" style={{ gap: 'var(--s-3)' }}>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? 'أدنى FDV ($)' : 'Min FDV ($)'}</span>
+                <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" placeholder={ar ? 'مثال 20000' : 'e.g. 20000'} value={market.min_fdv_usd ?? ''} onChange={(e) => setMarket({ ...market, min_fdv_usd: e.target.value })} />
+              </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? 'أقصى FDV ($)' : 'Max FDV ($)'}</span>
+                <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" placeholder={ar ? 'مثال 5000000' : 'e.g. 5000000'} value={market.max_fdv_usd ?? ''} onChange={(e) => setMarket({ ...market, max_fdv_usd: e.target.value })} />
+              </label>
+            </div>
+            <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>
+              {ar ? 'يرفض الدخول إذا خرج FDV عن النطاق — لتفادي العملات الصغيرة جداً أو المتأخّرة جداً.' : 'Rejects entry when FDV falls outside the band — avoid too-tiny or too-late tokens.'}
             </p>
           </Card>
         </>

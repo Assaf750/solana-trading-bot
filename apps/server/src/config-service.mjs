@@ -81,6 +81,12 @@ const DEFAULTS = {
     token_blacklist: [],
     token_whitelist: [],
   },
+  market_filters: {
+    // optional FDV (fully-diluted valuation) band at entry. null = off. Quality filter (skips when
+    // supply/price can't be read), NOT the fail-closed anti-rug screen.
+    min_fdv_usd: null,
+    max_fdv_usd: null,
+  },
   providers: {
     // refs only — raw keys live in the vault
     rpc_url_ref: null,        // e.g. vault:helius_rpc_url
@@ -124,6 +130,7 @@ const NUMERIC_BOUNDS = {
   minimum_exit_success_rate: [0, 1], max_expected_drawdown_pct: [0.1, 100],
   capital_limit: [1, 1e12], sizing_value: [0.000001, 1e9], jito_tip_lamports: [1000, 1e9],
   jito_tip_percentile: [1, 100], jito_tip_max_lamports: [1000, 1e9],
+  min_fdv_usd: [1, 1e15], max_fdv_usd: [1, 1e15],
   take_profit_pct: [0.1, 100000], stop_loss_pct: [0.1, 100],
   max_entry_slippage_vs_leader: [0.01, 100], min_mirror_sell_pct: [0.1, 100],
   max_entry_drift_pct: [0.1, 100000], auto_pause_after_losses: [1, 1000],
@@ -153,6 +160,7 @@ export function validateConfigPatch(patch) {
     copy_defaults: ['copy_mode', 'take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'max_entry_drift_pct', 'drift_action', 'exit_on_leader_sell', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct', 'breakeven_after_tp1'],
     safety: ['enabled', 'require_mint_revoked', 'require_freeze_revoked', 'block_permanent_delegate'],
     lists: ['token_blacklist', 'token_whitelist'],
+    market_filters: ['min_fdv_usd', 'max_fdv_usd'],
     providers: ['rpc_url_ref', 'stream_ref', 'jupiter_key_ref', 'grpc_url_ref', 'grpc_token_ref', 'jito_url_ref', 'telegram_bot_token_ref', 'webhook_url_ref'],
     signer_session: ['idle_timeout_ms', 'max_session_ms', 'max_session_notional_usd', 'lock_after_n_risk_rejections'],
     notifications: ['enabled', 'telegram_enabled', 'webhook_enabled', 'telegram_chat_id', 'on_entry', 'on_exit', 'on_kill', 'on_daily_loss'],
