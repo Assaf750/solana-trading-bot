@@ -6,9 +6,9 @@ import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, MiniCha
 import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
+import { shortMint } from '../format.js';
 
 const usd = (v) => `$${Number(v ?? 0).toFixed(2)}`;
-const shortMint = (m) => `${String(m).slice(0, 4)}…${String(m).slice(-4)}`;
 
 export default function AnalyticsReports() {
   const { lang } = useI18n();
@@ -66,8 +66,10 @@ export default function AnalyticsReports() {
   const grossProfit = realizedVals.filter((x) => x > 0).reduce((a, b) => a + b, 0);
   const grossLoss = -realizedVals.filter((x) => x < 0).reduce((a, b) => a + b, 0);
   const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : (grossProfit > 0 ? Infinity : null);
-  const peak = equity.length ? Math.max(...equity) : 0;
-  const maxDD = equity.reduce((mx, v, i) => Math.max(mx, Math.max(...equity.slice(0, i + 1)) - v), 0);
+  // single-pass running peak + max drawdown (no O(n^2), no Math.max(...spread) which would
+  // RangeError on a large equity array)
+  let peak = 0; let maxDD = 0;
+  for (const v of equity) { if (v > peak) peak = v; const dd = peak - v; if (dd > maxDD) maxDD = dd; }
 
   const byLeader = (insights?.leaders || []).filter((l) => l.trades > 0).slice(0, 8);
 

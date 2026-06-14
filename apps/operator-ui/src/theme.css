@@ -187,6 +187,12 @@ h1, h2, h3, h4 { margin: 0; font-weight: 650; letter-spacing: -0.01em; }
 .statbar .pill .led.ok { background: var(--c-ok); box-shadow: 0 0 8px var(--c-ok); }
 .statbar .pill .led.warn { background: var(--c-warn); box-shadow: 0 0 8px var(--c-warn); }
 .statbar .pill .led.danger { background: var(--c-danger); box-shadow: 0 0 8px var(--c-danger); }
+/* generic LED dot for standalone use (e.g. settings tab health) — statbar rules above are more
+   specific and keep their own sizing/glow */
+.led { display: inline-block; inline-size: 7px; block-size: 7px; border-radius: 50%; background: var(--c-neutral); }
+.led.ok { background: var(--c-ok); }
+.led.warn { background: var(--c-warn); }
+.led.danger { background: var(--c-danger); }
 
 .content { padding: var(--s-5); max-inline-size: 1560px; width: 100%; }
 

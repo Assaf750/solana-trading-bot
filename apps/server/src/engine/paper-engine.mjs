@@ -531,11 +531,15 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
         // first-tier partial take-profit: bank tp1_sell_pct of the position, let the rest ride
         const tp1Pct = Number(w?.config?.tp1_pct ?? cfg.copy_defaults?.tp1_pct);
         if (firstTierHit({ pnlPct, tp1Pct, done: p.tp1_done })) {
-          const sellPct = Number(w?.config?.tp1_sell_pct ?? cfg.copy_defaults?.tp1_sell_pct) || 50;
+          const sellRaw = Number(w?.config?.tp1_sell_pct ?? cfg.copy_defaults?.tp1_sell_pct);
+          const sellPct = Number.isFinite(sellRaw) && sellRaw > 0 ? sellRaw : 50;
           const frac = Math.min(1, Math.max(0.01, sellPct / 100));
-          await performExit({ pf, p, fraction: frac, reason: 'take_profit_tier1' });
-          pf.markTp1Done(p.position_id);
-          continue;
+          const res = await performExit({ pf, p, fraction: frac, reason: 'take_profit_tier1' });
+          // Only mark the tier done (which arms break-even) when the partial ACTUALLY banked AND
+          // the position still rides. A refused/unconfirmed live sell leaves tp1_done false so it
+          // retries next tick; a 100% sell closed the position so there is nothing to arm.
+          if (res?.ok && res.closed !== true) pf.markTp1Done(p.position_id);
+          continue; // one exit attempt per tick — don't also run full TP/SL this pass
         }
         if (pnlPct >= p.tp_pct) {
           await performExit({ pf, p, fraction: 1, reason: 'take_profit_hit' });

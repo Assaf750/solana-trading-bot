@@ -63,10 +63,16 @@ export function buildTipTransferTx({ owner, tipAccount, lamports, recentBlockhas
  */
 export function selectTipLamports({ floor, percentile = 50, fixedLamports = 10000, maxLamports = null }) {
   const fixed = Number.isFinite(fixedLamports) && fixedLamports > 0 ? Math.floor(fixedLamports) : 10000;
-  const pct = [25, 50, 75, 95, 99].includes(percentile) ? percentile : 50;
+  // Ceiling = the explicit cap, else the fixed value. This keeps the selected tip <= what the
+  // balance check reserves (maxTipReserveLamports mirrors this). Raise jito_tip_max_lamports to
+  // let the live floor bid above the fixed tip. The fixed value also acts as the FLOOR (minimum).
+  const cap = Math.max(fixed, Number.isFinite(maxLamports) && maxLamports > 0 ? Math.floor(maxLamports) : fixed);
+  // snap the requested percentile to the nearest supported bucket (validator allows 1..100)
+  const buckets = [25, 50, 75, 95, 99];
+  const pn = Number(percentile);
+  const pct = Number.isFinite(pn) ? buckets.reduce((a, b) => (Math.abs(b - pn) < Math.abs(a - pn) ? b : a), 50) : 50;
   const sol = floor ? Number(floor[`landed_tips_${pct}th_percentile`]) : NaN;
   if (!Number.isFinite(sol) || sol <= 0) return fixed; // no live floor -> fixed fallback
-  let lamports = Math.floor(sol * 1e9);
-  if (Number.isFinite(maxLamports) && maxLamports > 0) lamports = Math.min(lamports, Math.floor(maxLamports));
-  return Math.max(1, lamports);
+  const lamports = Math.floor(sol * 1e9);
+  return Math.max(fixed, Math.min(lamports, cap)); // clamp into [fixed, cap]
 }

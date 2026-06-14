@@ -14,14 +14,24 @@ function notify() { for (const cb of subs) cb(); }
 
 async function flush() {
   timer = null;
-  const batch = [...queue].filter((m) => !cache.has(m)).slice(0, 100);
-  queue.clear();
-  if (!batch.length) return;
+  // drop any already-resolved stragglers, then take at most 100 for this request
+  for (const m of [...queue]) if (cache.has(m)) queue.delete(m);
+  const batch = [...queue].slice(0, 100);
+  for (const m of batch) queue.delete(m); // leave the overflow (>100) queued
+  if (!batch.length) { if (queue.size) timer = setTimeout(flush, 80); return; }
   const r = await api.tokenMeta(batch);
-  const tokens = (r.ok && r.data?.tokens) || {};
-  // cache misses as null too, so we never loop re-requesting an unknown mint this session
+  if (!r.ok) {
+    // transient failure (call() returns {ok:false}, never throws): re-queue and retry with
+    // backoff instead of permanently negative-caching every mint in the batch.
+    for (const m of batch) queue.add(m);
+    timer = setTimeout(flush, 2000);
+    return;
+  }
+  const tokens = r.data?.tokens || {};
+  // cache misses as null too, so we don't loop re-requesting an unknown mint this session
   for (const m of batch) cache.set(m, tokens[m] || null);
   notify();
+  if (queue.size) timer = setTimeout(flush, 80); // process the overflow next tick
 }
 
 export function requestTokenMeta(mints) {

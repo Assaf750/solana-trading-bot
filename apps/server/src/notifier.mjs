@@ -43,8 +43,11 @@ export function createNotifier({ config, getSecret, fetchImpl = fetch }) {
       const token = resolve(p.telegram_bot_token_ref);
       const chatId = n.telegram_chat_id;
       if (token && chatId) {
+        // escape HTML metachars — with parse_mode:'HTML' an unescaped <,>,& makes Telegram
+        // reject the message (400), and the best-effort catch would drop the alert silently.
+        const safe = String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         jobs.push(postJson(`https://api.telegram.org/bot${token}/sendMessage`, {
-          chat_id: chatId, text, parse_mode: 'HTML', disable_web_page_preview: true,
+          chat_id: chatId, text: safe, parse_mode: 'HTML', disable_web_page_preview: true,
         }));
       }
     }

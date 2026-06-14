@@ -6,9 +6,9 @@ import { Card, Badge, DangerNote, EmptyState, Sparkline, FlashValue } from '../c
 import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
+import { shortMint } from '../format.js';
 
 const usd = (v) => `$${Number(v ?? 0).toFixed(2)}`;
-const shortMint = (m) => `${String(m).slice(0, 4)}…${String(m).slice(-4)}`;
 
 export default function CommandCenter() {
   const { lang } = useI18n();

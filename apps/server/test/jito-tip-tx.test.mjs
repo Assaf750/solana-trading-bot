@@ -52,15 +52,28 @@ test('jito tip tx: rejects bad key lengths and non-positive lamports', () => {
   assert.throws(() => buildTipTransferTx({ owner, tipAccount: tip, lamports: 0, recentBlockhash: bh }), /bad_lamports/);
 });
 
-test('selectTipLamports: dynamic picks the chosen percentile (SOL -> lamports)', () => {
+test('selectTipLamports: dynamic picks the chosen percentile (SOL -> lamports), bounded by cap', () => {
   const floor = { landed_tips_50th_percentile: 0.00001, landed_tips_75th_percentile: 0.00005 };
+  // no cap => ceiling is the fixed value, so the floor cannot exceed it
   assert.equal(selectTipLamports({ floor, percentile: 50, fixedLamports: 10000 }), 10000); // 0.00001 SOL
-  assert.equal(selectTipLamports({ floor, percentile: 75, fixedLamports: 10000 }), 50000);
+  assert.equal(selectTipLamports({ floor, percentile: 75, fixedLamports: 10000 }), 10000); // capped at fixed
+  // raise the cap to let the floor bid higher
+  assert.equal(selectTipLamports({ floor, percentile: 75, fixedLamports: 10000, maxLamports: 100000 }), 50000);
+});
+
+test('selectTipLamports: fixed acts as a FLOOR — never tips below the configured fixed value', () => {
+  const floor = { landed_tips_50th_percentile: 0.000005 }; // 5000 lamports < fixed
+  assert.equal(selectTipLamports({ floor, percentile: 50, fixedLamports: 10000, maxLamports: 100000 }), 10000);
 });
 
 test('selectTipLamports: clamps to maxLamports', () => {
   const floor = { landed_tips_95th_percentile: 0.01 }; // 10,000,000 lamports
   assert.equal(selectTipLamports({ floor, percentile: 95, fixedLamports: 10000, maxLamports: 200000 }), 200000);
+});
+
+test('selectTipLamports: snaps an unsupported percentile to the nearest bucket (not silently 50)', () => {
+  const floor = { landed_tips_95th_percentile: 0.00005 }; // 50000 lamports
+  assert.equal(selectTipLamports({ floor, percentile: 90, fixedLamports: 10000, maxLamports: 100000 }), 50000); // 90 -> 95
 });
 
 test('selectTipLamports: falls back to fixed when floor missing/invalid', () => {

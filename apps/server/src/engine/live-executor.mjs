@@ -25,11 +25,13 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     return selectTipLamports({ floor, percentile: exec.jito_tip_percentile ?? 50, fixedLamports: fixed, maxLamports: exec.jito_tip_max_lamports ?? null });
   }
 
-  // Worst-case tip to RESERVE in the balance check (no network): the dynamic cap, else fixed.
+  // Worst-case tip to RESERVE in the balance check (no network). Must mirror selectTipLamports'
+  // ceiling exactly so the reserve is always >= the tip actually sent: the explicit cap if set,
+  // else the fixed value (which is also the ceiling when no cap is configured).
   function maxTipReserveLamports(exec) {
     const fixed = Number.isFinite(exec?.jito_tip_lamports) ? exec.jito_tip_lamports : 10000;
     if (exec?.jito_tip_mode !== 'dynamic') return fixed;
-    return Number.isFinite(exec?.jito_tip_max_lamports) ? exec.jito_tip_max_lamports : fixed;
+    return Math.max(fixed, Number.isFinite(exec?.jito_tip_max_lamports) ? exec.jito_tip_max_lamports : fixed);
   }
 
   // ---------- intent ledger (idempotency: a retry can NEVER duplicate an on-chain tx) ----------

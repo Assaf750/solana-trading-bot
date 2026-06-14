@@ -1,8 +1,7 @@
 // TokenLabel — renders a token's symbol + logo for a mint, falling back to the short
 // mint address when metadata isn't known. Resolution is batched/cached via useTokenMeta.
 import { useTokenMeta } from '../api/useTokenMeta.js';
-
-const shortMint = (m) => `${String(m).slice(0, 4)}…${String(m).slice(-4)}`;
+import { shortMint } from '../format.js';
 
 export default function TokenLabel({ mint, showIcon = true, showMint = true, className = '' }) {
   const meta = useTokenMeta(mint ? [mint] : [])[mint];

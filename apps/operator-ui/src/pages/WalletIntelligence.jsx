@@ -4,8 +4,7 @@ import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
-
-const short = (a) => `${a.slice(0, 4)}…${a.slice(-4)}`;
+import { shortMint as short } from '../format.js';
 
 export default function WalletIntelligence() {
   const { t, lang } = useI18n();

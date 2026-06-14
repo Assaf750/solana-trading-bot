@@ -24,14 +24,14 @@ const PRESETS = [
     key: 'conservative', ico: '🛡', label: { en: 'Conservative', ar: 'محافظ' },
     desc: { en: 'Tight stops, strict EV, fast auto-pause. Capital preservation first.', ar: 'وقف ضيّق، EV صارم، إيقاف سريع. حماية رأس المال أولاً.' },
     mode: 'strict',
-    copy: { take_profit_pct: 40, stop_loss_pct: 15, trailing_stop_pct: 12, tp1_pct: 20, tp1_sell_pct: 50, breakeven_after_tp1: true, max_entry_slippage_vs_leader: 1.5, min_mirror_sell_pct: 50, max_entry_drift_pct: 3, drift_action: 'skip', exit_on_leader_sell: true, auto_pause_after_losses: 2 },
+    copy: { take_profit_pct: 40, stop_loss_pct: 15, trailing_stop_pct: null, tp1_pct: 20, tp1_sell_pct: 50, breakeven_after_tp1: true, max_entry_slippage_vs_leader: 1.5, min_mirror_sell_pct: 50, max_entry_drift_pct: 3, drift_action: 'skip', exit_on_leader_sell: true, auto_pause_after_losses: 2 },
     ev: { minimum_sample_size: 20, minimum_profit_factor: 1.5, minimum_exit_success_rate: 0.55, minimum_net_expectancy: 0, max_expected_drawdown_pct: 25 },
   },
   {
     key: 'balanced', ico: '⚖', label: { en: 'Balanced', ar: 'متوازن' },
     desc: { en: 'The default copy-trading profile — moderate targets, shrink on drift.', ar: 'ملف النسخ الافتراضي — أهداف معتدلة، تقليص عند الانحراف.' },
     mode: 'strict',
-    copy: { take_profit_pct: 80, stop_loss_pct: 25, trailing_stop_pct: 25, tp1_pct: 40, tp1_sell_pct: 50, breakeven_after_tp1: true, max_entry_slippage_vs_leader: 2.5, min_mirror_sell_pct: 40, max_entry_drift_pct: 5, drift_action: 'shrink', exit_on_leader_sell: true, auto_pause_after_losses: 3 },
+    copy: { take_profit_pct: 80, stop_loss_pct: 25, trailing_stop_pct: 25, tp1_pct: 40, tp1_sell_pct: 50, breakeven_after_tp1: false, max_entry_slippage_vs_leader: 2.5, min_mirror_sell_pct: 40, max_entry_drift_pct: 5, drift_action: 'shrink', exit_on_leader_sell: true, auto_pause_after_losses: 3 },
     ev: { minimum_sample_size: 15, minimum_profit_factor: 1.2, minimum_exit_success_rate: 0.5, minimum_net_expectancy: 0, max_expected_drawdown_pct: 35 },
   },
   {

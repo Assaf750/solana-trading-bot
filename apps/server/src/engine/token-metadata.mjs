@@ -6,12 +6,25 @@ const SEARCH_BASE = 'https://lite-api.jup.ag/tokens/v2/search';
 const TTL_MS = 24 * 60 * 60 * 1000;   // positive cache: 24h (names rarely change)
 const NEG_TTL_MS = 5 * 60 * 1000;     // negative cache: 5m (a brand-new mint may list later)
 const BATCH = 50;                     // mints per upstream request (comma-separated query)
+const MAX_CACHE = 5000;               // bound the cache so the Radar's ever-changing mints can't grow it forever
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
 export function createTokenMetadata({ fetchImpl = fetch, now = () => Date.now() } = {}) {
   const cache = new Map(); // mint -> { meta: {symbol,name,icon}|null, exp: epoch_ms }
   let last = 0;
   let chain = Promise.resolve();
+
+  // Keep the cache bounded: drop expired entries first, then the oldest (Map preserves insertion
+  // order) until under the cap. Prevents unbounded growth on a long-running server.
+  function evict(t) {
+    if (cache.size <= MAX_CACHE) return;
+    for (const [k, v] of cache) if (v.exp <= t) cache.delete(k);
+    while (cache.size > MAX_CACHE) {
+      const k = cache.keys().next().value;
+      if (k === undefined) break;
+      cache.delete(k);
+    }
+  }
 
   // serialize + space upstream calls (~1.6 req/s) so display lookups never starve the
   // shared Jupiter budget the trading engine relies on for quotes.
@@ -59,6 +72,7 @@ export function createTokenMetadata({ fetchImpl = fetch, now = () => Date.now() 
         if (meta) result[m] = meta;
       }
     }
+    evict(now());
     return result;
   }
 
