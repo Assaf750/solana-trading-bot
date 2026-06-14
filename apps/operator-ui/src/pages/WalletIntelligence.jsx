@@ -334,6 +334,7 @@ function WalletConfigEditor({ ar, wallet, onSaved }) {
             <option value="fixed_usd">fixed_usd</option>
             <option value="fixed_sol">fixed_sol</option>
             <option value="pct_of_capital">pct_of_capital</option>
+            <option value="proportional_leader">proportional_leader</option>
           </select>
         </label>
         <NumCell k="sizing_value" label={ar ? 'قيمة التحجيم' : 'Sizing value'} />

@@ -139,7 +139,7 @@ export function validateConfigPatch(patch) {
     for (const [field, v] of Object.entries(value)) {
       if (!sections[section].includes(field)) { errors.push({ field: `${section}.${field}`, error: 'unknown_field' }); continue; }
       if (field === 'ev_gate_mode' && !['strict', 'warning_only'].includes(v)) errors.push({ field, error: 'invalid_enum' });
-      else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field, error: 'invalid_enum' });
+      else if (field === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital', 'proportional_leader'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'signer_backend' && !['node', 'rust'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'submit_backend' && !['rpc', 'jito'].includes(v)) errors.push({ field, error: 'invalid_enum' });
       else if (field === 'jito_tip_account') {

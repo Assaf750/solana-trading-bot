@@ -61,7 +61,7 @@ export function createWalletRegistry() {
     for (const [k, v] of Object.entries(patch || {})) {
       if (!PER_WALLET_FIELDS.includes(k)) { errors.push({ field: k, error: 'unknown_field' }); continue; }
       if (k === 'copy_mode' && !['follow_entry_user_exit', 'full_mirror'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
-      if (k === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
+      if (k === 'sizing_mode' && !['fixed_usd', 'fixed_sol', 'pct_of_capital', 'proportional_leader'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
       if (k === 'drift_action' && !['skip', 'shrink'].includes(v)) errors.push({ field: k, error: 'invalid_enum' });
       if ((k === 'exit_on_leader_sell' || k === 'breakeven_after_tp1') && typeof v !== 'boolean') errors.push({ field: k, error: 'must_be_boolean' });
       if (['take_profit_pct', 'stop_loss_pct', 'max_entry_slippage_vs_leader', 'min_mirror_sell_pct', 'sizing_value', 'max_entry_drift_pct', 'auto_pause_after_losses', 'trailing_stop_pct', 'tp1_pct', 'tp1_sell_pct'].includes(k)

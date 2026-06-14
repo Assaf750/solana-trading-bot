@@ -395,11 +395,11 @@ export default function SettingsSafety() {
             <label className="stack" style={{ gap: 4 }}>
               <span className="muted fs-xs">{ar ? 'نمط التحجيم العام' : 'Global sizing mode'}</span>
               <select className="search" dir="ltr" value={exec.sizing_mode || 'fixed_usd'} onChange={(e) => setExec({ ...exec, sizing_mode: e.target.value })}>
-                <option value="fixed_usd">fixed_usd</option><option value="fixed_sol">fixed_sol</option><option value="pct_of_capital">pct_of_capital</option>
+                <option value="fixed_usd">fixed_usd</option><option value="fixed_sol">fixed_sol</option><option value="pct_of_capital">pct_of_capital</option><option value="proportional_leader">proportional_leader</option>
               </select>
             </label>
             <label className="stack" style={{ gap: 4 }}>
-              <span className="muted fs-xs">{ar ? 'قيمة التحجيم العامة' : 'Global sizing value'}</span>
+              <span className="muted fs-xs">{ar ? 'قيمة التحجيم العامة' : 'Global sizing value'}{exec.sizing_mode === 'proportional_leader' ? (ar ? ' (% من حجم القائد)' : ' (% of leader size)') : ''}</span>
               <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" value={exec.sizing_value ?? ''} onChange={(e) => setExec({ ...exec, sizing_value: e.target.value })} />
             </label>
           </div>

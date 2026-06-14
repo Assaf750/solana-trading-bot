@@ -7,6 +7,7 @@ import { checkEntryGates } from './risk-gates.mjs';
 import { checkTokenSafety } from './token-safety.mjs';
 import { checkEvGate } from './ev-gate.mjs';
 import { trailingStopHit, firstTierHit, breakevenStopHit } from './exit-rules.mjs';
+import { proportionalLeaderUsd } from './sizing.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
@@ -89,7 +90,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
 
   /** Resolve trade size in USD honoring the (per-wallet, else global) sizing mode.
    *  Fail-closed: returns {ok:false} rather than silently mis-sizing a real trade. */
-  async function resolveSizeUsd({ cfg, wallet }) {
+  async function resolveSizeUsd({ cfg, wallet, swap }) {
     const wc = wallet.config || {};
     const mode = wc.sizing_mode || cfg.execution?.sizing_mode || 'fixed_usd';
     const value = wc.sizing_value ?? cfg.execution?.sizing_value;
@@ -106,6 +107,17 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       const px = await solUsd();
       if (!px) return { ok: false, error: 'sol_price_unavailable' };
       return { ok: true, usd: value * px };
+    }
+    if (mode === 'proportional_leader') {
+      // value = % of the leader's own buy size. Needs the leader's spend (from the swap).
+      const px = await solUsd();
+      const leaderUsd = (swap?.quoteSpentSol || 0) * (px || 0) + (swap?.quoteSpentUsdc || 0);
+      const usd = proportionalLeaderUsd({
+        leaderUsd, valuePct: value,
+        capUsd: cfg.execution?.capital_limit, maxPosPct: cfg.hard_risk?.max_position_size_pct,
+      });
+      if (usd == null) return { ok: false, error: 'leader_size_unavailable' };
+      return { ok: true, usd };
     }
     return { ok: false, error: `unsupported_sizing_mode_${mode}` };
   }
@@ -124,7 +136,7 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
       if (recent) { pushEvent({ kind: 'entry_skipped_rebuy_cooldown', leader, mint: swap.mint }); return; }
     }
 
-    const sized = await resolveSizeUsd({ cfg, wallet });
+    const sized = await resolveSizeUsd({ cfg, wallet, swap });
     if (!sized.ok) {
       pushEvent({ kind: 'entry_rejected', leader, mint: swap.mint, rejections: [`sizing_${sized.error}`] });
       return;
