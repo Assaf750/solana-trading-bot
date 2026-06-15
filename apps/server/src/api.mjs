@@ -21,7 +21,12 @@ function diagSummary(readiness) {
 // DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
 const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null }) {
+  // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
+  // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
+  // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
+  const HOT_CACHE_TTL = { providerHealth: 10_000, readiness: 15_000 };
+  const cacheOp = async (fn) => { try { return { ok: true, value: await fn() }; } catch { return { ok: false, value: null }; } };
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
@@ -235,12 +240,40 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/readiness') return { status: 200, body: readiness() };
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
-        if (path === '/api/providers/health') return { status: 200, body: { providers: providerHealth ? providerHealth.snapshot() : {} } };
-        // ADR-0001 Phase 5B: read-only live-readiness rollup (connectivity + provider health).
-        // Present only when DIAGNOSTIC_BACKEND=package wired the adapter; never trades.
+        if (path === '/api/providers/health') {
+          // Live in-process monitor is authoritative + cheap; the hot-state cache is write-through and
+          // (only on a cold/empty monitor) a fallback. A Redis error NEVER changes the reported status.
+          const live = providerHealth ? providerHealth.snapshot() : {};
+          let providers = live;
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          if (hotState) {
+            if (Object.keys(live).length > 0) {
+              const w = await cacheOp(() => hotState.setProviderHealth(live, HOT_CACHE_TTL.providerHealth));
+              hot_state_cache.degraded = !w.ok;
+            } else {
+              const r = await cacheOp(() => hotState.getProviderHealth()); // cold start: serve last cached
+              hot_state_cache.degraded = !r.ok;
+              if (r.ok && r.value && typeof r.value === 'object') { providers = r.value; hot_state_cache.hit = true; }
+            }
+          }
+          return { status: 200, body: { providers, hot_state_cache } };
+        }
+        // ADR-0001 Phase 5B/6B: read-only live-readiness rollup (connectivity + provider health). The
+        // readiness is always computed LIVE; the hot-state cache is written best-effort and the prior
+        // cached snapshot is returned as `cached_readiness` (ADVISORY ONLY — never an activation decision).
         if (diagnostics && path === '/api/diagnostics/status') {
           const r = await diagnostics.runLiveReadinessDiagnostic();
-          return { status: 200, body: { ok: true, ...diagSummary(r.readiness), readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY } };
+          const summary = diagSummary(r.readiness);
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          let cached_readiness = null;
+          if (hotState) {
+            const prev = await cacheOp(() => hotState.getReadiness());
+            if (!prev.ok) hot_state_cache.degraded = true;
+            else if (prev.value) { cached_readiness = prev.value; hot_state_cache.hit = true; }
+            const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: r.readiness, checked_at: r.checked_at }, HOT_CACHE_TTL.readiness));
+            if (!w.ok) hot_state_cache.degraded = true;
+          }
+          return { status: 200, body: { ok: true, ...summary, readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY, hot_state_cache, cached_readiness } };
         }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
@@ -466,7 +499,13 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         // otherwise these fall through to 404. `/execution-test` is an explicit alias of `/run`.
         if (diagnostics && (path === '/api/diagnostics/run' || path === '/api/diagnostics/execution-test')) {
           const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
-          return { status: 200, body: { ok: true, run, ...diagSummary(run.readiness), safety: DIAG_SAFETY } };
+          const summary = diagSummary(run.readiness);
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          if (hotState) {
+            const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: run.readiness, checked_at: run.created_at }, HOT_CACHE_TTL.readiness));
+            hot_state_cache.degraded = !w.ok;
+          }
+          return { status: 200, body: { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache } };
         }
         if (diagnostics && path === '/api/diagnostics/provider-test') {
           const check = await diagnostics.runProviderHealthCheck();

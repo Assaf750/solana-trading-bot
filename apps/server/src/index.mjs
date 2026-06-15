@@ -25,7 +25,9 @@ import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
 import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
 import { createDiagnosticExecutionAdapter } from '../../../packages/execution/src/index.mjs';
+import { createMemoryHotStateStore } from '../../../packages/hot-state/src/index.mjs';
 import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
+import { createHotStateBackend } from './storage/redis-client.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -180,11 +182,22 @@ const diagnostics = process.env.DIAGNOSTIC_BACKEND === 'package'
   ? createDiagnosticExecutionAdapter({ rpc, jupiter, jito: jitoProvider, providerHealth })
   : null;
 
+// ADR-0001 Phase 6A/6B: optional hot-state cache (provider-health + readiness only; never SoT).
+// memory by default. FAIL-OPEN even at boot: if HOT_STATE_BACKEND=redis but Redis is unreachable, fall
+// back to the in-process memory cache rather than failing the server — a cache must never block trading.
+let hotState;
+try {
+  hotState = (await createHotStateBackend({ env: process.env })).store;
+} catch (e) {
+  console.warn(`hot-state: ${e?.message || e} — falling back to in-process memory cache`);
+  hotState = createMemoryHotStateStore();
+}
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
