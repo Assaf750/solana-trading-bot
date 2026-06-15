@@ -12,7 +12,9 @@
     "check:all": "node --test",
     "db:postgres:migrate": "node scripts/postgres-migrate.mjs",
     "smoke:postgres": "node scripts/smoke-postgres-storage.mjs",
-    "smoke:redis": "node scripts/smoke-redis.mjs"
+    "smoke:redis": "node scripts/smoke-redis.mjs",
+    "db:clickhouse:migrate": "node scripts/clickhouse-migrate.mjs",
+    "smoke:clickhouse": "node scripts/smoke-clickhouse.mjs"
   },
   "dependencies": {
     "pg": "^8.13.0",
