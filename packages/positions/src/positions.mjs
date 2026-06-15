@@ -1,59 +1,76 @@
-// paper-portfolio.mjs — simulated portfolio: positions, FIFO trades, realized/unrealized
-// P&L, daily loss tracking. ALWAYS labeled simulated. Persisted (atomic writes).
-import { readJson, writeJson, newId, nowIso } from '../util.mjs';
-import { createPositionsBook, createJsonPositionStore } from '../../../../packages/positions/src/index.mjs';
+// @soltrade/positions — position lifecycle + portfolio book (ADR-0001 Phase 2B).
+// The legacy-named methods (recordEntry/recordExit/setMark/summary/...) are a byte-for-byte port of
+// apps/server engine/paper-portfolio.mjs so the server delegates with zero behaviour change. The
+// canonical aliases (createPosition/applyFill/closePosition/updatePositionMark/...) are the
+// forward-looking surface and fail closed on a corrupt store. The Node crypto module is NOT used
+// here (id/time helpers are injected by the host), keeping the mechanism-guard confinement intact.
+import { POSITION_STATE } from '../../ssot-types/src/core-enums.mjs';
+import { deriveExitPlan } from './exit-rules.mjs';
 
-const DEFAULT_FILE = 'paper-portfolio.json';
-const MARK_HISTORY_MAX = 48; // bounded per-position mark series for real (non-synthetic) charts
+const MARK_HISTORY_MAX = 48;
 
 const EMPTY = {
   simulated: true,
-  positions: [], // {position_id, leader_address, wallet_id, token_mint, qty_ui, decimals, cost_usd, entry_price_usd, entry_ts, position_state, copy_mode, tp_pct, sl_pct, mark_usd, mark_ts, mark_status}
-  trades: [],    // {trade_id, position_id, side, token_mint, qty_ui, price_usd, value_usd, fee_usd_est, price_impact_pct, ts, reason, simulated:true}
+  positions: [],
+  trades: [],
   realized_pnl_usd: 0,
   daily: { date: null, realized_pnl_usd: 0, entries_blocked: false },
 };
 
-export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } = {}) {
-  // ADR-0001 Phase 2B: the positions/portfolio book is OWNED by @soltrade/positions. The server
-  // delegates to it; the prior in-process implementation stays as a `legacy` backend behind
-  // POSITIONS_BACKEND until parity is proven, then the package is the default. Both share the same
-  // JSON file + helpers, so the two backends are interchangeable.
-  if (process.env.POSITIONS_BACKEND !== 'legacy') {
-    return createPositionsBook({
-      store: createJsonPositionStore({ file, readJson, writeJson }),
-      newId,
-      nowIso,
-      simulated,
-    });
+// Canonical POSITION_STATE transitions (fail-closed). The current book only uses OPEN->CLOSED, but
+// validatePositionTransition covers the full SSOT lifecycle for forward code.
+const POSITION_TRANSITIONS = Object.freeze({
+  OPENING: ['OPEN', 'FAILED_ENTRY'],
+  OPEN: ['PARTIALLY_EXITING', 'EXIT_PENDING', 'MIRROR_SELL_PENDING', 'MIGRATION_PENDING', 'CLOSED', 'CLOSED_WITH_DUST', 'FAILED_EXIT'],
+  PARTIALLY_EXITING: ['OPEN', 'EXIT_PENDING', 'CLOSED', 'CLOSED_WITH_DUST', 'FAILED_EXIT'],
+  EXIT_PENDING: ['OPEN', 'CLOSED', 'CLOSED_WITH_DUST', 'FAILED_EXIT'],
+  MIRROR_SELL_PENDING: ['OPEN', 'CLOSED', 'CLOSED_WITH_DUST', 'FAILED_EXIT'],
+  MIGRATION_PENDING: ['OPEN', 'CLOSED', 'FAILED_EXIT'],
+  CLOSED: [],
+  CLOSED_WITH_DUST: [],
+  FAILED_ENTRY: [],
+  FAILED_EXIT: [],
+});
+
+export function validatePositionTransition(from, to) {
+  if (!POSITION_STATE.includes(from)) return { ok: false, error: `unknown_from_state:${from}` };
+  if (!POSITION_STATE.includes(to)) return { ok: false, error: `unknown_to_state:${to}` };
+  if (!(POSITION_TRANSITIONS[from] || []).includes(to)) return { ok: false, error: `illegal_transition:${from}->${to}` };
+  return { ok: true };
+}
+
+function round2(n) { return Math.round(n * 100) / 100; }
+
+export function createPositionsBook({ store, newId, nowIso, simulated = true } = {}) {
+  if (!store || typeof store.read !== 'function' || typeof store.write !== 'function') {
+    throw new Error('positions_book_requires_store');
   }
-  const FILE = file;
+  if (typeof newId !== 'function' || typeof nowIso !== 'function') {
+    throw new Error('positions_book_requires_id_and_time');
+  }
+
   function load() {
-    const v = readJson(FILE, null).value || { ...structuredClone(EMPTY), simulated };
+    const v = store.read().value || { ...structuredClone(EMPTY), simulated };
     v.simulated = simulated;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = nowIso().slice(0, 10);
     if (v.daily?.date !== today) v.daily = { date: today, realized_pnl_usd: 0, entries_blocked: false };
     return v;
   }
-  function save(s) { writeJson(FILE, s); }
+  function save(s) { store.write(s); }
+  function isCorrupt() { return !!store.read().corrupt; }
 
   function state() { return load(); }
-
   function openPositions() { return load().positions.filter((p) => p.position_state === 'OPEN'); }
 
   function tokenExposureUsd(mint) {
     return openPositions().filter((p) => p.token_mint === mint)
       .reduce((a, p) => a + (p.mark_usd ?? p.cost_usd), 0);
   }
-
-  // open exposure to all positions copied from one leader (creator/source-concentration proxy)
   function leaderExposureUsd(leader) {
     return openPositions().filter((p) => p.leader_address === leader)
       .reduce((a, p) => a + (p.mark_usd ?? p.cost_usd), 0);
   }
-
   function openCount() { return openPositions().length; }
-
   function dailyRealized() { return load().daily.realized_pnl_usd; }
 
   function recordEntry({ leader_address, wallet_id, token_mint, qty_ui, decimals, cost_usd, fee_usd_est, price_impact_pct, copy_mode, tp_pct, sl_pct, intent_id = null }) {
@@ -67,12 +84,8 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
       position_state: 'OPEN',
       copy_mode, tp_pct, sl_pct,
       mark_usd: cost_usd, mark_ts: nowIso(), mark_status: 'valid',
-      mark_history: [Math.round(cost_usd * 1e6) / 1e6], // seed the real mark series with the entry value
-      intent_id, // live intent that opened this position (for SENT_UNCONFIRMED reconciliation)
-      // Paper realism: the buy transaction also pays a network/priority fee that price-impact does
-      // NOT capture, so charge it (proportionally) at exit. SIMULATED book only — the LIVE book
-      // carries 0 here because live realized P&L comes from the REAL on-chain native-SOL proceeds,
-      // already net of every fee paid; charging an estimate on top would double-count.
+      mark_history: [Math.round(cost_usd * 1e6) / 1e6],
+      intent_id,
       entry_fee_usd: simulated ? (fee_usd_est || 0) : 0,
       simulated,
     };
@@ -86,33 +99,25 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     return position;
   }
 
-  /** Sell a fraction (0..1] of a position at a quoted USD value for that fraction. */
   function recordExit({ position_id, fraction = 1, proceeds_usd, fee_usd_est, price_impact_pct, reason }) {
     const s = load();
     const p = s.positions.find((x) => x.position_id === position_id && x.position_state === 'OPEN');
     if (!p) return { ok: false, error: 'position_not_open' };
-    // reject a non-finite payout — a NaN realized would permanently poison lifetime + daily P&L
-    // (persisted) and silently disable the daily-loss circuit breaker (NaN >= cap is always false).
     if (!Number.isFinite(proceeds_usd)) return { ok: false, error: 'invalid_proceeds' };
     const f = Math.min(1, Math.max(0, fraction));
     const qtySold = p.qty_ui * f;
     const costPart = p.cost_usd * f;
-    // entry-side fee charged proportionally to the fraction exited (paper book only — see recordEntry).
-    // Mirrors costPart, so partial exits sum to exactly one entry fee over a full round trip.
     const entryFeePart = (p.entry_fee_usd || 0) * f;
     const realized = proceeds_usd - costPart - (fee_usd_est || 0) - entryFeePart;
     p.qty_ui -= qtySold;
     p.cost_usd -= costPart;
     p.entry_fee_usd = (p.entry_fee_usd || 0) - entryFeePart;
-    p.realized_usd = (p.realized_usd || 0) + realized; // per-position net P&L (sums partials) for leader stats
+    p.realized_usd = (p.realized_usd || 0) + realized;
     if (f >= 1 || p.qty_ui <= 0) {
       p.position_state = 'CLOSED';
       p.qty_ui = 0; p.cost_usd = 0; p.entry_fee_usd = 0;
       p.closed_at = nowIso();
     } else if (Number.isFinite(p.mark_usd) && p.mark_status === 'valid') {
-      // partial exit: shrink the mark to the remaining quantity so unrealized P&L isn't inflated
-      // in the window before the next markPass re-quotes the position. Only rescale a VALID mark —
-      // scaling a stale ('unavailable') mark would compound an already-untrustworthy figure.
       p.mark_usd *= (1 - f);
       p.mark_ts = nowIso();
     }
@@ -134,11 +139,8 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     p.mark_usd = mark_usd;
     p.mark_ts = nowIso();
     p.mark_status = mark_status;
-    // append only REAL (valid, finite) marks to the history -> the UI draws a true price line,
-    // not a synthetic seeded one. Stale ('unavailable') quotes are skipped to avoid flat noise.
     if (mark_status === 'valid' && Number.isFinite(mark_usd)) {
       p.mark_history = [...(p.mark_history || []), Math.round(mark_usd * 1e6) / 1e6].slice(-MARK_HISTORY_MAX);
-      // track the highest P&L % seen (size-independent) — drives the trailing stop, survives restarts.
       if (p.cost_usd > 0) {
         const pct = (mark_usd - p.cost_usd) / p.cost_usd * 100;
         p.peak_pnl_pct = Math.max(p.peak_pnl_pct ?? pct, pct);
@@ -147,8 +149,6 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     save(s);
   }
 
-  /** Mark a position as needing manual reconciliation (e.g. a confirmed on-chain exit whose
-   *  real proceeds couldn't be read). Keeps it out of the auto TP/SL loop; never fabricates P&L. */
   function flagNeedsReconciliation(position_id, reason) {
     const s = load();
     const p = s.positions.find((x) => x.position_id === position_id);
@@ -159,9 +159,6 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     return { ok: true };
   }
 
-  /** Resolve a needs_reconciliation position with the operator's REAL proceeds (read from an
-   *  explorer): books realized P&L (so the daily-loss breaker sees it), closes the position,
-   *  and clears the flag — the only path that retires a flagged position into the books. */
   function resolveReconciliation(position_id, proceeds_usd) {
     const s = load();
     const p = s.positions.find((x) => x.position_id === position_id && x.position_state === 'OPEN');
@@ -186,8 +183,6 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     return { ok: true, realized_usd: realized, closed: true };
   }
 
-  /** Realized-history stats for one leader, from this book's CLOSED positions (each carries its
-   *  net realized_usd). Feeds the EV quality gate. profit_factor = Infinity when there are no losses. */
   function leaderStats(leader) {
     const closed = load().positions.filter(
       (p) => p.leader_address === leader && p.position_state === 'CLOSED' && Number.isFinite(p.realized_usd),
@@ -210,11 +205,10 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     };
   }
 
-  /** Count of the leader's most-recent CONSECUTIVE losing closed positions (auto-pause trigger). */
   function leaderConsecutiveLosses(leader) {
     const closed = load().positions
       .filter((p) => p.leader_address === leader && p.position_state === 'CLOSED' && p.closed_at && Number.isFinite(p.realized_usd))
-      .sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1)); // newest first
+      .sort((a, b) => (a.closed_at < b.closed_at ? 1 : -1));
     let n = 0;
     for (const p of closed) { if (p.realized_usd < 0) n += 1; else break; }
     return n;
@@ -226,7 +220,6 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     save(s);
   }
 
-  /** Record that a position's first-tier partial take-profit has fired (drives break-even + dedupe). */
   function markTp1Done(position_id) {
     const s = load();
     const p = s.positions.find((x) => x.position_id === position_id);
@@ -235,10 +228,12 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     save(s);
   }
 
+  function unrealizedFor(p) { return (p.mark_status === 'valid' ? p.mark_usd : p.cost_usd) - p.cost_usd; }
+
   function summary() {
     const s = load();
     const open = s.positions.filter((p) => p.position_state === 'OPEN');
-    const unrealized = open.reduce((a, p) => a + ((p.mark_status === 'valid' ? p.mark_usd : p.cost_usd) - p.cost_usd), 0);
+    const unrealized = open.reduce((a, p) => a + unrealizedFor(p), 0);
     return {
       simulated,
       open_positions: open.length,
@@ -250,11 +245,42 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     };
   }
 
+  // ---- canonical API (forward-looking; fail-closed on corrupt store) ----
+  function createPosition(args) {
+    if (isCorrupt()) return { ok: false, error: 'positions_corrupt' };
+    return recordEntry(args);
+  }
+  function applyFill(fill = {}) {
+    if (isCorrupt()) return { ok: false, error: 'positions_corrupt' };
+    if (fill.side === 'sell') return recordExit(fill);
+    return recordEntry(fill);
+  }
+  function closePosition(position_id, { proceeds_usd, fee_usd_est, price_impact_pct, reason = 'close' } = {}) {
+    if (isCorrupt()) return { ok: false, error: 'positions_corrupt' };
+    return recordExit({ position_id, fraction: 1, proceeds_usd, fee_usd_est, price_impact_pct, reason });
+  }
+  function updatePositionMark(position_id, mark_usd, mark_status = 'valid') {
+    if (isCorrupt()) return { ok: false, error: 'positions_corrupt' };
+    setMark(position_id, mark_usd, mark_status);
+    return { ok: true };
+  }
+  function computeUnrealizedPnl(position) {
+    if (position) return unrealizedFor(position);
+    return openPositions().reduce((a, p) => a + unrealizedFor(p), 0);
+  }
+  function computeRealizedPnl() { return load().realized_pnl_usd; }
+  function listOpenPositions() { return openPositions(); }
+  function summarizePortfolio() { return summary(); }
+
   return {
+    // legacy-exact surface (apps/server delegates to these)
     state, openPositions, openCount, tokenExposureUsd, leaderExposureUsd, dailyRealized,
     leaderStats, leaderConsecutiveLosses,
-    recordEntry, recordExit, setMark, setEntriesBlocked, markTp1Done, flagNeedsReconciliation, resolveReconciliation, summary,
+    recordEntry, recordExit, setMark, setEntriesBlocked, markTp1Done,
+    flagNeedsReconciliation, resolveReconciliation, summary,
+    // canonical API (ADR-0001)
+    createPosition, applyFill, closePosition, updatePositionMark,
+    computeUnrealizedPnl, computeRealizedPnl, deriveExitPlan, validatePositionTransition,
+    listOpenPositions, summarizePortfolio,
   };
 }
-
-function round2(n) { return Math.round(n * 100) / 100; }
