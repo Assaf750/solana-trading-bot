@@ -7,7 +7,7 @@ import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
 import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
@@ -440,6 +440,12 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             emit({ event_type: 'health_update', kill_switch: res.state });
           }
           return { status: res.ok ? 200 : 400, body: res };
+        }
+        // ADR-0001 Phase 5A: pre-flight diagnostics (read-only; never trades). Only present when
+        // DIAGNOSTIC_BACKEND=package wired a DiagnosticExecutionAdapter; otherwise falls through to 404.
+        if (diagnostics && path === '/api/diagnostics/run') {
+          const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
+          return { status: 200, body: { ok: true, run } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

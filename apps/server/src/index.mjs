@@ -24,6 +24,7 @@ import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } 
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
 import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
+import { createDiagnosticExecutionAdapter } from '../../../packages/execution/src/index.mjs';
 import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
 import { createNotifier } from './notifier.mjs';
 
@@ -172,11 +173,18 @@ const paperEngine = createPaperEngine({
 const das = createDas({ rpc });
 const tokenMeta = createTokenMetadata({ dasResolve: (mint) => das.getAssetMeta(mint) });
 
+// ADR-0001 Phase 5A: DiagnosticExecutionAdapter — pre-flight diagnostics over the SAME live
+// providers (read-only; never opens a position, claims an intent, or broadcasts). Behind a flag
+// (DIAGNOSTIC_BACKEND=package); default 'legacy' leaves it unconstructed and the engine untouched.
+const diagnostics = process.env.DIAGNOSTIC_BACKEND === 'package'
+  ? createDiagnosticExecutionAdapter({ rpc, jupiter, jito: jitoProvider, providerHealth })
+  : null;
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

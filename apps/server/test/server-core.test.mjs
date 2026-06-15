@@ -200,6 +200,25 @@ test('api: update_config command works; invalid patch rejected with CONFIG_VALID
   assert.equal(bad.body.api_error_code, 'CONFIG_VALIDATION_FAILED');
 });
 
+test('api: POST /api/diagnostics/run is 404 by default (DIAGNOSTIC_BACKEND off); active only when an adapter is wired', async () => {
+  // default stack injects no diagnostics adapter -> route falls through to 404 (no behavior change)
+  const off = await S.api.handle({ method: 'POST', path: '/api/diagnostics/run', body: {} });
+  assert.equal(off.status, 404);
+  assert.equal(off.body.api_error_code, 'RESOURCE_NOT_FOUND');
+
+  // Phase 5A wiring: when a DiagnosticExecutionAdapter IS injected, the route returns its run.
+  let traded = 0;
+  const diagnostics = {
+    runDiagnosticExecutionTest: async (opts) => { if (opts && opts.__trade) traded += 1; return { run_id: 'diag_1', kind: 'preflight', readiness: 'valid', checks: [], created_at: 'T' }; },
+  };
+  const api = createApi({ config: S.config, wallets: S.wallets, killSwitch: S.killSwitch, operatingState: S.operatingState, vault: S.vault, signer: S.signer, audit: appendAudit, broadcast: () => {}, diagnostics });
+  const on = await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: {} });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.ok, true);
+  assert.equal(on.body.run.kind, 'preflight');
+  assert.equal(traded, 0, 'diagnostics endpoint must never trade');
+});
+
 test('api: forbidden opportunity commands are NOT part of the command surface', async () => {
   for (const ct of ['buy_opportunity', 'execute_opportunity', 'submit_opportunity', 'exit_all_positions', 'batch_exit_all_positions']) {
     const r = await S.api.handle({ method: 'POST', path: '/api/commands', body: { command_type: ct } });
