@@ -7,7 +7,7 @@ import { createOperatingState } from './operating-state.mjs';
 import { createSignerService } from './signer-service.mjs';
 import { createApi } from './api.mjs';
 import { startServer } from './server.mjs';
-import { appendAudit } from './audit-log.mjs';
+import { appendAudit, configureAuditStore } from './audit-log.mjs';
 import { ensureDataDir } from './util.mjs';
 import { createPaperPortfolio } from './engine/paper-portfolio.mjs';
 import { createOrdersStore } from './engine/orders.mjs';
@@ -24,7 +24,7 @@ import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } 
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
 import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
-import { createStorageBackend, createDecisionLedgerStore, createPositionStore } from './storage/storage-backend.mjs';
+import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -39,6 +39,9 @@ const signer = createSignerService({ vault, config, killSwitch, audit: appendAud
 // ADR-0001 Phase 4B: resolve the storage backend once (STORAGE_BACKEND=json|postgres). Fail-clear at
 // boot on bad/missing config; the json default loads no pg.
 const storageBackend = await createStorageBackend({ env: process.env });
+// ADR-0001 Phase 4B.3: route the operational audit trail to the active backend (json JSONL default;
+// postgres append-only). The standalone appendAudit/readAuditTail then delegate to it.
+configureAuditStore(await createAuditStore(storageBackend));
 
 // engine wiring — secrets resolved from the vault AT CALL TIME, never cached/logged
 const portfolio = createPaperPortfolio({ positionStore: await createPositionStore(storageBackend, { file: 'paper-portfolio.json', simulated: true }) });

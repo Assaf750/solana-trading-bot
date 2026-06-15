@@ -6,6 +6,7 @@
 import { readJson, writeJson } from '../util.mjs';
 import { createJsonIntentStore } from '../../../../packages/decision-ledger/src/index.mjs';
 import { createJsonPositionStore } from '../../../../packages/positions/src/index.mjs';
+import { mapAuditEventToRecord } from '../../../../packages/storage/src/index.mjs';
 import { parseStorageBackendConfig, createPgClient, createPostgresExecutor } from './postgres-client.mjs';
 
 const INTENTS_FILE = 'intent-ledger.json';
@@ -153,6 +154,81 @@ export async function createPositionStore(backend, { file, simulated = true } = 
   }
   if (backend.backend === 'postgres') {
     const store = createPostgresPositionStore({ executor: backend.executor, book: file.replace(/\.json$/, '') });
+    await store.init();
+    return store;
+  }
+  throw new Error(`unknown_storage_backend:${backend.backend}`);
+}
+
+function auditRowToRecord(r) {
+  return {
+    audit_id: r.audit_id,
+    event_timestamp: r.event_timestamp,
+    audit_actor: r.audit_actor,
+    audit_scope: r.audit_scope,
+    audit_reason: r.audit_reason,
+    command_type: r.command_type ?? null,
+    detail: (r.payload && r.payload.detail) ?? r.payload ?? {},
+  };
+}
+
+/**
+ * Postgres append-only audit store. append(record) validates the record SYNCHRONOUSLY via
+ * @soltrade/storage (contracts AuditEvent — fail-closed) so an invalid record is rejected on the spot
+ * (preserving the synchronous fail-closed audit-before-sign guarantee), then write-through-INSERTs
+ * (build-phase write-behind; durability via flush()). A bounded in-memory ring serves recent()
+ * synchronously (loaded from Postgres at init()). No update/delete (append-only).
+ */
+export function createPostgresAuditStore({ executor, cacheLimit = 500 } = {}) {
+  if (!executor || typeof executor.query !== 'function' || typeof executor.execute !== 'function') {
+    throw new Error('postgres_audit_store_requires_executor');
+  }
+  const ring = [];
+  let chain = Promise.resolve();
+  let lastError = null;
+
+  async function init() {
+    const rows = await executor.query(
+      'SELECT audit_id, event_timestamp, audit_actor, audit_scope, audit_reason, command_type, payload FROM audit_events ORDER BY event_timestamp DESC, audit_id DESC LIMIT $1',
+      [cacheLimit],
+    );
+    ring.length = 0;
+    for (const r of (rows || []).slice().reverse()) ring.push(auditRowToRecord(r)); // chronological
+    return ring.length;
+  }
+
+  function append(record) {
+    // synchronous fail-closed validation (translate legacy record -> contracts AuditEvent)
+    const evt = {
+      audit_scope: record.audit_scope, audit_reason: record.audit_reason, command_type: record.command_type,
+      actor_ref: record.audit_actor, detail: record.detail, at: record.event_timestamp,
+    };
+    const mapped = mapAuditEventToRecord(evt); // throws invalid_AuditEvent on bad input
+    ring.push(record);
+    if (ring.length > cacheLimit) ring.shift();
+    const params = [record.audit_id, record.event_timestamp, record.audit_actor, record.audit_scope, record.audit_reason, record.command_type ?? null, mapped.payload ?? { detail: record.detail }];
+    chain = chain.then(() => executor.execute(
+      'INSERT INTO audit_events (audit_id, event_timestamp, audit_actor, audit_scope, audit_reason, command_type, payload) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+      params,
+    )).catch((e) => { lastError = e; });
+    return record;
+  }
+
+  function recent(limit = 100) { return ring.slice(-limit); }
+  async function flush() {
+    await chain;
+    if (lastError) { const e = lastError; lastError = null; throw e; }
+  }
+
+  return { append, recent, init, flush };
+}
+
+/** Audit store for the active backend: json => null (audit-log uses its JSONL default); postgres =>
+ *  an initialized append-only Postgres audit store. */
+export async function createAuditStore(backend) {
+  if (!backend || backend.backend === 'json') return null;
+  if (backend.backend === 'postgres') {
+    const store = createPostgresAuditStore({ executor: backend.executor });
     await store.init();
     return store;
   }
