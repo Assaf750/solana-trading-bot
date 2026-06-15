@@ -40,6 +40,13 @@ export function assessRisk({ status = {}, config = {}, portfolioSummary = {} } =
   push('concentration', 'info', 'cluster_unenforced', 'Cluster & correlated-meme exposure caps are configured but not yet enforced (no on-chain classification source).');
 
   // --- data quality / providers ---
+  // live provider health (measured success/error of Jupiter quotes + RPC). A failing provider is a
+  // real, time-sensitive trading risk — surface it from the actual measured outcomes.
+  for (const [name, p] of Object.entries(status?.providers || {})) {
+    if (!p || !p.calls) continue;
+    if (p.status === 'down') push('providers', 'block', `provider_down_${name}`, `Provider "${name}" is failing (${p.error_pct}% errors over ${p.calls} calls${p.last_error ? `, last: ${p.last_error}` : ''}) — quotes/marks/trades unreliable.`);
+    else if (p.status === 'degraded') push('providers', 'warn', `provider_degraded_${name}`, `Provider "${name}" is degraded (${p.error_pct}% errors over ${p.calls} calls${p.last_error ? `, last: ${p.last_error}` : ''}).`);
+  }
   if (blockers.includes('rpc_provider_not_configured')) push('data', 'block', 'no_rpc', 'No RPC provider configured — analyses and trading unavailable.');
   if (status?.vault && !status.vault.vault_unlocked) push('data', 'watch', 'vault_locked', 'Vault is locked — read-only mode; unlock for live data and execution.');
   if (!Number.isFinite(mf.min_fdv_usd) && !Number.isFinite(mf.max_fdv_usd) && !Number.isFinite(mf.min_holders)) push('token', 'info', 'no_market_filters', 'No FDV / min-holders quality filters set (optional, off by default).');

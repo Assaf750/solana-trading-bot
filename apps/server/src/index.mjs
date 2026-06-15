@@ -14,6 +14,7 @@ import { createOrdersStore } from './engine/orders.mjs';
 import { createHistory } from './engine/history.mjs';
 import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
+import { createProviderHealth } from './engine/provider-health.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
 import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
@@ -35,7 +36,10 @@ const signer = createSignerService({ vault, config, killSwitch, audit: appendAud
 
 // engine wiring — secrets resolved from the vault AT CALL TIME, never cached/logged
 const portfolio = createPaperPortfolio();
+// live operational health of the external providers the money path leans on (Jupiter, RPC)
+const providerHealth = createProviderHealth();
 const rpc = createRpcClient({
+  health: providerHealth,
   getRpcUrl: () => {
     const ref = config.get().providers?.rpc_url_ref;
     if (!ref?.startsWith('vault:')) return null;
@@ -58,6 +62,7 @@ const rpc = createRpcClient({
   },
 });
 const jupiter = createJupiterClient({
+  health: providerHealth,
   getApiKey: () => {
     const ref = config.get().providers?.jupiter_key_ref;
     if (!ref?.startsWith('vault:')) return null;
@@ -140,7 +145,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

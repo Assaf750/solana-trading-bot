@@ -7,7 +7,7 @@ import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
 import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
@@ -50,6 +50,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           : 'ready_gated_by_owner_activation',
       },
     };
+    payload.providers = providerHealth ? providerHealth.snapshot() : {}; // live external-provider health
     payload.run_mode = deriveRunMode(payload); // operator-facing mode (read_only/paper/live_armed/live_active)
     return payload;
   }
@@ -220,6 +221,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/readiness') return { status: 200, body: readiness() };
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
+        if (path === '/api/providers/health') return { status: 200, body: { providers: providerHealth ? providerHealth.snapshot() : {} } };
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
           const limit = Number(qs.get('limit')) || 50;

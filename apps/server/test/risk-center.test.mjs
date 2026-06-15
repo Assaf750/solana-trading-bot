@@ -48,3 +48,20 @@ test('risk: findings are severity-sorted (block first) + counts present', () => 
   assert.equal(r.findings[0].severity, 'block');
   assert.ok(r.counts.block >= 1);
 });
+
+test('risk: a DOWN provider => block finding; degraded => warn; healthy => none', () => {
+  const down = assessRisk({ status: { ...okStatus, providers: { jupiter: { calls: 30, error_pct: 60, status: 'down', last_error: 'quote_http_500' } } }, config: cleanConfig });
+  assert.ok(down.findings.some((f) => f.code === 'provider_down_jupiter' && f.severity === 'block'));
+  assert.equal(down.posture, 'blocked');
+
+  const deg = assessRisk({ status: { ...okStatus, providers: { rpc: { calls: 40, error_pct: 20, status: 'degraded', last_error: 'rpc_http_429' } } }, config: cleanConfig });
+  assert.ok(deg.findings.some((f) => f.code === 'provider_degraded_rpc' && f.severity === 'warn'));
+
+  const healthy = assessRisk({ status: { ...okStatus, providers: { jupiter: { calls: 50, error_pct: 0, status: 'healthy' } } }, config: cleanConfig });
+  assert.ok(!healthy.findings.some((f) => f.area === 'providers'));
+});
+
+test('risk: a provider with zero calls is ignored (no noise before any traffic)', () => {
+  const r = assessRisk({ status: { ...okStatus, providers: { jupiter: { calls: 0, error_pct: 0, status: 'unknown' } } }, config: cleanConfig });
+  assert.ok(!r.findings.some((f) => f.area === 'providers'));
+});

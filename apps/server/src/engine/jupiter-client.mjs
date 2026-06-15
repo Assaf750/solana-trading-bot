@@ -6,7 +6,7 @@ import { USDC_MINT } from './swap-detector.mjs';
 const LITE_BASE = 'https://lite-api.jup.ag/swap/v1';
 const PRO_BASE = 'https://api.jup.ag/swap/v1';
 
-export function createJupiterClient({ getApiKey }) {
+export function createJupiterClient({ getApiKey, health }) {
   let last = 0;
   let chain = Promise.resolve();
 
@@ -22,6 +22,15 @@ export function createJupiterClient({ getApiKey }) {
 
   async function quote({ inputMint, outputMint, amountBaseUnits, slippageBps = 100 }) {
     return throttled(async () => {
+      // time the real provider response (after the throttle wait) for honest health latency
+      const t0 = Date.now();
+      // health reflects provider AVAILABILITY, not token liquidity: a 'quote_no_route' is a valid
+      // provider response (the token simply has no route) -> healthy. Only transport/HTTP/timeout
+      // failures count against the provider.
+      const rec = (r) => {
+        if (health) { const up = r.ok || r.error === 'quote_no_route'; health.record('jupiter', up, Date.now() - t0, up ? null : r.error); }
+        return r;
+      };
       const key = typeof getApiKey === 'function' ? getApiKey() : null;
       const base = key ? PRO_BASE : LITE_BASE;
       const url = `${base}/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${Math.floor(amountBaseUnits)}&slippageBps=${slippageBps}&swapMode=ExactIn`;
@@ -33,29 +42,29 @@ export function createJupiterClient({ getApiKey }) {
         try {
           const res = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
           if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500 * attempt)); continue; }
-          if (!res.ok) return { ok: false, error: `quote_http_${res.status}` };
+          if (!res.ok) return rec({ ok: false, error: `quote_http_${res.status}` });
           const j = await res.json();
           // a route is valid ONLY with a finite, strictly-positive outAmount. The string '0' is
           // truthy and a malformed field is NaN, so a plain falsy check would let a no-liquidity
           // or garbage quote through -> $0 marks / NaN poisoning sizing & P&L downstream.
           const outAmount = Number(j?.outAmount);
-          if (!Number.isFinite(outAmount) || outAmount <= 0) return { ok: false, error: 'quote_no_route' };
+          if (!Number.isFinite(outAmount) || outAmount <= 0) return rec({ ok: false, error: 'quote_no_route' });
           const inAmount = Number(j?.inAmount);
           const priceImpactPct = Number(j?.priceImpactPct ?? 0) * 100;
-          return {
+          return rec({
             ok: true,
             inAmount: Number.isFinite(inAmount) ? inAmount : 0,
             outAmount,
             priceImpactPct: Number.isFinite(priceImpactPct) ? priceImpactPct : 0,
             routePlan: Array.isArray(j.routePlan) ? j.routePlan.length : 0,
             raw: j, // full quoteResponse — required by /swap when executing live
-          };
+          });
         } catch (e) {
-          if (attempt >= 3) return { ok: false, error: `quote_failed_${String(e?.name || 'err')}` };
+          if (attempt >= 3) return rec({ ok: false, error: `quote_failed_${String(e?.name || 'err')}` });
           await new Promise((r) => setTimeout(r, 1000 * attempt));
         }
       }
-      return { ok: false, error: 'quote_retries_exhausted' };
+      return rec({ ok: false, error: 'quote_retries_exhausted' });
     });
   }
 

@@ -58,10 +58,12 @@ export function parseStreamNotification(msg) {
   return null;
 }
 
-export function createRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor }) {
+export function createRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor, health }) {
   async function rpc(method, params) {
     const url = getRpcUrl();
-    if (!url) return { ok: false, error: 'rpc_url_unavailable' };
+    if (!url) return { ok: false, error: 'rpc_url_unavailable' }; // config state (no URL), not a provider failure -> not recorded
+    const t0 = Date.now();
+    const rec = (r) => { if (health) health.record('rpc', r.ok, Date.now() - t0, r.error); return r; };
     let attempt = 0;
     while (attempt < 3) {
       attempt += 1;
@@ -73,16 +75,16 @@ export function createRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactor
           signal: AbortSignal.timeout(10000),
         });
         if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500 * attempt)); continue; }
-        if (!res.ok) return { ok: false, error: `rpc_http_${res.status}` };
+        if (!res.ok) return rec({ ok: false, error: `rpc_http_${res.status}` });
         const j = await res.json();
-        if (j.error) return { ok: false, error: `rpc_${j.error.code}`, message: String(j.error.message || '').slice(0, 120) };
-        return { ok: true, result: j.result };
+        if (j.error) return rec({ ok: false, error: `rpc_${j.error.code}`, message: String(j.error.message || '').slice(0, 120) });
+        return rec({ ok: true, result: j.result });
       } catch (e) {
-        if (attempt >= 3) return { ok: false, error: `rpc_failed_${String(e?.name || 'err')}` };
+        if (attempt >= 3) return rec({ ok: false, error: `rpc_failed_${String(e?.name || 'err')}` });
         await new Promise((r) => setTimeout(r, 800 * attempt));
       }
     }
-    return { ok: false, error: 'rpc_retries_exhausted' };
+    return rec({ ok: false, error: 'rpc_retries_exhausted' });
   }
 
   const getHealth = () => rpc('getHealth', []);

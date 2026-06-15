@@ -21,12 +21,14 @@ const AREA = {
   general: { ar: 'عام', en: 'General' }, token: { ar: 'التوكن', en: 'Token' }, authority: { ar: 'الصلاحيات', en: 'Authorities' },
   token2022: { ar: 'Token-2022', en: 'Token-2022' }, slippage: { ar: 'الانزلاق', en: 'Slippage' }, exit: { ar: 'الخروج', en: 'Exit' },
   concentration: { ar: 'التركّز', en: 'Concentration' }, data: { ar: 'البيانات', en: 'Data' }, network: { ar: 'الشبكة', en: 'Network' },
+  providers: { ar: 'المزوّدون', en: 'Providers' },
 };
+const PROV_TONE = { healthy: 'ok', degraded: 'warn', down: 'danger', unknown: 'neutral' };
 
 export default function RiskCenter() {
   const { lang } = useI18n();
   const ar = lang === 'ar';
-  const { connected } = useBackend();
+  const { connected, status } = useBackend();
   const [risk, setRisk] = useState(null);
 
   async function load() { const r = await api.risk(); if (r.ok) setRisk(r.data); }
@@ -83,7 +85,39 @@ export default function RiskCenter() {
         )
       )}
 
+      <ProviderHealth ar={ar} providers={status?.providers} />
+
       <p className="faint fs-xs">{ar ? 'مشتقّ من الحالة والإعدادات الحقيقية — لا أرقام مختلقة. للضوابط استخدم الإعدادات والأمان، وللإيقاف الفوري صفحة التنبيهات.' : 'Derived from real state & config — no fabricated numbers. Tune controls on Settings & Safety; the kill switch is on Alerts.'}</p>
     </div>
+  );
+}
+
+// Live external-provider health (measured success/error + latency of the real Jupiter & RPC calls).
+function ProviderHealth({ ar, providers }) {
+  const rows = Object.entries(providers || {}).filter(([, p]) => p && p.calls > 0);
+  return (
+    <Card title={ar ? 'صحّة المزوّدين' : 'Provider health'}
+      right={<span className="muted fs-xs">{ar ? 'من نتائج الاستدعاءات الفعلية' : 'from real call outcomes'}</span>}>
+      {rows.length === 0 ? (
+        <p className="muted fs-xs">{ar ? 'لا استدعاءات بعد — افتح الخزنة وحلّل توكناً لتجميع البيانات.' : 'No calls yet — unlock the vault and analyze a token to gather data.'}</p>
+      ) : (
+        <table className="data">
+          <thead><tr><th className="nosort">{ar ? 'المزوّد' : 'provider'}</th><th className="nosort">{ar ? 'الحالة' : 'status'}</th><th className="nosort num">{ar ? 'استدعاءات' : 'calls'}</th><th className="nosort num">{ar ? 'أخطاء' : 'err%'}</th><th className="nosort num">p50</th><th className="nosort num">p90</th><th className="nosort">{ar ? 'آخر خطأ' : 'last error'}</th></tr></thead>
+          <tbody>
+            {rows.map(([name, p]) => (
+              <tr key={name}>
+                <td className="mono">{name}</td>
+                <td><Badge tone={PROV_TONE[p.status] || 'neutral'}>{p.status}</Badge></td>
+                <td className="num mono">{p.calls}</td>
+                <td className="num mono" style={{ color: p.error_pct >= 10 ? 'var(--c-danger)' : p.error_pct > 0 ? 'var(--c-warn)' : 'var(--c-text-faint)' }}>{p.error_pct}%</td>
+                <td className="num mono faint">{p.p50_ms != null ? `${p.p50_ms}ms` : '—'}</td>
+                <td className="num mono faint">{p.p90_ms != null ? `${p.p90_ms}ms` : '—'}</td>
+                <td className="mono faint fs-xs">{p.last_error || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
