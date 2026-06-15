@@ -5,6 +5,7 @@
 import { computeReadiness } from './readiness.mjs';
 import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
+import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
 
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
@@ -280,6 +281,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const mint = decodeURIComponent(path.slice('/api/tokens/'.length, -'/analysis'.length));
           return runTokenAnalysis(mint);
         }
+        if (path.startsWith('/api/strategy/scenarios')) {
+          // PURE catalog of hypothetical preview scenarios. No vault/secret needed.
+          return { status: 200, body: { scenarios: listScenarios() } };
+        }
         if (path.startsWith('/api/token-meta')) {
           // DISPLAY-ONLY mint -> {symbol,name,icon}. No vault/secret needed; degrades to {}.
           if (typeof tokenMeta?.resolve !== 'function') return { status: 200, body: { tokens: {} } };
@@ -300,6 +305,14 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           }
           const out = await commands[ct](body || {});
           return out;
+        }
+        if (path === '/api/strategy/simulate') {
+          // PURE deterministic strategy preview — reuses the engine's exit logic on a
+          // hypothetical price path. No vault/secret/market data. A candidate strategy may be
+          // supplied in the body; otherwise the live config's copy_defaults is previewed.
+          const strategy = (body && typeof body.strategy === 'object' && body.strategy) ? body.strategy : (config.get().copy_defaults || {});
+          const out = runScenario({ strategy, scenario: body?.scenario || 'pump_then_dump' });
+          return { status: out.ok ? 200 : 400, body: out };
         }
         // vault/session ops (local auth surface; bodies never logged)
         if (path === '/api/vault/create') {

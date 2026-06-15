@@ -57,6 +57,7 @@ export default {
     setup: 'Setup Wizard',
     command: 'Command Center',
     workspace: 'Trading Workspace',
+    strategy: 'Strategy Lab',
     radar: 'Wallet Discovery',
     tokens: 'Token Analysis',
     wallets: 'Wallet Workspace',

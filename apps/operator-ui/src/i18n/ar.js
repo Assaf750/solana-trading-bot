@@ -57,6 +57,7 @@ export default {
     setup: 'معالج الإعداد',
     command: 'مركز القيادة',
     workspace: 'مساحة التداول',
+    strategy: 'مختبر الاستراتيجيات',
     radar: 'اكتشاف المحافظ',
     tokens: 'تحليل التوكنات',
     wallets: 'كونسول المحافظ',

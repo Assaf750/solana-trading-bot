@@ -10,6 +10,7 @@ import { useBackend } from './api/useBackend.jsx';
 import SetupWizard from './pages/SetupWizard.jsx';
 import CommandCenter from './pages/CommandCenter.jsx';
 import TradingWorkspace from './pages/TradingWorkspace.jsx';
+import StrategyLab from './pages/StrategyLab.jsx';
 import NewCoinRadar from './pages/NewCoinRadar.jsx';
 import TokenAnalysis from './pages/TokenAnalysis.jsx';
 import RiskCenter from './pages/RiskCenter.jsx';
@@ -37,6 +38,7 @@ const NAV = [
   { to: '/wallets', key: 'wallets', ico: '◇' },
   { sec: { en: 'Trade', ar: 'التداول' } },
   { to: '/workspace', key: 'workspace', ico: '▤' },
+  { to: '/strategy', key: 'strategy', ico: '⚗' },
   { sec: { en: 'Reports & alerts', ar: 'التقارير والتنبيهات' } },
   { to: '/analytics', key: 'analytics', ico: '▦' },
   { to: '/risk', key: 'risk', ico: '⚠' },
@@ -200,6 +202,7 @@ export default function App() {
             <Route path="/setup" element={<SetupWizard />} />
             <Route path="/command" element={<CommandCenter />} />
             <Route path="/workspace" element={<TradingWorkspace />} />
+            <Route path="/strategy" element={<StrategyLab />} />
             <Route path="/radar" element={<NewCoinRadar />} />
             <Route path="/tokens" element={<TokenAnalysis />} />
             <Route path="/wallets" element={<WalletIntelligence />} />

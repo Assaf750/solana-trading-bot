@@ -47,6 +47,8 @@ export const api = {
   leaderInsights: () => call('GET', '/api/leader-insights'),
   tokenMeta: (mints) => call('GET', `/api/token-meta?mints=${encodeURIComponent((mints || []).join(','))}`),
   exportCsv: (which, book = 'paper') => call('GET', `/api/export/${which}?book=${book}`),
+  strategyScenarios: () => call('GET', '/api/strategy/scenarios'),
+  simulateStrategy: (strategy, scenario) => call('POST', '/api/strategy/simulate', { strategy, scenario }),
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),
