@@ -72,6 +72,7 @@ export const api = {
   deleteSecret: (name) => call('DELETE', `/api/secrets/${encodeURIComponent(name)}`),
   testProviderConnection: () => call('POST', '/api/providers/test-connection', {}),
   analyzeWallet: (address) => call('POST', '/api/wallets/analyze', { address }),
+  analyzeToken: (mint) => call('GET', `/api/tokens/${encodeURIComponent(mint)}/analysis`),
   discoverTokenTraders: (mint) => call('POST', '/api/discover/token-traders', { mint }),
   discoverFromLeaders: () => call('POST', '/api/discover/from-leaders', {}),
   signerImportKey: (secret) => call('POST', '/api/signer/import-key', { secret }),

@@ -58,6 +58,7 @@ export default {
     command: 'Command Center',
     workspace: 'Trading Workspace',
     radar: 'Wallet Discovery',
+    tokens: 'Token Analysis',
     wallets: 'Wallet Workspace',
     analytics: 'Analytics & Reports',
     funds: 'My Wallets & Funds',

@@ -112,7 +112,11 @@ export default function NewCoinRadar() {
           <div className="row">
             <input className="search grow" dir="ltr" placeholder={ar ? 'عقد العملة (mint)…' : 'coin contract (mint)…'} value={mint} onChange={(e) => setMint(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && mint.trim()) discover(); }} />
             <button className="btn primary" onClick={discover} disabled={!mint.trim() || state?.loading}>{ar ? '🔭 اكتشف' : '🔭 Scan'}</button>
+            {/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint.trim()) && (
+              <Link className="btn" to={`/tokens?mint=${mint.trim()}`}>{ar ? '🔬 تحليل التوكن' : '🔬 Analyze token'}</Link>
+            )}
           </div>
+          <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>{ar ? 'المسح يجد المحافظ المتداولة؛ «تحليل التوكن» يفتح تقرير الأمان/السيولة/الحائزين الكامل.' : 'Scan finds trading wallets; “Analyze token” opens the full safety/liquidity/holders report.'}</p>
         </Card>
         <Card title={ar ? '② بحث تلقائي من قادتك' : '② Auto-discover from leaders'}
           sub={ar ? 'يمسح الشبكة انطلاقاً من المحافظ التي تتابعها ويجد من يتداول مثلها — لا عقد مطلوب.' : 'Scans the chain from the wallets you already follow and finds who trades like them — no contract needed.'}>

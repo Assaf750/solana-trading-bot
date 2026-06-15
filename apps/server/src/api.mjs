@@ -4,12 +4,23 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, discoverTraders, discoverFromLeaders, tokenMeta, notifier }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
   // Single-flight for the heavy on-chain scans: only one runs at a time so re-clicks can't
   // stack and compound RPC pressure on the shared client the live trading engine also uses.
   let discoveryBusy = false;
+  let tokenAnalysisBusy = false;
+
+  async function runTokenAnalysis(mint) {
+    if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
+    if (typeof analyzeToken !== 'function') return { status: 503, body: { ok: false, error: 'analyzer_unavailable' } };
+    if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return { status: 400, body: { ok: false, error: 'invalid_mint' } };
+    if (tokenAnalysisBusy) return { status: 429, body: { ok: false, error: 'analysis_in_progress' } };
+    tokenAnalysisBusy = true;
+    try { const r = await analyzeToken({ mint }); return { status: r.ok ? 200 : 400, body: r }; }
+    finally { tokenAnalysisBusy = false; }
+  }
 
   function readiness() {
     return computeReadiness({ config, vault, killSwitch, signerStatus: signer.status() });
@@ -247,6 +258,12 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/orders') {
           return { status: 200, body: { orders: paperEngine && typeof paperEngine.listOrders === 'function' ? paperEngine.listOrders() : [] } };
         }
+        if (path.startsWith('/api/tokens/') && path.endsWith('/analysis')) {
+          // full on-chain token report (identity, market, liquidity, holders, authorities,
+          // Token-2022, route, smart-money, risk/opportunity/copyability, verdict). Vault-gated.
+          const mint = decodeURIComponent(path.slice('/api/tokens/'.length, -'/analysis'.length));
+          return runTokenAnalysis(mint);
+        }
         if (path.startsWith('/api/token-meta')) {
           // DISPLAY-ONLY mint -> {symbol,name,icon}. No vault/secret needed; degrades to {}.
           if (typeof tokenMeta?.resolve !== 'function') return { status: 200, body: { tokens: {} } };
@@ -313,6 +330,9 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           discoveryBusy = true;
           try { const r = await discoverFromLeaders(); return { status: r.ok ? 200 : 502, body: r }; }
           finally { discoveryBusy = false; }
+        }
+        if (path === '/api/tokens/analyze') {
+          return runTokenAnalysis(body?.mint);
         }
         if (path === '/api/wallets/analyze') {
           // READ-ONLY historical wallet intelligence. Needs unlocked vault (uses the RPC key).

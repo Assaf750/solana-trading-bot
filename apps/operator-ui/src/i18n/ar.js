@@ -58,6 +58,7 @@ export default {
     command: 'مركز القيادة',
     workspace: 'مساحة التداول',
     radar: 'اكتشاف المحافظ',
+    tokens: 'تحليل التوكنات',
     wallets: 'كونسول المحافظ',
     analytics: 'التحليلات والتقارير',
     funds: 'محافظي والأموال',

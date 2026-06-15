@@ -17,6 +17,7 @@ import { createPaperEngine } from './engine/paper-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
 import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
+import { analyzeToken as analyzeTokenImpl } from './engine/token-analysis.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
@@ -139,6 +140,7 @@ const api = createApi({
   broadcast: (p) => broadcastRef(p),
   paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
+  analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
   discoverFromLeaders: () => discoverFromLeadersImpl({
     leaders: wallets.list().filter((w) => w.follow_enabled).map((w) => w.tracked_wallet_address),

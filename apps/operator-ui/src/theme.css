@@ -633,3 +633,9 @@ input.search.error, select.search.error { border-color: var(--c-danger); box-sha
 .token-label .token-sym { font-weight: 700; color: var(--c-text); letter-spacing: .01em; }
 .token-label .token-addr { font-size: var(--fs-xs); color: var(--c-text-faint); }
 .wname .token-label { gap: 6px; }
+
+/* ---- loading skeleton ---- */
+.skeleton-row { height: 14px; border-radius: var(--radius-sm); margin-block: 8px; background: linear-gradient(90deg, var(--c-bg-elev-2) 25%, var(--c-bg-elev-3) 50%, var(--c-bg-elev-2) 75%); background-size: 200% 100%; animation: skeleton 1.3s ease-in-out infinite; }
+.skeleton-row:nth-child(2) { width: 80%; } .skeleton-row:nth-child(3) { width: 60%; }
+@keyframes skeleton { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+:root[data-motion="off"] .skeleton-row { animation: none; }
