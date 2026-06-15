@@ -6,6 +6,7 @@ import { computeReadiness } from './readiness.mjs';
 import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
 import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
+import { mapProviderEventToRecord } from '../../../packages/storage/src/index.mjs';
 
 // ADR-0001 Phase 5B: map a DiagnosticRun readiness (valid/warning/invalid) to an operator-facing
 // summary. `safe_to_run_live` is ADVISORY ONLY — it never arms or activates live trading; it merely
@@ -21,12 +22,28 @@ function diagSummary(readiness) {
 // DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
 const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null }) {
   // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
   // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
   // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
   const HOT_CACHE_TTL = { providerHealth: 10_000, readiness: 15_000 };
   const cacheOp = async (fn) => { try { return { ok: true, value: await fn() }; } catch { return { ok: false, value: null }; } };
+
+  // ADR-0001 Phase 7B: optional append-only analytics events for NON-CRITICAL surfaces only
+  // (diagnostics + provider-health). Strictly BEST-EFFORT and FAIL-OPEN: a ClickHouse error is
+  // swallowed and NEVER changes a response, status, or trading decision. Payloads are curated summaries
+  // — never secrets / raw tx / keys / auth headers (diagnostics never touch signing material anyway).
+  const eventEnabled = !!(eventSink && eventSink.backend && eventSink.backend !== 'none' && eventSink.writer);
+  async function recordEvent(kind, fields = {}) {
+    if (!eventEnabled) return false;
+    try {
+      const r = await eventSink.writer.writeEvent(mapProviderEventToRecord({ kind, at: fields.at || new Date().toISOString(), ...fields }));
+      return !!(r && r.ok);
+    } catch { return false; } // never let analytics throw into the request path
+  }
+  const _eventThrottle = new Map(); // event_type -> last-write ms; keeps polled GETs from spamming the sink
+  const eventThrottleOk = (key, minMs = 10_000) => { const now = Date.now(); if (now - (_eventThrottle.get(key) || 0) < minMs) return false; _eventThrottle.set(key, now); return true; };
+  const providerStatuses = (snap) => Object.fromEntries(Object.entries(snap || {}).map(([k, v]) => [k, (v && v.status) || 'unknown']));
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
@@ -256,7 +273,12 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
               if (r.ok && r.value && typeof r.value === 'object') { providers = r.value; hot_state_cache.hit = true; }
             }
           }
-          return { status: 200, body: { providers, hot_state_cache } };
+          // best-effort analytics (throttled — this route is polled). Compact, no secrets.
+          let event_written = false;
+          if (eventEnabled && eventThrottleOk('provider.health')) {
+            event_written = await recordEvent('provider.health', { providers: providerStatuses(providers), degraded: hot_state_cache.degraded });
+          }
+          return { status: 200, body: { providers, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         // ADR-0001 Phase 5B/6B: read-only live-readiness rollup (connectivity + provider health). The
         // readiness is always computed LIVE; the hot-state cache is written best-effort and the prior
@@ -273,7 +295,11 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: r.readiness, checked_at: r.checked_at }, HOT_CACHE_TTL.readiness));
             if (!w.ok) hot_state_cache.degraded = true;
           }
-          return { status: 200, body: { ok: true, ...summary, readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY, hot_state_cache, cached_readiness } };
+          let event_written = false;
+          if (eventEnabled && eventThrottleOk('diagnostic.status')) { // throttled — status is polled
+            event_written = await recordEvent('diagnostic.status', { at: r.checked_at, readiness: r.readiness, overall: summary.overall, blockers: r.blockers });
+          }
+          return { status: 200, body: { ok: true, ...summary, readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY, hot_state_cache, cached_readiness, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
@@ -505,11 +531,22 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: run.readiness, checked_at: run.created_at }, HOT_CACHE_TTL.readiness));
             hot_state_cache.degraded = !w.ok;
           }
-          return { status: 200, body: { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache } };
+          // best-effort analytics: one run summary + a compact sample per quote/route check (no secrets)
+          let event_written = false;
+          if (eventEnabled) {
+            event_written = await recordEvent('diagnostic.run', { at: run.created_at, run_id: run.run_id, run_kind: run.kind, readiness: run.readiness, overall: summary.overall, checks: run.checks.map((c) => ({ name: c.name, status: c.status })) });
+            for (const c of run.checks) {
+              if (c.name === 'quote' || c.name === 'route') {
+                await recordEvent(`diagnostic.${c.name}_check`, { at: c.checked_at, status: c.status, available: c.available, out_amount: c.out_amount, error: c.error });
+              }
+            }
+          }
+          return { status: 200, body: { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         if (diagnostics && path === '/api/diagnostics/provider-test') {
           const check = await diagnostics.runProviderHealthCheck();
-          return { status: 200, body: { ok: true, check, overall: check.status, safety: DIAG_SAFETY } };
+          const event_written = await recordEvent('provider.health_check', { overall: check.status, degraded: check.degraded, providers: providerStatuses(check.providers) });
+          return { status: 200, body: { ok: true, check, overall: check.status, safety: DIAG_SAFETY, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

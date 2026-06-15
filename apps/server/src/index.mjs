@@ -28,6 +28,7 @@ import { createDiagnosticExecutionAdapter } from '../../../packages/execution/sr
 import { createMemoryHotStateStore } from '../../../packages/hot-state/src/index.mjs';
 import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
 import { createHotStateBackend } from './storage/redis-client.mjs';
+import { createEventSinkBackend } from './storage/clickhouse-client.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -193,11 +194,22 @@ try {
   hotState = createMemoryHotStateStore();
 }
 
+// ADR-0001 Phase 7A/7B: optional append-only analytics sink (ClickHouse). EVENT_SINK_BACKEND=none by
+// default. Wired ONLY to non-critical surfaces (diagnostics + provider-health), best-effort + fail-open.
+// FAIL-OPEN at boot too: a misconfigured sink disables analytics rather than blocking the server.
+let eventSink = null;
+try {
+  eventSink = await createEventSinkBackend({ env: process.env });
+} catch (e) {
+  console.warn(`event-sink: ${e?.message || e} — analytics sink disabled`);
+  eventSink = null;
+}
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
