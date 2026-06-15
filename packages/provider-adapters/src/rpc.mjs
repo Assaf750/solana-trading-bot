@@ -1,28 +1,13 @@
-// rpc-client.mjs — Solana JSON-RPC (HTTP) + wallet activity stream (WebSocket).
-// The RPC URL comes from the encrypted vault at call time and is never logged.
-//
-// Streaming strategy (auto-detected per provider):
-//  - Helius (host contains "helius"): ONE transactionSubscribe with accountInclude=[all
-//    followed wallets] and transactionDetails:full -> leader tx delivered INLINE
-//    (no per-signature getTransaction round-trip; fewer credits, lower latency).
-//  - Generic RPC: logsSubscribe per address -> signature only -> engine fetches the tx.
-//  Both paths get a 60s keepalive frame (Helius closes idle sockets after 10 min).
-
-import { createGrpcIngestor } from '../../../../services/ingestor/src/grpc-ingestor.mjs';
-import { createRpcProvider } from '../../../../packages/provider-adapters/src/index.mjs';
+// @soltrade/provider-adapters — Solana RPC provider (ADR-0001 Phase 2D).
+// Byte-for-byte port of apps/server engine/rpc-client.mjs. The gRPC ingestor factory is INJECTED
+// (grpcIngestorFactory) so the package does not import services/ingestor.
 
 /** Pure: is this a Helius endpoint (supports enhanced transactionSubscribe)? */
 export function isHeliusHost(url) {
   try { return new URL(url).hostname.toLowerCase().includes('helius'); } catch { return false; }
 }
 
-/**
- * Pure: build the subscription JSON-RPC message(s) for a wallet set.
- * Default = logsSubscribe (one per address) — universally supported on every Solana
- * RPC incl. the standard Helius endpoint / free plan, so signals actually flow.
- * Helius `transactionSubscribe` (enhanced/Atlas WS) only delivers on the dedicated
- * atlas endpoint + paid plan, so it is opt-in via `enhanced:true`, not the default.
- */
+/** Pure: build the subscription JSON-RPC message(s) for a wallet set. */
 export function buildWalletSubscriptions({ addresses, enhanced = false }) {
   if (enhanced) {
     return [{
@@ -47,7 +32,6 @@ export function parseStreamNotification(msg) {
     const sig = v?.signature || v?.transaction?.signatures?.[0];
     if (!sig) return null;
     if (v?.transaction?.meta?.err) return null;
-    // reshape to the getTransaction-style object the swap-detector expects
     const tx = v?.transaction ? { transaction: v.transaction.transaction || v.transaction, meta: v.transaction.meta || v.meta } : null;
     return { signature: sig, tx };
   }
@@ -59,25 +43,19 @@ export function parseStreamNotification(msg) {
   return null;
 }
 
-// ADR-0001 Phase 2D: RPC calls are OWNED by @soltrade/provider-adapters. The server delegates behind
-// PROVIDER_BACKEND (default=package), injecting the gRPC ingestor factory; legacy retained for rollback.
-export function createRpcClient(args) {
-  return process.env.PROVIDER_BACKEND === 'legacy'
-    ? legacyCreateRpcClient(args)
-    : createRpcProvider({ grpcIngestorFactory: createGrpcIngestor, request: (u, o) => fetch(u, o), wsFactory: (u) => new WebSocket(u), ...args });
-}
-
-function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor, health }) {
+// `request` (fetch-compatible) and `wsFactory` (url => WebSocket-like) are injected so the package
+// stays free of live network primitives (mechanism-guard pure); the server passes fetch/WebSocket.
+export function createRpcProvider({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory, health, request, wsFactory } = {}) {
   async function rpc(method, params) {
     const url = getRpcUrl();
-    if (!url) return { ok: false, error: 'rpc_url_unavailable' }; // config state (no URL), not a provider failure -> not recorded
+    if (!url) return { ok: false, error: 'rpc_url_unavailable' };
     const t0 = Date.now();
     const rec = (r) => { if (health) health.record('rpc', r.ok, Date.now() - t0, r.error); return r; };
     let attempt = 0;
     while (attempt < 3) {
       attempt += 1;
       try {
-        const res = await fetch(url, {
+        const res = await request(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -102,7 +80,6 @@ function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory
     encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0,
   }]);
 
-  /** Runtime readiness probe used when the owner enters/validates an RPC key. */
   async function testConnection() {
     const url = getRpcUrl();
     if (!url) return { ok: false, error: 'rpc_url_unavailable' };
@@ -129,15 +106,7 @@ function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory
     } catch { return null; }
   }
 
-  /**
-   * Subscribe to leader-wallet activity. onLeaderActivity({signature, tx}) fires per event
-   * (tx inline on Helius, null on generic -> engine fetches). Bounded-backoff reconnect;
-   * onGap() fires when the stream has been down longer than gapMs. 60s keepalive frame.
-   */
   function subscribeWallets({ addresses, onLeaderActivity, onUp, onGap, gapMs = 120000 }) {
-    // Prefer the Yellowstone/Geyser gRPC transport when an endpoint is configured (intra-slot
-    // streaming, reliable under load). Falls back to the universal WebSocket logsSubscribe path —
-    // identical callback contract, so the engine is unchanged either way.
     const grpc = typeof getGrpcEndpoint === 'function' ? getGrpcEndpoint() : null;
     if (grpc && grpc.endpoint) {
       return grpcIngestorFactory({
@@ -159,18 +128,15 @@ function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory
       const wsUrl = http ? wsUrlFromHttp(http) : null;
       if (!wsUrl) { scheduleReconnect(); return; }
       const helius = isHeliusHost(http);
-      try { ws = new WebSocket(wsUrl); } catch { scheduleReconnect(); return; }
+      try { ws = wsFactory(wsUrl); } catch { scheduleReconnect(); return; }
 
       ws.onopen = () => {
         backoff = 1000;
         downSince = null;
         if (gapTimer) { clearTimeout(gapTimer); gapTimer = null; }
-        // logsSubscribe by default (reliable on every plan); transactionSubscribe is
-        // opt-in only and requires Helius' paid Atlas endpoint.
         for (const sub of buildWalletSubscriptions({ addresses, enhanced: false })) {
           try { ws.send(JSON.stringify(sub)); } catch { /* will reconnect */ }
         }
-        // keepalive: a lightweight frame every 60s (Helius idle close at 10 min)
         keepAlive = setInterval(() => {
           try { ws.send(JSON.stringify({ jsonrpc: '2.0', id: 'keepalive', method: 'getHealth' })); }
           catch { /* socket gone; onclose handles it */ }

@@ -1,22 +1,13 @@
-// provider-health.mjs — in-memory rolling health of the external providers the money path
-// depends on (Jupiter quotes, the RPC). A trading bot's biggest silent operational risk is a
-// provider quietly failing — quotes 429ing, RPC erroring — so we measure REAL call outcomes
-// (success/error + latency) over a sliding window and expose an honest status. No persistence:
-// this is live operational health that should reset on restart, never a stored "estimate".
+// @soltrade/provider-adapters — provider-health monitor (ADR-0001 Phase 2D).
+// Byte-for-byte port of apps/server engine/provider-health.mjs. In-memory rolling health over a
+// sliding window; no persistence (live operational health, resets on restart).
 
-const WINDOW = 120;       // outcomes kept per provider
-const DEGRADED_PCT = 10;  // error rate >= 10% over the window -> degraded
-const DOWN_PCT = 50;      // error rate >= 50% -> down
+const WINDOW = 120;
+const DEGRADED_PCT = 10;
+const DOWN_PCT = 50;
 
-import { createProviderHealthMonitor } from '../../../../packages/provider-adapters/src/index.mjs';
-
-// ADR-0001 Phase 2D: delegated to @soltrade/provider-adapters behind PROVIDER_BACKEND (legacy retained).
-export function createProviderHealth(args = {}) {
-  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyCreateProviderHealth(args) : createProviderHealthMonitor(args);
-}
-
-function legacyCreateProviderHealth({ window = WINDOW, now = () => Date.now() } = {}) {
-  const providers = new Map(); // name -> { outcomes: [{ok, ms, error, ts}], lastError, lastErrorTs }
+export function createProviderHealthMonitor({ window = WINDOW, now = () => Date.now() } = {}) {
+  const providers = new Map();
 
   function record(provider, ok, ms, error) {
     if (!provider) return;

@@ -23,6 +23,7 @@ import { analyzeToken as analyzeTokenImpl } from './engine/token-analysis.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
+import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -88,7 +89,26 @@ const hotSigner = process.env.HOT_EXECUTOR_BIN
 // Jito bundle sender — POSTs to the configured block-engine URL (vault ref). Only invoked when
 // execution.submit_backend='jito' AND the URL is set; the live-executor falls back to RPC on any
 // failure. The URL is resolved from the vault at call time and never logged.
+// Jito bundle sender + tip floor — OWNED by @soltrade/provider-adapters (ADR-0001 Phase 2D). The
+// server delegates behind PROVIDER_BACKEND (default=package); the URL is resolved from the vault at
+// call time (never logged) and injected via getBundleUrl. The legacy in-process glue is retained.
+const jitoProvider = createJitoProvider({
+  request: (u, o) => fetch(u, o),
+  getBundleUrl: () => {
+    const ref = config.get().providers?.jito_url_ref;
+    if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
+    const r = vault.getSecretForUse(ref.slice(6));
+    if (!r.ok) return { ok: false, error: 'jito_url_unavailable' };
+    return { ok: true, url: r.value };
+  },
+});
 async function jitoSendBundle(txsBase64) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyJitoSendBundle(txsBase64) : jitoProvider.sendBundle(txsBase64);
+}
+async function getJitoTipFloor() {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyGetJitoTipFloor() : jitoProvider.getTipFloor();
+}
+async function legacyJitoSendBundle(txsBase64) {
   const ref = config.get().providers?.jito_url_ref;
   if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
   const r = vault.getSecretForUse(ref.slice(6));
@@ -112,7 +132,7 @@ async function jitoSendBundle(txsBase64) {
 }
 // Live Jito tip floor (dynamic-tip mode). Public endpoint; best-effort with a short timeout —
 // any failure makes resolveTipLamports fall back to the fixed jito_tip_lamports.
-async function getJitoTipFloor() {
+async function legacyGetJitoTipFloor() {
   try {
     const res = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;

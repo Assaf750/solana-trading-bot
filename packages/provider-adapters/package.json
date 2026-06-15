@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/provider-adapters",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unified external-provider adapters (ADR-0001 Phase 2D): Jupiter quotes/routes, Solana RPC read/send/simulate, Jito tip/bundle, Helius DAS metadata, provider-health normalization. Byte-for-byte port of the engine clients; cross-boundary deps (grpc ingestor factory, b58decode, mints, urls) are injected so the package imports neither apps nor services.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}

@@ -2,6 +2,17 @@
 // (owner -> Jito tip account), used as the tip leg of a Jito bundle. Returns an UNSIGNED base64
 // tx ready for the fee-payer-locked signer (owner is account 0 = fee payer). No network.
 import { b58decode } from './base58.mjs';
+import { makeTipTransferBuilder, selectTipLamports as pkgSelectTipLamports } from '../../../../packages/provider-adapters/src/index.mjs';
+
+// ADR-0001 Phase 2D: Jito tip/bundle helpers are OWNED by @soltrade/provider-adapters. The server
+// delegates behind PROVIDER_BACKEND (default=package); the legacy in-process helpers are retained.
+const pkgBuildTipTransferTx = makeTipTransferBuilder(b58decode);
+export function buildTipTransferTx(args) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyBuildTipTransferTx(args) : pkgBuildTipTransferTx(args);
+}
+export function selectTipLamports(args) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacySelectTipLamports(args) : pkgSelectTipLamports(args);
+}
 
 const SYSTEM_PROGRAM = Buffer.alloc(32); // "111…1" = 32 zero bytes
 
@@ -19,7 +30,7 @@ function shortvec(n) {
 }
 
 /** Build an unsigned legacy transfer tx: owner pays `lamports` to `tipAccount`. */
-export function buildTipTransferTx({ owner, tipAccount, lamports, recentBlockhash }) {
+function legacyBuildTipTransferTx({ owner, tipAccount, lamports, recentBlockhash }) {
   const ownerKey = Buffer.from(b58decode(owner));
   const tipKey = Buffer.from(b58decode(tipAccount));
   const blockhash = Buffer.from(b58decode(recentBlockhash));
@@ -61,7 +72,7 @@ export function buildTipTransferTx({ owner, tipAccount, lamports, recentBlockhas
  * landed_tips_50th_percentile). Falls back to `fixedLamports` when the floor/percentile is
  * unavailable, and clamps to `maxLamports` when set. Pure — no network.
  */
-export function selectTipLamports({ floor, percentile = 50, fixedLamports = 10000, maxLamports = null }) {
+function legacySelectTipLamports({ floor, percentile = 50, fixedLamports = 10000, maxLamports = null }) {
   const fixed = Number.isFinite(fixedLamports) && fixedLamports > 0 ? Math.floor(fixedLamports) : 10000;
   // Ceiling = the explicit cap, else the fixed value. This keeps the selected tip <= what the
   // balance check reserves (maxTipReserveLamports mirrors this). Raise jito_tip_max_lamports to

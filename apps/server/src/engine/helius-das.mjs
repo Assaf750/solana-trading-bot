@@ -2,7 +2,14 @@
 // token display metadata (name/symbol/logo) for mints the Jupiter token list doesn't cover yet
 // (e.g. brand-new pump.fun launches). Helius-only: on a non-Helius RPC the method errors and
 // every call returns null, so callers degrade to the short mint. Never on the trading path.
-export function createDas({ rpc }) {
+import { createHeliusProvider } from '../../../../packages/provider-adapters/src/index.mjs';
+
+// ADR-0001 Phase 2D: delegated to @soltrade/provider-adapters behind PROVIDER_BACKEND (legacy retained).
+export function createDas(args) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyCreateDas(args) : createHeliusProvider(args);
+}
+
+function legacyCreateDas({ rpc }) {
   async function getAssetMeta(mint) {
     if (!rpc || typeof rpc.rpc !== 'function' || !mint) return null;
     const r = await rpc.rpc('getAsset', { id: mint }); // DAS params are an object, not an array
