@@ -184,7 +184,7 @@ export default function TradingWorkspace() {
             {events.length === 0 ? <EmptyState message={ar ? 'لا أحداث بعد' : 'No events yet'} /> : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 300, overflow: 'auto' }}>
                 {events.slice(0, 40).map((e, i) => (
-                  <li key={i} style={{ padding: '5px 0', borderBottom: '1px solid var(--c-border)', display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                  <li key={`${e.ts || ''}|${e.kind || ''}|${e.mint || ''}|${i}`} style={{ padding: '5px 0', borderBottom: '1px solid var(--c-border)', display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
                     <span className="mono faint" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{(e.ts || '').slice(11, 19)}</span>
                     <Badge tone={e.kind?.includes('rejected') || e.kind?.includes('gap') || e.kind?.includes('refused') ? 'danger' : e.kind?.includes('exit') ? 'warn' : e.kind?.includes('entry') ? 'ok' : 'info'}>{e.kind}</Badge>
                     {e.mint && <span className="mono" dir="ltr" style={{ fontSize: 'var(--fs-xs)' }}>{shortMint(e.mint)}</span>}
@@ -349,6 +349,7 @@ function PositionActions({ ar, position, onDone }) {
           <div className="row" style={{ flexWrap: 'wrap', gap: 'var(--s-2)' }}>
             <button className="btn" onClick={() => sell(0.25)} disabled={busy}>{ar ? 'بيع 25%' : 'Sell 25%'}</button>
             <button className="btn" onClick={() => sell(0.5)} disabled={busy}>{ar ? 'بيع 50%' : 'Sell 50%'}</button>
+            <button className="btn" onClick={() => sell(0.75)} disabled={busy}>{ar ? 'بيع 75%' : 'Sell 75%'}</button>
             <button className="btn danger" onClick={close} disabled={busy}>{ar ? 'إغلاق كامل' : 'Close 100%'}</button>
           </div>
           <span className="muted fs-xs">{ar ? 'بيع يدوي جزئي/كامل مستقل عن TP/SL/القائد' : 'manual partial/full sell, independent of TP/SL/leader'}</span>
@@ -385,6 +386,12 @@ function ManualTradePanel({ ar, live, onDone }) {
         <button className={`btn ${live ? 'danger' : 'primary'}`} onClick={buy} disabled={!valid || busy}>
           {live ? (ar ? '🔴 شراء حقيقي' : '🔴 Buy LIVE') : (ar ? 'شراء (ورقي)' : 'Buy (paper)')}
         </button>
+      </div>
+      <div className="row" style={{ gap: 4, marginBlockStart: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <span className="muted fs-xs">{ar ? 'حجم سريع:' : 'quick size:'}</span>
+        {[25, 50, 100, 250].map((v) => (
+          <button key={v} type="button" className={`btn sm toggle ${Number(size) === v ? 'on' : ''}`} onClick={() => setSize(String(v))}>${v}</button>
+        ))}
       </div>
       {mintOk && <div style={{ marginBlockStart: 8 }}><TokenLabel mint={mint.trim()} /></div>}
       {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
