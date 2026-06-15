@@ -109,7 +109,7 @@ export default function SettingsSafety() {
         token_blacklist: (d.lists?.token_blacklist || []).join('\n'),
         token_whitelist: (d.lists?.token_whitelist || []).join('\n'),
       });
-      setMarket({ min_fdv_usd: g(d.market_filters, 'min_fdv_usd'), max_fdv_usd: g(d.market_filters, 'max_fdv_usd') });
+      setMarket({ min_fdv_usd: g(d.market_filters, 'min_fdv_usd'), max_fdv_usd: g(d.market_filters, 'max_fdv_usd'), min_holders: g(d.market_filters, 'min_holders') });
       setActivePreset(null);
     }
   }
@@ -174,6 +174,7 @@ export default function SettingsSafety() {
       market_filters: {
         min_fdv_usd: numOrNull(market.min_fdv_usd),
         max_fdv_usd: numOrNull(market.max_fdv_usd),
+        min_holders: numOrNull(market.min_holders),
       },
     };
     const r = await api.updateConfig(patch);
@@ -430,9 +431,13 @@ export default function SettingsSafety() {
                 <span className="muted fs-xs">{ar ? 'أقصى FDV ($)' : 'Max FDV ($)'}</span>
                 <input className="search" type="number" inputMode="decimal" step="any" dir="ltr" placeholder={ar ? 'مثال 5000000' : 'e.g. 5000000'} value={market.max_fdv_usd ?? ''} onChange={(e) => setMarket({ ...market, max_fdv_usd: e.target.value })} />
               </label>
+              <label className="stack" style={{ gap: 4 }}>
+                <span className="muted fs-xs">{ar ? 'أدنى عدد حائزين (Helius)' : 'Min holders (Helius)'}</span>
+                <input className="search" type="number" inputMode="decimal" dir="ltr" placeholder={ar ? 'مثال 50' : 'e.g. 50'} value={market.min_holders ?? ''} onChange={(e) => setMarket({ ...market, min_holders: e.target.value })} />
+              </label>
             </div>
             <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>
-              {ar ? 'يرفض الدخول إذا خرج FDV عن النطاق — لتفادي العملات الصغيرة جداً أو المتأخّرة جداً.' : 'Rejects entry when FDV falls outside the band — avoid too-tiny or too-late tokens.'}
+              {ar ? 'يرفض الدخول إذا خرج FDV عن النطاق أو قلّ عدد الحائزين عن الحد — لتفادي العملات الصغيرة/المركّزة. عدد الحائزين يحتاج Helius (يتخطّى بأمان على غيره).' : 'Rejects entry when FDV is outside the band or holders are below the floor — avoid tiny/concentrated tokens. Min-holders needs Helius (skips safely otherwise).'}
             </p>
           </Card>
         </>
