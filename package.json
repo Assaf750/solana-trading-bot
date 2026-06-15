@@ -9,6 +9,11 @@
   ],
   "scripts": {
     "test": "node --test",
-    "check:all": "node --test"
+    "check:all": "node --test",
+    "db:postgres:migrate": "node scripts/postgres-migrate.mjs",
+    "smoke:postgres": "node scripts/smoke-postgres-storage.mjs"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
   }
 }

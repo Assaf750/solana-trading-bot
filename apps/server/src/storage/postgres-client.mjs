@@ -10,7 +10,7 @@ export function parseStorageBackendConfig(env = {}) {
   }
   if (raw === 'json') return { ok: true, backend: 'json', pg: null };
 
-  const url = env.DATABASE_URL || env.PG_URL || null;
+  const url = env.DATABASE_URL || env.POSTGRES_URL || env.PG_URL || null;
   const host = env.PGHOST || env.PG_HOST || null;
   if (!url && !host) {
     return { ok: false, backend: 'postgres', error: 'postgres_config_missing: set DATABASE_URL (or PGHOST/PGUSER/PGDATABASE)' };

@@ -41,6 +41,14 @@ test('config: postgres with DATABASE_URL => ok; without config => clear failure'
   assert.match(missing.error, /postgres_config_missing/);
 });
 
+test('config: POSTGRES_URL is accepted as an alias; PG* host vars also work', () => {
+  assert.deepEqual(parseStorageBackendConfig({ STORAGE_BACKEND: 'postgres', POSTGRES_URL: 'postgres://u@h/db' }).pg, { connectionString: 'postgres://u@h/db' });
+  const byHost = parseStorageBackendConfig({ STORAGE_BACKEND: 'postgres', PGHOST: 'h', PGUSER: 'u', PGDATABASE: 'db', PGPORT: '5433' });
+  assert.equal(byHost.ok, true);
+  assert.equal(byHost.pg.host, 'h');
+  assert.equal(byHost.pg.port, 5433);
+});
+
 test('config: invalid backend => clear failure', () => {
   const r = parseStorageBackendConfig({ STORAGE_BACKEND: 'mongo' });
   assert.equal(r.ok, false);
