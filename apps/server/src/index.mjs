@@ -24,6 +24,7 @@ import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } 
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
 import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
+import { createStorageBackend, createDecisionLedgerStore } from './storage/storage-backend.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -142,9 +143,14 @@ async function legacyGetJitoTipFloor() {
     return null;
   }
 }
+// ADR-0001 Phase 4B.1: pick the decision-ledger store from STORAGE_BACKEND (json default; postgres
+// loads pg and uses it as the durable source of truth). Fail-clear at boot on bad/missing config.
+const storageBackend = await createStorageBackend({ env: process.env });
+const decisionLedgerStore = await createDecisionLedgerStore(storageBackend);
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,
   audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle, getJitoTipFloor,
+  decisionLedgerStore,
 });
 
 const ordersStore = createOrdersStore();

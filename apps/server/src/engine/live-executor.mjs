@@ -13,7 +13,7 @@ const INTENTS_FILE = 'intent-ledger.json';
 const SOL_RESERVE_LAMPORTS = 0.05 * 1e9; // never spend the fee/rent reserve
 const SIGNER_SECRET_NAME = 'signer_keypair';
 
-export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null, jitoSendBundle = null, getJitoTipFloor = null }) {
+export function createLiveExecutor({ config, vault, signer, killSwitch, operatingState, rpc, jupiter, audit, broadcast, hotSigner = null, jitoSendBundle = null, getJitoTipFloor = null, decisionLedgerStore = null }) {
   let solPriceCache = { usd: null, at: 0 };
 
   // Resolve the Jito tip in lamports: dynamic reads the live tip floor (with a fixed fallback),
@@ -84,8 +84,11 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
         .map(([intent_id, v]) => ({ intent_id, status: v.status, signature: v.signature, detail: v.detail || {} }));
     },
   };
+  // ADR-0001 Phase 4B.1: the ledger store is injected by the host (STORAGE_BACKEND=postgres provides a
+  // Postgres-backed store; default = the JSON store, unchanged). decision-ledger logic is identical
+  // either way (the store is just read/write).
   const packageLedger = createDecisionLedger({
-    store: createJsonIntentStore({ file: INTENTS_FILE, readJson, writeJson, fallback: { intents: {} } }),
+    store: decisionLedgerStore || createJsonIntentStore({ file: INTENTS_FILE, readJson, writeJson, fallback: { intents: {} } }),
     now: nowIso,
     retryableStatuses: RETRYABLE_STATUSES,
     intentIdFor: sha256IntentId,
