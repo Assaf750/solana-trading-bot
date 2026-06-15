@@ -139,10 +139,10 @@ export async function analyzeToken({ mint, rpc, jupiter, das = null, tokenMeta =
   if (tokenMeta && typeof tokenMeta.resolve === 'function') {
     const m = await tokenMeta.resolve([mint]).catch(() => ({}));
     const dm = m?.[mint];
-    if (dm) { name = dm.name; symbol = dm.symbol; icon = dm.icon; sources.add('jupiter+das:metadata'); }
+    if (dm) { name = dm.name || null; symbol = dm.symbol || null; icon = dm.icon || null; if (name || symbol) sources.add('jupiter+das:metadata'); }
   } else if (das && typeof das.getAssetMeta === 'function') {
     const dm = await das.getAssetMeta(mint).catch(() => null);
-    if (dm) { name = dm.name; symbol = dm.symbol; icon = dm.icon; sources.add('helius:das'); }
+    if (dm) { name = dm.name || null; symbol = dm.symbol || null; icon = dm.icon || null; if (name || symbol) sources.add('helius:das'); }
   }
   if (!symbol) missing_data.push('token_metadata');
 
