@@ -298,22 +298,13 @@ export function NotExecutableModal({ open, title, onClose, body }) {
   );
 }
 
-// ---------- Deterministic series (seeded — stable per token, no real history) ----------
-// Used to render illustrative sparklines/mini-charts. NOT real price history; purely a
-// visual trend hint derived from a stable seed so the same token always draws the same line.
-export function genSeries(seed, n = 24, bias = 0) {
-  let h = 2166136261;
-  const s = String(seed);
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
-  let state = (h >>> 0) || 1;
-  const rnd = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+// ---------- numeric-series guard: keep only finite numbers ----------
+// Charts render REAL data only. There is no synthetic/seeded fallback — a series with
+// fewer than 2 finite points draws an honest empty/baseline state, never a fabricated curve.
+function finiteSeries(data) {
+  if (!Array.isArray(data)) return [];
   const out = [];
-  let v = 40 + rnd() * 25;
-  for (let i = 0; i < n; i++) {
-    v += (rnd() - 0.5) * 14 + bias;
-    v = Math.max(4, Math.min(96, v));
-    out.push(v);
-  }
+  for (const v of data) { const n = Number(v); if (Number.isFinite(n)) out.push(n); }
   return out;
 }
 
@@ -336,13 +327,22 @@ function buildPath(pts, width, height, pad) {
 // pos/neg/muted map to a CSS class; anything else (undefined) uses the default brand tone.
 const toneClass = (t) => (t === 'pos' || t === 'neg' || t === 'muted' ? t : '');
 
-// ---------- Sparkline (inline SVG trend) ----------
-export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0, points = 24 }) {
-  const { line, area, last } = useMemo(() => {
-    const pts = (data && data.length) ? data : genSeries(seed ?? 'spark', points, bias);
-    return buildPath(pts, width, height, 1.5);
-  }, [data, seed, bias, points, width, height]);
+// ---------- Sparkline (inline SVG trend — REAL data only) ----------
+// With <2 finite points it draws a flat muted baseline (an honest "no trend yet"
+// marker), never a fabricated curve. No seed/synthetic fallback.
+export function Sparkline({ data, tone, width = 64, height = 20 }) {
+  const series = useMemo(() => finiteSeries(data), [data]);
   const cls = toneClass(tone);
+  if (series.length < 2) {
+    return (
+      <span className="spark spark-empty" aria-hidden title="no trend data yet">
+        <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
+          <line className="spark-baseline" x1="0" y1={height / 2} x2={width} y2={height / 2} />
+        </svg>
+      </span>
+    );
+  }
+  const { line, area, last } = buildPath(series, width, height, 1.5);
   return (
     <span className={`spark ${cls}`} aria-hidden>
       <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
@@ -354,16 +354,23 @@ export function Sparkline({ data, tone, width = 64, height = 20, seed, bias = 0,
   );
 }
 
-// ---------- MiniChart (area chart for detail panels) ----------
-export function MiniChart({ data, tone, seed, bias = 0, height = 60, points = 40, label }) {
+// ---------- MiniChart (area chart for detail panels — REAL data only) ----------
+// With <2 finite points it shows an honest empty placeholder instead of a synthetic area.
+export function MiniChart({ data, tone, height = 60, label, emptyLabel }) {
   const rawId = useId();
   const gid = 'mc' + rawId.replace(/[^a-zA-Z0-9]/g, '');
   const width = 260;
-  const { line, area, last } = useMemo(() => {
-    const pts = (data && data.length) ? data : genSeries(seed ?? 'mc', points, bias);
-    return buildPath(pts, width, height, 4);
-  }, [data, seed, bias, points, height]);
+  const series = useMemo(() => finiteSeries(data), [data]);
   const cls = toneClass(tone);
+  if (series.length < 2) {
+    return (
+      <div className="minichart minichart-empty" style={{ minBlockSize: height }}>
+        {label && <div className="minichart-label">{label}</div>}
+        <div className="minichart-empty-body" style={{ blockSize: height }}>{emptyLabel || 'no data yet'}</div>
+      </div>
+    );
+  }
+  const { line, area, last } = buildPath(series, width, height, 4);
   return (
     <div className={`minichart ${cls}`}>
       {label && <div className="minichart-label">{label}</div>}
@@ -379,6 +386,23 @@ export function MiniChart({ data, tone, seed, bias = 0, height = 60, points = 40
         <circle className="mc-dot" cx={last[0].toFixed(1)} cy={last[1].toFixed(1)} r="2.4" />
       </svg>
     </div>
+  );
+}
+
+// ---------- MetricBar (honest horizontal ratio bar for a single REAL value) ----------
+// Replaces fabricated trend sparklines for scalar metrics (e.g. win rate). Renders a
+// dash when the value is missing — never invents a shape.
+export function MetricBar({ value, max = 1, tone, width = 60, label }) {
+  const v = Number(value);
+  const cls = toneClass(tone);
+  if (!Number.isFinite(v) || !(max > 0)) {
+    return <span className="metricbar metricbar-empty" style={{ width }} aria-hidden title="no data">—</span>;
+  }
+  const pct = Math.max(0, Math.min(1, v / max)) * 100;
+  return (
+    <span className={`metricbar ${cls}`} style={{ width }} role="img" aria-label={label || `${pct.toFixed(0)}%`} title={label || `${pct.toFixed(0)}%`}>
+      <span className="metricbar-fill" style={{ width: `${pct}%` }} />
+    </span>
   );
 }
 

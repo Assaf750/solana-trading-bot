@@ -122,7 +122,6 @@ export default function CommandCenter() {
         <div className="stattile">
           <span className="lbl">{ar ? 'محقّق اليوم' : 'Realized today'}</span>
           <FlashValue className={`val ${(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.daily_realized_pnl_usd ?? 0)} format={usd} />
-          <Sparkline seed="realized-today" tone={(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'} bias={(summary?.daily_realized_pnl_usd ?? 0) >= 0 ? 1 : -1} width={130} height={26} points={32} />
         </div>
         <div className="stattile"><span className="lbl">{ar ? 'مفتوح' : 'Open'}</span><span className="val">{open.length}</span><span className="sub">{ar ? 'إجمالي محقّق' : 'total realized'}: {usd(summary?.realized_pnl_usd)}</span></div>
         <div className="stattile"><span className="lbl">{ar ? 'الخزنة' : 'Vault'}</span><span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={vault.vault_unlocked ? 'ok' : vault.vault_exists ? 'warn' : 'danger'}>{vault.vault_unlocked ? (ar ? 'مفتوحة' : 'unlocked') : vault.vault_exists ? (ar ? 'مقفلة' : 'locked') : (ar ? 'غير منشأة' : 'none')}</Badge></span><span className="sub">signer: {signer.signer_status}</span></div>
@@ -200,7 +199,7 @@ export default function CommandCenter() {
                     <li key={p.position_id} className="list-row">
                       <TokenLabel mint={p.token_mint} className="fs-sm" />
                       <span className="row" style={{ gap: 8 }}>
-                        <Sparkline data={p.mark_history} seed={p.token_mint} tone={pnlPct == null ? 'muted' : pnlPct >= 0 ? 'pos' : 'neg'} width={48} height={16} />
+                        <Sparkline data={p.mark_history} tone={pnlPct == null ? 'muted' : pnlPct >= 0 ? 'pos' : 'neg'} width={48} height={16} />
                         <span className="mono fs-sm" style={{ color: pnlPct == null ? 'var(--c-text-faint)' : pnlPct >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{pnlPct == null ? '—' : `${pnlPct >= 0 ? '+' : ''}${pnlPct.toFixed(1)}%`}</span>
                       </span>
                     </li>

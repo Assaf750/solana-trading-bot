@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, MetricBar } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 import { shortMint as short } from '../format.js';
@@ -222,7 +222,7 @@ export default function WalletIntelligence() {
                   onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedId(w.wallet_id); } }}>
                   <span className="wname"><span className="lab">{w.label || short(w.tracked_wallet_address)}</span><span className="addr" dir="ltr">{short(w.tracked_wallet_address)}</span></span>
                   <span className="trend-cell">
-                    <Sparkline seed={w.tracked_wallet_address} tone={s && s.win_rate != null ? (s.win_rate >= 0.5 ? 'pos' : 'neg') : 'muted'} bias={s && s.win_rate != null ? (s.win_rate >= 0.5 ? 1 : -1) : 0} width={60} height={20} />
+                    <MetricBar value={s ? s.win_rate : null} tone={s && s.win_rate != null ? (s.win_rate >= 0.5 ? 'pos' : 'neg') : 'muted'} width={60} label={s && s.win_rate != null ? `${ar ? 'نسبة الفوز' : 'win rate'} ${(s.win_rate * 100).toFixed(0)}%` : undefined} />
                   </span>
                   <span><Badge tone={w.copy_mode === 'full_mirror' ? 'warn' : 'info'}>{w.copy_mode === 'full_mirror' ? 'mirror' : 'follow'}</Badge></span>
                   <span className="num" style={{ color: s && s.win_rate != null ? (s.win_rate >= 0.5 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? (s.win_rate != null ? `${(s.win_rate * 100).toFixed(0)}%` : '—') : '·'}</span>

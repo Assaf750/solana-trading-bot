@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, MiniChart, FlashValue } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, SimulatedBadge, Sparkline, MiniChart, MetricBar, FlashValue } from '../components/index.jsx';
 import TokenLabel from '../components/TokenLabel.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
@@ -110,7 +110,7 @@ export default function AnalyticsReports() {
         <div className="stattile">
           <span className="lbl">{ar ? 'محقّق' : 'Realized'} {!live && <SimulatedBadge />}</span>
           <FlashValue className={`val ${(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.realized_pnl_usd ?? 0)} format={usd} />
-          <Sparkline data={equity.length > 1 ? equity : undefined} seed="analytics-realized" tone={(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'} bias={(summary?.realized_pnl_usd ?? 0) >= 0 ? 1 : -1} width={130} height={24} points={32} />
+          <Sparkline data={equity} tone={(summary?.realized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'} width={130} height={24} />
         </div>
         <div className="stattile"><span className="lbl">{ar ? 'غير محقّق' : 'Unrealized'} {!live && <SimulatedBadge />}</span><FlashValue className={`val ${(summary?.unrealized_pnl_usd ?? 0) >= 0 ? 'pos' : 'neg'}`} value={Number(summary?.unrealized_pnl_usd ?? 0)} format={usd} /></div>
         <div className="stattile"><span className="lbl">{ar ? 'نسبة الفوز' : 'Win rate'}</span><span className={`val ${winRate == null ? '' : winRate >= 0.5 ? 'pos' : 'neg'}`}>{winRate == null ? '—' : `${(winRate * 100).toFixed(0)}%`}</span><span className="sub">{winsN}/{realizedVals.length} {ar ? 'مغلق' : 'closed'}</span></div>
@@ -129,7 +129,7 @@ export default function AnalyticsReports() {
         right={<span className="muted fs-xs">{closedR.length} {ar ? 'مركز مغلق' : 'closed positions'}</span>}>
         {equity.length <= 1
           ? <EmptyState message={ar ? 'لا مراكز مغلقة بعد — يُبنى المنحنى من الأرباح المحقّقة الفعلية' : 'No closed positions yet — the curve builds from real realized P&L'} />
-          : <MiniChart data={equity} tone={equity[equity.length - 1] >= 0 ? 'pos' : 'neg'} height={120} label={ar ? `محقّق تراكمي · ${closedR.length} مركز` : `cumulative realized · ${closedR.length} positions`} />}
+          : <MiniChart data={equity} tone={equity[equity.length - 1] >= 0 ? 'pos' : 'neg'} height={120} label={ar ? `محقّق تراكمي · ${closedR.length} مركز` : `cumulative realized · ${closedR.length} positions`} emptyLabel={ar ? 'لا بيانات بعد' : 'no data yet'} />}
       </Card>
 
       <div className="workspace">
@@ -139,18 +139,21 @@ export default function AnalyticsReports() {
           ) : (
             <div className="table-wrap">
               <table className="data">
-                <thead><tr><th className="nosort">token</th><th className="nosort trend-col">{ar ? 'الاتجاه' : 'trend'}</th><th className="nosort num">{ar ? 'صفقات' : 'trades'}</th><th className="nosort num">{ar ? 'شراء' : 'buys'}</th><th className="nosort num">{ar ? 'بيع' : 'sells'}</th><th className="nosort num">net</th></tr></thead>
+                <thead><tr><th className="nosort">token</th><th className="nosort trend-col">{ar ? 'شراء/بيع' : 'buy share'}</th><th className="nosort num">{ar ? 'صفقات' : 'trades'}</th><th className="nosort num">{ar ? 'شراء' : 'buys'}</th><th className="nosort num">{ar ? 'بيع' : 'sells'}</th><th className="nosort num">net</th></tr></thead>
                 <tbody>
-                  {byToken.map((e) => (
+                  {byToken.map((e) => {
+                    const flow = e.buys + e.sells;
+                    const buyShare = flow > 0 ? e.buys / flow : null;
+                    return (
                     <tr key={e.mint}>
                       <td><TokenLabel mint={e.mint} /></td>
-                      <td className="trend-col"><Sparkline seed={e.mint} tone={e.net >= 0 ? 'pos' : 'neg'} bias={e.net >= 0 ? 1 : -1} width={62} height={20} /></td>
+                      <td className="trend-col"><MetricBar value={buyShare} tone="muted" width={62} label={buyShare == null ? undefined : `${ar ? 'حصة الشراء' : 'buy share'} ${(buyShare * 100).toFixed(0)}%`} /></td>
                       <td className="num mono">{e.count}</td>
                       <td className="num mono">{usd(e.buys)}</td>
                       <td className="num mono">{usd(e.sells)}</td>
                       <td className="num mono" style={{ color: e.net >= 0 ? 'var(--c-ok)' : 'var(--c-danger)' }}>{e.net >= 0 ? '+' : ''}{usd(e.net)}</td>
                     </tr>
-                  ))}
+                  ); })}
                 </tbody>
               </table>
             </div>

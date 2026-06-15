@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
-import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
+import { Card, Badge, DangerNote, EmptyState, MetricBar } from '../components/index.jsx';
 import { api } from '../api/client.js';
 import { useBackend } from '../api/useBackend.jsx';
 import { shortMint as short } from '../format.js';
@@ -192,7 +192,7 @@ export default function NewCoinRadar() {
                     <th className="nosort num">win%</th>
                     <th className="nosort num">PnL ◎</th>
                     <th className="nosort num">{ar ? 'صفقات' : 'trades'}</th>
-                    <th className="nosort">{ar ? 'الاتجاه' : 'trend'}</th>
+                    <th className="nosort">{ar ? 'مقياس الفوز' : 'win gauge'}</th>
                     <th className="nosort"></th>
                   </tr></thead>
                   <tbody>
@@ -218,7 +218,7 @@ export default function NewCoinRadar() {
                           <td className="num mono" style={{ color: s ? ((s.realized_pnl_sol || 0) >= 0 ? 'var(--c-ok)' : 'var(--c-danger)') : 'var(--c-text-faint)' }}>{s ? `${s.realized_pnl_sol > 0 ? '+' : ''}${s.realized_pnl_sol}` : '—'}</td>
                           <td className="num mono faint">{s ? s.trades_closed : '—'}</td>
                           <td>{s && s.win_rate != null
-                            ? <Sparkline seed={tr.address} tone={s.win_rate >= 0.5 ? 'pos' : 'neg'} bias={s.win_rate >= 0.5 ? 1 : -1} width={52} height={16} />
+                            ? <MetricBar value={s.win_rate} tone={s.win_rate >= 0.5 ? 'pos' : 'neg'} width={52} label={`${ar ? 'نسبة الفوز' : 'win rate'} ${(s.win_rate * 100).toFixed(0)}%`} />
                             : <span className="faint">—</span>}</td>
                           <td>
                             <span className="row" style={{ gap: 4, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
