@@ -12,6 +12,7 @@ import CommandCenter from './pages/CommandCenter.jsx';
 import TradingWorkspace from './pages/TradingWorkspace.jsx';
 import NewCoinRadar from './pages/NewCoinRadar.jsx';
 import TokenAnalysis from './pages/TokenAnalysis.jsx';
+import RiskCenter from './pages/RiskCenter.jsx';
 import WalletIntelligence from './pages/WalletIntelligence.jsx';
 import AnalyticsReports from './pages/AnalyticsReports.jsx';
 import MyWalletsFunds from './pages/MyWalletsFunds.jsx';
@@ -38,6 +39,7 @@ const NAV = [
   { to: '/workspace', key: 'workspace', ico: '▤' },
   { sec: { en: 'Reports & alerts', ar: 'التقارير والتنبيهات' } },
   { to: '/analytics', key: 'analytics', ico: '▦' },
+  { to: '/risk', key: 'risk', ico: '⚠' },
   { to: '/alerts', key: 'alerts', ico: '⚑' },
   { sec: { en: 'Setup & system', ar: 'الإعداد والنظام' } },
   { to: '/setup', key: 'setup', ico: '✦' },
@@ -202,6 +204,7 @@ export default function App() {
             <Route path="/tokens" element={<TokenAnalysis />} />
             <Route path="/wallets" element={<WalletIntelligence />} />
             <Route path="/analytics" element={<AnalyticsReports />} />
+            <Route path="/risk" element={<RiskCenter />} />
             <Route path="/funds" element={<MyWalletsFunds />} />
             <Route path="/settings" element={<SettingsSafety />} />
             <Route path="/alerts" element={<Alerts />} />

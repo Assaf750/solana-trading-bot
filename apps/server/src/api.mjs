@@ -4,6 +4,7 @@
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
 import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
+import { assessRisk } from './engine/risk-center.mjs';
 
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
@@ -217,6 +218,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
+        if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
           const limit = Number(qs.get('limit')) || 50;

@@ -112,10 +112,76 @@ export default function Alerts() {
         </p>
       </Card>
 
+      <AlertFeed ar={ar} />
+
       <Card title={ar ? 'سجل أحداث النظام (Audit)' : 'System events (Audit)'}>
         <AuditTail ar={ar} />
       </Card>
     </div>
+  );
+}
+
+// Alert Center: a unified, filterable feed merging live risk findings + recent engine events.
+const EV_SEV = (e) => {
+  const k = e.kind || '';
+  if (/daily_loss|refused|kill|stopped_killed|gap/.test(k)) return 'danger';
+  if (/rejected|skipped|reconciliation|auto_paused|warning/.test(k)) return 'warn';
+  if (/exit/.test(k)) return (Number(e.realized_usd) >= 0 ? 'ok' : 'warn');
+  if (/entry|filled|connected/.test(k)) return 'info';
+  return 'info';
+};
+const short = (m) => (m ? `${String(m).slice(0, 4)}…${String(m).slice(-4)}` : '');
+
+function AlertFeed({ ar }) {
+  const [items, setItems] = useState(null);
+  const [filter, setFilter] = useState('all');
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const [ev, rk] = await Promise.all([api.engineEvents(), api.risk()]);
+      if (!alive) return;
+      const merged = [];
+      for (const f of (rk.ok ? rk.data.findings : []) || []) {
+        if (f.severity === 'block' || f.severity === 'warn') merged.push({ sev: f.severity === 'block' ? 'danger' : 'warn', text: f.text, ts: null, src: ar ? 'مخاطر' : 'risk' });
+      }
+      for (const e of (ev.ok ? ev.data.events : []) || []) {
+        const bits = [e.kind, e.mint ? short(e.mint) : '', e.size_usd != null ? `$${e.size_usd}` : '', e.realized_usd != null ? `→ $${e.realized_usd}` : '', (e.rejections || []).join(' ')].filter(Boolean).join(' ');
+        merged.push({ sev: EV_SEV(e), text: bits, ts: e.ts, src: ar ? 'محرك' : 'engine' });
+      }
+      setItems(merged);
+    };
+    load();
+    const iv = setInterval(load, 10000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [ar]);
+
+  const SEVS = ['all', 'danger', 'warn', 'info', 'ok'];
+  const view = (items || []).filter((x) => filter === 'all' || x.sev === filter);
+  const tone = (s) => (s === 'danger' ? 'danger' : s === 'warn' ? 'warn' : s === 'ok' ? 'ok' : 'info');
+
+  return (
+    <Card title={ar ? '🔔 مركز التنبيهات' : '🔔 Alert Center'}
+      sub={ar ? 'تدفّق موحّد: إشارات المخاطر الحالية + أحداث المحرك الأخيرة (دخول/خروج/رفض/إيقاف).' : 'Unified feed: live risk signals + recent engine events (entries/exits/rejections/halts).'}
+      right={(
+        <div className="seg">
+          {SEVS.map((s) => <button key={s} className={filter === s ? 'on' : ''} onClick={() => setFilter(s)}>{s === 'all' ? (ar ? 'الكل' : 'all') : s}</button>)}
+        </div>
+      )}>
+      {items === null ? <p className="muted">{ar ? 'جارٍ التحميل…' : 'Loading…'}</p>
+        : view.length === 0 ? <EmptyState message={ar ? 'لا تنبيهات مطابقة' : 'No matching alerts'} />
+          : (
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 360, overflow: 'auto' }}>
+              {view.map((a, i) => (
+                <li key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--c-border)', flexWrap: 'wrap' }}>
+                  <Badge tone={tone(a.sev)}>{a.sev}</Badge>
+                  <span className="muted fs-xs">{a.src}</span>
+                  <span className="fs-sm" style={{ flex: 1, minWidth: 0 }}>{a.text}</span>
+                  {a.ts && <span className="faint fs-xs mono" dir="ltr">{(a.ts || '').slice(11, 19)}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+    </Card>
   );
 }
 

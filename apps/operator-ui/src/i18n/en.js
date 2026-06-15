@@ -61,6 +61,7 @@ export default {
     tokens: 'Token Analysis',
     wallets: 'Wallet Workspace',
     analytics: 'Analytics & Reports',
+    risk: 'Risk Center',
     funds: 'My Wallets & Funds',
     settings: 'Settings & Safety',
     alerts: 'Alerts',
