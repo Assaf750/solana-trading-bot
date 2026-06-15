@@ -5,6 +5,7 @@
 // keeps decision-ledger/live-executor synchronous and UNCHANGED (parity). No dual-write, no backfill.
 import { readJson, writeJson } from '../util.mjs';
 import { createJsonIntentStore } from '../../../../packages/decision-ledger/src/index.mjs';
+import { createJsonPositionStore } from '../../../../packages/positions/src/index.mjs';
 import { parseStorageBackendConfig, createPgClient, createPostgresExecutor } from './postgres-client.mjs';
 
 const INTENTS_FILE = 'intent-ledger.json';
@@ -79,6 +80,79 @@ export async function createDecisionLedgerStore(backend) {
   }
   if (backend.backend === 'postgres') {
     const store = createPostgresDecisionLedgerStore({ executor: backend.executor });
+    await store.init();
+    return store;
+  }
+  throw new Error(`unknown_storage_backend:${backend.backend}`);
+}
+
+/**
+ * Postgres-backed positions book store. Same pattern as the decision-ledger store: a synchronous
+ * in-memory working copy (read()/write() document interface the positions book expects), loaded from
+ * Postgres at init() and write-through-persisted. `book` namespaces the rows (paper vs live). The full
+ * operational position object is stored as JSONB; per-book aggregates (trades/realized/daily/simulated)
+ * live in positions_book_meta. Build-phase: persists the whole working set (low volume).
+ */
+export function createPostgresPositionStore({ executor, book } = {}) {
+  if (!executor || typeof executor.query !== 'function' || typeof executor.execute !== 'function') {
+    throw new Error('postgres_position_store_requires_executor');
+  }
+  if (!book) throw new Error('postgres_position_store_requires_book');
+  let doc = null; // null => empty book (book load() falls back to EMPTY, matching the JSON store)
+  let chain = Promise.resolve();
+  let lastError = null;
+
+  async function init() {
+    const posRows = await executor.query('SELECT position FROM positions_state WHERE book = $1 ORDER BY opened_at NULLS LAST, position_id', [book]);
+    const metaRows = await executor.query('SELECT meta FROM positions_book_meta WHERE book = $1', [book]);
+    const positions = (posRows || []).map((r) => r.position);
+    const meta = (metaRows && metaRows[0] && metaRows[0].meta) || null;
+    if (!positions.length && !meta) { doc = null; return doc; }
+    doc = {
+      simulated: meta ? meta.simulated : undefined,
+      positions,
+      trades: (meta && meta.trades) || [],
+      realized_pnl_usd: (meta && meta.realized_pnl_usd) || 0,
+      daily: (meta && meta.daily) || { date: null, realized_pnl_usd: 0, entries_blocked: false },
+    };
+    return doc;
+  }
+
+  async function persist(value) {
+    await executor.execute(
+      'INSERT INTO positions_book_meta (book, meta) VALUES ($1, $2) ON CONFLICT (book) DO UPDATE SET meta = $2, updated_at = now()',
+      [book, { simulated: value.simulated, trades: value.trades || [], realized_pnl_usd: value.realized_pnl_usd || 0, daily: value.daily }],
+    );
+    for (const p of value.positions || []) {
+      await executor.execute(
+        'INSERT INTO positions_state (book, position_id, token_ref, position_state, opened_at, closed_at, position) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (book, position_id) DO UPDATE SET token_ref = $3, position_state = $4, opened_at = $5, closed_at = $6, position = $7, updated_at = now()',
+        [book, p.position_id, p.token_mint ?? null, p.position_state ?? null, p.entry_ts ?? null, p.closed_at ?? null, p],
+      );
+    }
+  }
+
+  function read() { return { value: doc, corrupt: false }; }
+  function write(value) {
+    doc = value;
+    const snapshot = { simulated: value.simulated, positions: [...(value.positions || [])], trades: value.trades, realized_pnl_usd: value.realized_pnl_usd, daily: value.daily };
+    chain = chain.then(() => persist(snapshot)).catch((e) => { lastError = e; });
+  }
+  async function flush() {
+    await chain;
+    if (lastError) { const e = lastError; lastError = null; throw e; }
+  }
+
+  return { read, write, init, flush };
+}
+
+/** Return the positions book store for the active backend (json store, or initialized pg store). */
+export async function createPositionStore(backend, { file, simulated = true } = {}) {
+  if (!file) throw new Error('create_position_store_requires_file');
+  if (!backend || backend.backend === 'json') {
+    return createJsonPositionStore({ file, readJson, writeJson });
+  }
+  if (backend.backend === 'postgres') {
+    const store = createPostgresPositionStore({ executor: backend.executor, book: file.replace(/\.json$/, '') });
     await store.init();
     return store;
   }

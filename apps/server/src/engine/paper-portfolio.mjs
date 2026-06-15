@@ -14,14 +14,16 @@ const EMPTY = {
   daily: { date: null, realized_pnl_usd: 0, entries_blocked: false },
 };
 
-export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } = {}) {
+export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true, positionStore = null } = {}) {
   // ADR-0001 Phase 2B: the positions/portfolio book is OWNED by @soltrade/positions. The server
   // delegates to it; the prior in-process implementation stays as a `legacy` backend behind
   // POSITIONS_BACKEND until parity is proven, then the package is the default. Both share the same
   // JSON file + helpers, so the two backends are interchangeable.
+  // ADR-0001 Phase 4B.2: the store is injected by the host (STORAGE_BACKEND=postgres provides a
+  // Postgres-backed store; default = the JSON store, unchanged). The book logic is identical either way.
   if (process.env.POSITIONS_BACKEND !== 'legacy') {
     return createPositionsBook({
-      store: createJsonPositionStore({ file, readJson, writeJson }),
+      store: positionStore || createJsonPositionStore({ file, readJson, writeJson }),
       newId,
       nowIso,
       simulated,

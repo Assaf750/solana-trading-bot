@@ -24,7 +24,7 @@ import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } 
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
 import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
-import { createStorageBackend, createDecisionLedgerStore } from './storage/storage-backend.mjs';
+import { createStorageBackend, createDecisionLedgerStore, createPositionStore } from './storage/storage-backend.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -36,8 +36,12 @@ const killSwitch = createKillSwitch();
 const operatingState = createOperatingState();
 const signer = createSignerService({ vault, config, killSwitch, audit: appendAudit });
 
+// ADR-0001 Phase 4B: resolve the storage backend once (STORAGE_BACKEND=json|postgres). Fail-clear at
+// boot on bad/missing config; the json default loads no pg.
+const storageBackend = await createStorageBackend({ env: process.env });
+
 // engine wiring — secrets resolved from the vault AT CALL TIME, never cached/logged
-const portfolio = createPaperPortfolio();
+const portfolio = createPaperPortfolio({ positionStore: await createPositionStore(storageBackend, { file: 'paper-portfolio.json', simulated: true }) });
 // live operational health of the external providers the money path leans on (Jupiter, RPC)
 const providerHealth = createProviderHealth();
 const rpc = createRpcClient({
@@ -81,7 +85,7 @@ const notifier = createNotifier({ config, getSecret: (name) => vault.getSecretFo
 
 // LIVE book + executor — real money path, fully gated (mode + signer session + kill
 // switch + readiness); separate file from the paper book, never mixed
-const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false });
+const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false, positionStore: await createPositionStore(storageBackend, { file: 'live-portfolio.json', simulated: false }) });
 // Optional Rust hot-executor for signing — active only when the binary path is set AND the owner
 // flips execution.signer_backend='rust'. Any failure falls back to in-process signing (fail-safe).
 const hotSigner = process.env.HOT_EXECUTOR_BIN
@@ -143,9 +147,7 @@ async function legacyGetJitoTipFloor() {
     return null;
   }
 }
-// ADR-0001 Phase 4B.1: pick the decision-ledger store from STORAGE_BACKEND (json default; postgres
-// loads pg and uses it as the durable source of truth). Fail-clear at boot on bad/missing config.
-const storageBackend = await createStorageBackend({ env: process.env });
+// ADR-0001 Phase 4B.1: the decision-ledger store comes from the same storage backend resolved above.
 const decisionLedgerStore = await createDecisionLedgerStore(storageBackend);
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,

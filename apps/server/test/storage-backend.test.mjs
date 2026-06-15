@@ -9,8 +9,9 @@ import { join } from 'node:path';
 process.env.SOLTRADE_DATA_DIR = process.env.SOLTRADE_DATA_DIR || mkdtempSync(join(tmpdir(), 'soltrade-stg-'));
 
 const { parseStorageBackendConfig, createPostgresExecutor } = await import('../src/storage/postgres-client.mjs');
-const { createStorageBackend, createDecisionLedgerStore } = await import('../src/storage/storage-backend.mjs');
+const { createStorageBackend, createDecisionLedgerStore, createPositionStore } = await import('../src/storage/storage-backend.mjs');
 const { createDecisionLedger } = await import('../../../packages/decision-ledger/src/index.mjs');
+const { createPositionsBook } = await import('../../../packages/positions/src/index.mjs');
 
 function mockPg() {
   const calls = [];
@@ -130,4 +131,60 @@ test('json backend returns a working JSON store (read/write), pg untouched', asy
   const dl = createDecisionLedger({ store, now: () => 'T', intentIdFor: (p) => `int_${p.join('')}` });
   assert.equal(dl.claimIntent('int_j', { side: 'buy' }).ok, true);
   assert.equal(dl.getIntent('int_j').status, 'PENDING');
+});
+
+// ---------- positions over the Postgres store (Phase 4B.2) ----------
+const ENTRY = { leader_address: 'L', wallet_id: 'w', token_mint: 'M', qty_ui: 100, decimals: 6, cost_usd: 50, fee_usd_est: 1, price_impact_pct: 0.1, copy_mode: 'follow_entry_user_exit', tp_pct: null, sl_pct: null };
+
+async function pgBook() {
+  const { client, calls } = mockPg();
+  const backend = await createStorageBackend({ env: { STORAGE_BACKEND: 'postgres', DATABASE_URL: 'postgres://x' }, pgClient: client });
+  const store = await createPositionStore(backend, { file: 'live-portfolio.json', simulated: false });
+  let n = 0;
+  const book = createPositionsBook({ store, newId: (p) => `${p}_${(n += 1)}`, nowIso: () => '2026-06-16T00:00:00.000Z', simulated: false });
+  return { book, store, calls };
+}
+
+test('pg position store: init reads positions; recordEntry persists a row + book meta (expected shape)', async () => {
+  const { book, store, calls } = await pgBook();
+  assert.ok(calls.some((c) => /SELECT position FROM positions_state/.test(c.sql)), 'init loaded positions');
+  const p = book.recordEntry(ENTRY);
+  await store.flush();
+  const posUp = calls.find((c) => /INSERT INTO positions_state/.test(c.sql));
+  assert.ok(posUp, 'position row upserted');
+  assert.equal(posUp.params[0], 'live-portfolio'); // book namespace
+  assert.equal(posUp.params[1], p.position_id);
+  assert.equal(posUp.params[2], 'M'); // token_ref
+  assert.equal(posUp.params[3], 'OPEN'); // position_state
+  assert.equal(posUp.params[6].position_id, p.position_id); // full position JSONB
+  assert.ok(calls.some((c) => /INSERT INTO positions_book_meta/.test(c.sql)), 'book meta upserted');
+});
+
+test('pg position store: setMark + full close persist updated state (CLOSED + closed_at)', async () => {
+  const { book, store, calls } = await pgBook();
+  const p = book.recordEntry(ENTRY);
+  book.setMark(p.position_id, 60, 'valid');
+  const r = book.recordExit({ position_id: p.position_id, fraction: 1, proceeds_usd: 80, fee_usd_est: 0, reason: 'manual_close' });
+  assert.equal(r.closed, true);
+  await store.flush();
+  const ups = calls.filter((c) => /INSERT INTO positions_state/.test(c.sql) && c.params[1] === p.position_id);
+  const last = ups[ups.length - 1];
+  assert.equal(last.params[3], 'CLOSED');
+  assert.ok(last.params[5], 'closed_at set');
+  assert.equal(last.params[6].position_state, 'CLOSED');
+});
+
+test('pg position store: init failure fails clearly (no silent fallback)', async () => {
+  const failing = { query: async () => { throw new Error('down'); } };
+  const backend = await createStorageBackend({ env: { STORAGE_BACKEND: 'postgres', DATABASE_URL: 'postgres://x' }, pgClient: failing });
+  await assert.rejects(() => createPositionStore(backend, { file: 'live-portfolio.json', simulated: false }), /pg_query_failed/);
+});
+
+test('json position store backend works (no pg); book roundtrip + parity surface', async () => {
+  const store = await createPositionStore({ backend: 'json' }, { file: 'paper-portfolio.json', simulated: true });
+  let n = 0;
+  const book = createPositionsBook({ store, newId: (p) => `${p}_${(n += 1)}`, nowIso: () => '2026-06-16T00:00:00.000Z', simulated: true });
+  const p = book.recordEntry(ENTRY);
+  assert.equal(book.openCount(), 1);
+  assert.equal(book.openPositions()[0].position_id, p.position_id);
 });
