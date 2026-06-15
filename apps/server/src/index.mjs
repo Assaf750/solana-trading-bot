@@ -11,6 +11,7 @@ import { appendAudit } from './audit-log.mjs';
 import { ensureDataDir } from './util.mjs';
 import { createPaperPortfolio } from './engine/paper-portfolio.mjs';
 import { createOrdersStore } from './engine/orders.mjs';
+import { createHistory } from './engine/history.mjs';
 import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createPaperEngine } from './engine/paper-engine.mjs';
@@ -122,6 +123,7 @@ const liveExecutor = createLiveExecutor({
 });
 
 const ordersStore = createOrdersStore();
+const history = createHistory();
 
 const paperEngine = createPaperEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
@@ -138,7 +140,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

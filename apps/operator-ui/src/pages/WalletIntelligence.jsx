@@ -37,6 +37,21 @@ export default function WalletIntelligence() {
   }
   useEffect(() => { if (connected) load(); }, [connected]);
 
+  // unified-search / history deep-link: #/wallets?address=… registers (idempotent) + analyzes it
+  useEffect(() => {
+    if (!connected) return;
+    const q = new URLSearchParams(window.location.hash.split('?')[1] || '');
+    const addr = q.get('address');
+    if (!addr || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return;
+    (async () => {
+      const r = await api.registerWallet({ tracked_wallet_address: addr, label: 'searched' });
+      const w = r.data?.wallet;
+      await load();
+      if (w?.wallet_id) { setSelectedId(w.wallet_id); analyze(w); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected]);
+
   function note(tone, a, e) { setMsg({ tone, text: ar ? a : e }); }
   const statsOf = (w) => analysis[w.wallet_id]?.data?.stats;
 

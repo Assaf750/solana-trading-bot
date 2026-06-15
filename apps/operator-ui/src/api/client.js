@@ -33,6 +33,7 @@ export const api = {
   config: () => call('GET', '/api/config'),
   readiness: () => call('GET', '/api/readiness'),
   modes: () => call('GET', '/api/modes'),
+  history: (limit = 50, type = null) => call('GET', `/api/history?limit=${limit}${type ? `&type=${type}` : ''}`),
   wallets: () => call('GET', '/api/wallets'),
   secrets: () => call('GET', '/api/secrets'),
   audit: (limit = 50) => call('GET', `/api/audit?limit=${limit}`),

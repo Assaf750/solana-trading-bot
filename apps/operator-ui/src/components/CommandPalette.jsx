@@ -9,6 +9,7 @@ const SCREENS = [
   { to: '/command', key: 'command', ico: '◈', kbd: 'g c' },
   { to: '/workspace', key: 'workspace', ico: '▤', kbd: 'g w' },
   { to: '/radar', key: 'radar', ico: '◎', kbd: 'g r' },
+  { to: '/tokens', key: 'tokens', ico: '⬡', kbd: 'g t' },
   { to: '/wallets', key: 'wallets', ico: '◇', kbd: 'g i' },
   { to: '/analytics', key: 'analytics', ico: '▦', kbd: 'g a' },
   { to: '/funds', key: 'funds', ico: '◰', kbd: 'g f' },
@@ -71,10 +72,18 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
   }, [ar, lang, prefs.theme, t, setLang, set, navigate, onOpenTweaks]);
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
+    const raw = q.trim();
+    const query = raw.toLowerCase();
+    // unified search: a pasted base58 mint/address routes straight to analysis
+    const isAddr = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw);
+    const short = isAddr ? `${raw.slice(0, 4)}…${raw.slice(-4)}` : '';
+    const addrActions = isAddr ? [
+      { group: ar ? 'بحث' : 'Search', label: `${ar ? 'تحليل توكن' : 'Analyze token'}: ${short}`, ico: '⬡', run: () => { navigate(`/tokens?mint=${raw}`); setOpen(false); } },
+      { group: ar ? 'بحث' : 'Search', label: `${ar ? 'تحليل محفظة' : 'Analyze wallet'}: ${short}`, ico: '◇', run: () => { navigate(`/wallets?address=${raw}`); setOpen(false); } },
+    ] : [];
     if (!query) return groups;
-    return groups.filter((g) => g.label.toLowerCase().includes(query));
-  }, [groups, q]);
+    return [...addrActions, ...groups.filter((g) => g.label.toLowerCase().includes(query))];
+  }, [groups, q, ar, navigate, setOpen]);
 
   useEffect(() => { setIdx(0); }, [q]);
   useEffect(() => {
@@ -117,7 +126,7 @@ export function CommandPalette({ open, setOpen, onOpenTweaks }) {
           <input
             ref={inputRef}
             className="cmdk-input"
-            placeholder={ar ? 'انتقل إلى شاشة أو نفّذ أمراً…' : 'Jump to a screen or run a command…'}
+            placeholder={ar ? 'شاشة، أمر، أو الصق عنوان توكن/محفظة…' : 'Screen, command, or paste a token/wallet address…'}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}

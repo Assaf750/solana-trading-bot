@@ -5,7 +5,8 @@
 import { computeReadiness } from './readiness.mjs';
 import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history }) {
+  const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
   // Single-flight for the heavy on-chain scans: only one runs at a time so re-clicks can't
@@ -19,8 +20,11 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
     if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) return { status: 400, body: { ok: false, error: 'invalid_mint' } };
     if (tokenAnalysisBusy) return { status: 429, body: { ok: false, error: 'analysis_in_progress' } };
     tokenAnalysisBusy = true;
-    try { const r = await analyzeToken({ mint }); return { status: r.ok ? 200 : 400, body: r }; }
-    finally { tokenAnalysisBusy = false; }
+    try {
+      const r = await analyzeToken({ mint });
+      if (r.ok) remember({ type: 'token_analysis', mint, symbol: r.token_identity?.symbol || null, verdict: r.final_verdict, risk_score: r.risk_score });
+      return { status: r.ok ? 200 : 400, body: r };
+    } finally { tokenAnalysisBusy = false; }
   }
 
   function readiness() {
@@ -213,6 +217,12 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
+        if (path.startsWith('/api/history')) {
+          const qs = new URLSearchParams(path.split('?')[1] || '');
+          const limit = Number(qs.get('limit')) || 50;
+          const type = qs.get('type') || null;
+          return { status: 200, body: { events: history ? history.list({ limit, type }) : [], counts: history ? history.counts() : { total: 0, by_type: {} } } };
+        }
         if (path === '/api/wallets') return { status: 200, body: { wallets: wallets.list() } };
         if (path === '/api/secrets') return { status: 200, body: { secrets: vault.listRefs() } };
         if (path.startsWith('/api/audit')) {
@@ -323,8 +333,11 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           }
           if (discoveryBusy) return { status: 429, body: { ok: false, error: 'scan_in_progress' } };
           discoveryBusy = true;
-          try { const r = await discoverTraders({ mint }); return { status: r.ok ? 200 : 502, body: r }; }
-          finally { discoveryBusy = false; }
+          try {
+            const r = await discoverTraders({ mint });
+            if (r.ok) remember({ type: 'radar_scan', mint, found: (r.traders || []).length, scanned: r.scanned });
+            return { status: r.ok ? 200 : 502, body: r };
+          } finally { discoveryBusy = false; }
         }
         if (path === '/api/discover/from-leaders') {
           // AUTOMATIC discovery — no mint needed; uses the followed leaders' recent tokens.
@@ -347,6 +360,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             return { status: 400, body: { ok: false, error: 'invalid_address' } };
           }
           const r = await analyzeWallet({ address });
+          if (r.ok) remember({ type: 'wallet_analysis', address, status: r.stats?.status || null, tier: r.intelligence?.tier || null, win_rate: r.stats?.win_rate ?? null });
           return { status: r.ok ? 200 : 502, body: r };
         }
         if (path === '/api/providers/test-connection') {

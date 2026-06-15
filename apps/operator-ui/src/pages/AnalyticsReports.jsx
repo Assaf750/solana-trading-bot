@@ -19,10 +19,13 @@ export default function AnalyticsReports() {
   const [trades, setTrades] = useState([]);
   const [positions, setPositions] = useState([]);
   const [insights, setInsights] = useState(null);
+  const [hist, setHist] = useState([]);
 
   async function load() {
     const ins = await api.leaderInsights();
     if (ins.ok) setInsights(ins.data || null);
+    const h = await api.history(40);
+    if (h.ok) setHist(h.data.events || []);
     if (live) {
       const lp = await api.livePositions();
       if (lp.ok) { setSummary(lp.data.summary || null); setPositions(lp.data.positions || []); setTrades(lp.data.trades || []); }
@@ -189,6 +192,30 @@ export default function AnalyticsReports() {
           </Card>
         </div>
       </div>
+
+      <Card title={ar ? '🕑 آخر النشاطات' : '🕑 Recent activity'}
+        sub={ar ? 'آخر تحليلات التوكنات والمحافظ وعمليات الرادار — انقر للفتح' : 'Recent token & wallet analyses and radar scans — click to open'}>
+        {hist.length === 0 ? (
+          <EmptyState message={ar ? 'لا نشاط بعد — حلّل توكناً أو محفظة' : 'No activity yet — analyze a token or wallet'} />
+        ) : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {hist.slice(0, 20).map((h) => {
+              const ts = (h.ts || '').replace('T', ' ').slice(0, 19);
+              const row = (ico, body) => (
+                <li key={h.id} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--c-border)' }}>
+                  <span aria-hidden style={{ width: 16 }}>{ico}</span>
+                  <span style={{ flex: 1, minWidth: 0 }} className="fs-sm">{body}</span>
+                  <span className="faint fs-xs mono" dir="ltr">{ts}</span>
+                </li>
+              );
+              if (h.type === 'token_analysis') return row('⬡', <><Link to={`/tokens?mint=${h.mint}`} className="mono" dir="ltr">{h.symbol || shortMint(h.mint)}</Link> <span className="muted">· {ar ? 'تحليل توكن' : 'token'}</span> {h.verdict && <Badge tone={h.verdict === 'suitable' ? 'ok' : h.verdict === 'high_risk' ? 'danger' : h.verdict === 'watch' ? 'warn' : 'neutral'}>{h.verdict}</Badge>}</>);
+              if (h.type === 'wallet_analysis') return row('◇', <><Link to={`/wallets?address=${h.address}`} className="mono" dir="ltr">{shortMint(h.address)}</Link> <span className="muted">· {ar ? 'تحليل محفظة' : 'wallet'}</span> {h.tier && <Badge tone={h.tier === 'copy_allowed' ? 'ok' : h.tier === 'banned' ? 'danger' : 'neutral'}>{h.tier}</Badge>}</>);
+              if (h.type === 'radar_scan') return row('◎', <><Link to="/radar" className="mono" dir="ltr">{shortMint(h.mint)}</Link> <span className="muted">· {ar ? 'رادار' : 'radar'}</span> <Badge tone={h.found > 0 ? 'ok' : 'neutral'}>{h.found} {ar ? 'محفظة' : 'wallets'}</Badge></>);
+              return null;
+            })}
+          </ul>
+        )}
+      </Card>
     </div>
   );
 }
