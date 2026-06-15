@@ -60,11 +60,11 @@ export function createJupiterClient({ getApiKey }) {
   }
 
   /** USD value of qty (ui units) of a token, via token -> USDC quote. */
-  async function usdValueOf({ mint, qtyUi, decimals }) {
+  async function usdValueOf({ mint, qtyUi, decimals, slippageBps = 100 }) {
     if (mint === USDC_MINT) return { ok: true, usd: qtyUi, priceImpactPct: 0 };
     const amountBase = Math.floor(qtyUi * 10 ** decimals);
     if (amountBase <= 0) return { ok: false, error: 'zero_amount' };
-    const q = await quote({ inputMint: mint, outputMint: USDC_MINT, amountBaseUnits: amountBase });
+    const q = await quote({ inputMint: mint, outputMint: USDC_MINT, amountBaseUnits: amountBase, slippageBps });
     if (!q.ok) return q;
     return { ok: true, usd: q.outAmount / 1e6, priceImpactPct: q.priceImpactPct };
   }

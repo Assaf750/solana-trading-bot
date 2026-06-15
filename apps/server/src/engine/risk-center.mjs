@@ -2,8 +2,9 @@
 // config + the live book. No I/O. Each finding is { area, severity, code, text }; the overall
 // posture is derived from the findings. Honest: it reports what the real config/state implies
 // (e.g. a disabled anti-rug check, a loose cap, a tripped daily-loss breaker), never invents.
+import { HARD_RISK_FIELDS } from '../config-service.mjs';
+
 const SEV_RANK = { block: 0, warn: 1, watch: 2, info: 3, ok: 4 };
-const HARD_RISK_FIELDS = ['max_daily_loss_pct', 'max_daily_loss_usdt', 'max_total_drawdown_pct', 'max_open_positions', 'max_position_size_pct', 'max_token_exposure_pct', 'max_creator_exposure_pct', 'max_cluster_exposure_pct', 'max_correlated_meme_exposure_pct'];
 
 export function assessRisk({ status = {}, config = {}, portfolioSummary = {} } = {}) {
   const findings = [];
@@ -18,7 +19,7 @@ export function assessRisk({ status = {}, config = {}, portfolioSummary = {} } =
   if (status?.kill_switch?.global?.engaged !== false && status?.kill_switch) push('general', 'block', 'kill_engaged', 'Kill switch engaged — all trading halted.');
   if (portfolioSummary.entries_blocked) push('general', 'block', 'daily_loss_tripped', 'Daily-loss limit hit — new entries blocked (exits only) until reset.');
   const hrMissing = HARD_RISK_FIELDS.filter((f) => typeof hr[f] !== 'number' || !Number.isFinite(hr[f]));
-  if (hrMissing.length) push('general', 'warn', 'hard_risk_incomplete', `${hrMissing.length}/9 hard-risk limits are unset — binding limits incomplete.`);
+  if (hrMissing.length) push('general', 'warn', 'hard_risk_incomplete', `${hrMissing.length}/${HARD_RISK_FIELDS.length} hard-risk limits are unset — binding limits incomplete.`);
 
   // --- token / anti-rug ---
   if (safety.enabled === false) push('token', 'block', 'antirug_disabled', 'Anti-rug screen is DISABLED — ruggable mints can pass entry.');

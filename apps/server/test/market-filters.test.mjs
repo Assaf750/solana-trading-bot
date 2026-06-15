@@ -30,6 +30,15 @@ test('market-filters: rejects FDV above the maximum', async () => {
   assert.match(r.reasons[0], /above_max_500000/);
 });
 
+test('market-filters: FDV uses uiAmountString when uiAmount is null (large supply)', async () => {
+  // supply 1,000,000 via uiAmountString (uiAmount null) × $0.001 = $1000 FDV; min 50000 -> reject (not skip)
+  const rpc = { rpc: async (m) => (m === 'getTokenSupply' ? { ok: true, result: { value: { uiAmount: null, uiAmountString: '1000000', amount: '1000000000000000', decimals: 9 } } } : { ok: false }) };
+  const r = await checkMarketFilters({ mint: 'M', rpc, cfg: { market_filters: { min_fdv_usd: 50000 } }, priceUsdPerToken: 0.001 });
+  assert.equal(r.ok, false);
+  assert.match(r.reasons[0], /below_min_50000/);
+  assert.ok(!r.skipped.includes('fdv_data_unavailable'));
+});
+
 test('market-filters: passes when FDV within [min,max]', async () => {
   const r = await checkMarketFilters({ mint: 'M', rpc: rpcSupply(1_000_000), cfg: { market_filters: { min_fdv_usd: 5_000, max_fdv_usd: 5_000_000 } }, priceUsdPerToken: 0.1 });
   assert.deepEqual(r, { ok: true, reasons: [], skipped: [] }); // FDV = 100,000

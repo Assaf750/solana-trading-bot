@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
@@ -34,18 +35,19 @@ export default function TokenAnalysis() {
   const { lang } = useI18n();
   const ar = lang === 'ar';
   const { connected } = useBackend();
+  const { search } = useLocation();
   const [mint, setMint] = useState('');
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
   const [err, setErr] = useState(null);
 
-  // deep-link: #/tokens?mint=... (from Radar / unified search)
+  // deep-link: #/tokens?mint=… (from Radar / unified search / recent activity). Keyed on the query
+  // so navigating to a NEW mint while already mounted re-fires the analysis.
   useEffect(() => {
-    const q = new URLSearchParams((window.location.hash.split('?')[1]) || '');
-    const m = q.get('mint');
+    const m = new URLSearchParams(search || '').get('mint');
     if (m && MINT_RE.test(m)) { setMint(m); run(m); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [search]);
 
   async function run(addr) {
     const m = (addr ?? mint).trim();
@@ -119,8 +121,8 @@ export default function TokenAnalysis() {
               <div className="row" style={{ marginBlockEnd: 'var(--s-2)' }}><Badge tone={verdict.tone}>{ar ? verdict.ar : verdict.en}</Badge></div>
               {res.reasons?.length ? (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {res.reasons.map((r, i) => (
-                    <li key={i} style={{ padding: '5px 0', borderBottom: '1px solid var(--c-border)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                  {res.reasons.map((r) => (
+                    <li key={r.code} style={{ padding: '5px 0', borderBottom: '1px solid var(--c-border)', display: 'flex', gap: 8, alignItems: 'baseline' }}>
                       <Badge tone={sevTone(r.severity)}>{r.severity}</Badge>
                       <span className="fs-sm">{r.text}</span>
                     </li>

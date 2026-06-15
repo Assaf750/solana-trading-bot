@@ -97,7 +97,16 @@ export function computeTokenScores(facts = {}) {
 }
 
 /** Async orchestrator: build the full token report. Never throws — failures degrade to missing_data. */
-export async function analyzeToken({ mint, rpc, jupiter, das = null, discoverTraders = null }) {
+// Read a parsed token-amount robustly: uiAmount is null for large / high-decimal balances, so
+// prefer uiAmountString, then amount/10**decimals, before falling back to uiAmount.
+function uiAmountOf(v, dec) {
+  if (!v) return NaN;
+  if (v.uiAmountString != null && v.uiAmountString !== '') { const n = Number(v.uiAmountString); if (Number.isFinite(n)) return n; }
+  if (v.amount != null && Number.isFinite(Number(dec))) { const n = Number(v.amount) / 10 ** Number(dec); if (Number.isFinite(n)) return n; }
+  const u = Number(v.uiAmount); return Number.isFinite(u) ? u : NaN;
+}
+
+export async function analyzeToken({ mint, rpc, jupiter, das = null, tokenMeta = null, discoverTraders = null }) {
   if (typeof mint !== 'string' || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
     return { ok: false, error: 'invalid_mint' };
   }
@@ -124,38 +133,49 @@ export async function analyzeToken({ mint, rpc, jupiter, das = null, discoverTra
   }
   const extClass = classifyExtensions(extensions);
 
-  // --- metadata (name/symbol/logo) via Jupiter token list then DAS ---
+  // --- metadata (name/symbol/logo): Jupiter token list + DAS via the shared cached resolver,
+  //     falling back to a direct DAS call if no resolver was wired ---
   let name = null; let symbol = null; let icon = null;
-  if (das && typeof das.getAssetMeta === 'function') {
+  if (tokenMeta && typeof tokenMeta.resolve === 'function') {
+    const m = await tokenMeta.resolve([mint]).catch(() => ({}));
+    const dm = m?.[mint];
+    if (dm) { name = dm.name; symbol = dm.symbol; icon = dm.icon; sources.add('jupiter+das:metadata'); }
+  } else if (das && typeof das.getAssetMeta === 'function') {
     const dm = await das.getAssetMeta(mint).catch(() => null);
     if (dm) { name = dm.name; symbol = dm.symbol; icon = dm.icon; sources.add('helius:das'); }
   }
   if (!symbol) missing_data.push('token_metadata');
 
-  // --- price + route + slippage via Jupiter (buy $10, sell it back) ---
+  // --- price + route + slippage via Jupiter (buy $10, sell it back at the SAME slippage basis) ---
+  const PROBE_BPS = 300;
   let priceUsd = null; let buyRoute = false; let sellable = null; let slippagePct = null;
   if (jupiter && Number.isFinite(decimals)) {
-    const buy = await jupiter.paperBuy({ mint, sizeUsd: 10, slippageBps: 300 }).catch(() => ({ ok: false }));
+    const buy = await jupiter.paperBuy({ mint, sizeUsd: 10, slippageBps: PROBE_BPS }).catch(() => ({ ok: false }));
     if (buy.ok) {
       buyRoute = true; sources.add('jupiter:quote');
       const qtyUi = buy.outAmountBase / 10 ** decimals;
       if (qtyUi > 0) {
         priceUsd = 10 / qtyUi;
-        const sell = await jupiter.usdValueOf({ mint, qtyUi, decimals }).catch(() => ({ ok: false }));
+        const sell = await jupiter.usdValueOf({ mint, qtyUi, decimals, slippageBps: PROBE_BPS }).catch(() => ({ ok: false, error: 'sell_quote_error' }));
         if (sell.ok) { sellable = true; slippagePct = Math.max(0, ((10 - sell.usd) / 10) * 100); }
-        else { sellable = false; }
+        else if (sell.error === 'quote_no_route' || sell.error === 'zero_amount') { sellable = false; } // genuine: cannot exit
+        else { sellable = null; missing_data.push('sell_route'); } // transient quote error — unknown, NOT a honeypot
       }
     } else { buyRoute = false; missing_data.push('price_route'); }
   } else { missing_data.push('price_route'); }
   const fdvUsd = (Number.isFinite(supplyUi) && supplyUi > 0 && priceUsd != null) ? supplyUi * priceUsd : null;
   if (fdvUsd == null) missing_data.push('fdv');
 
-  // --- holders + concentration via getTokenLargestAccounts ---
+  // --- holders + concentration via getTokenLargestAccounts (uiAmount is null for big balances) ---
   let topHolders = []; let topHolderPct = null; let top5Pct = null;
   const la = await rrpc('getTokenLargestAccounts', [mint, { commitment: 'confirmed' }]).catch(() => ({ ok: false }));
   if (la.ok && Array.isArray(la.result?.value) && Number.isFinite(supplyUi) && supplyUi > 0) {
     sources.add('rpc:getTokenLargestAccounts');
-    topHolders = la.result.value.slice(0, 10).map((h) => ({ address: h.address, amount_ui: Number(h.uiAmount) || 0, pct: ((Number(h.uiAmount) || 0) / supplyUi) * 100 }));
+    topHolders = la.result.value.slice(0, 10).map((h) => {
+      const amt = uiAmountOf(h, h.decimals ?? decimals);
+      const amount_ui = Number.isFinite(amt) ? amt : 0;
+      return { address: h.address, amount_ui, pct: (amount_ui / supplyUi) * 100 };
+    });
     topHolderPct = topHolders[0]?.pct ?? null;
     top5Pct = topHolders.slice(0, 5).reduce((a, h) => a + h.pct, 0);
   } else { missing_data.push('holders'); }
@@ -178,15 +198,17 @@ export async function analyzeToken({ mint, rpc, jupiter, das = null, discoverTra
     if (d?.ok) { traders = (d.traders || []).slice(0, 10); traderCount = traders.length; sources.add('rpc:trader-discovery'); }
   }
 
-  const dataComplete = accVal?.data?.parsed?.type === 'mint';
+  const dataComplete = accVal?.data?.parsed?.type === 'mint' && Number.isFinite(decimals);
   const metadataMutable = false; // update-authority parse not exposed by jsonParsed mint; treated unknown→false
+  // '1000+' (page-capped) still counts as a high holder count for scoring, not null
+  const holderCountNum = typeof holderCount === 'number' ? holderCount : (holderCount === '1000+' ? 1000 : null);
   const scores = computeTokenScores({
     mintAuthorityActive: !!mintAuthority,
     freezeAuthorityActive: !!freezeAuthority,
     metadataMutable,
     extensionKeys: extClass.map((e) => e.key),
     sellable, slippagePct, fdvUsd, priceUsd,
-    topHolderPct, holderCount: typeof holderCount === 'number' ? holderCount : null, traderCount,
+    topHolderPct, holderCount: holderCountNum, traderCount,
     dataComplete,
   });
 

@@ -51,6 +51,17 @@ test('nextOrderState: dca advances slot + next_at, completes after total (succes
   assert.equal(o.last_error, 'route_invalid');
 });
 
+test('store: replace is compare-and-set — a cancelled order is not clobbered (poll/cancel race)', () => {
+  const store = createOrdersStore({ file: 'orders-cas.json' });
+  const o = store.add({ type: 'limit_buy', mint: 'M', size_usd: 10, target_price_usd: 0.001, decimals: 6 });
+  // simulate: pollOrders snapshotted it open and fired; meanwhile the user cancelled it
+  store.cancel(o.order_id);
+  const r = store.replace(o.order_id, { ...o, status: 'filled' }); // stale write from the in-flight poll
+  assert.equal(r.ok, false);
+  assert.equal(r.error, 'order_not_open');
+  assert.equal(store.list().find((x) => x.order_id === o.order_id).status, 'cancelled'); // stays cancelled
+});
+
 test('store: add / list / cancel', () => {
   const store = createOrdersStore({ file: 'orders-test.json' });
   const o = store.add({ type: 'limit_buy', mint: 'M', size_usd: 10, target_price_usd: 0.001, decimals: 6 });

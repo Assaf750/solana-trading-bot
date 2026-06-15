@@ -87,7 +87,7 @@ function TopBar({ onOpenCmdk, onOpenTweaks }) {
         {connected && status?.run_mode && (
           <span className="status-chip">
             <span className="muted">{ar ? 'الوضع' : 'Mode'}:</span>
-            <Badge tone={RUN_MODE[status.run_mode]?.tone || 'neutral'}>{ar ? RUN_MODE[status.run_mode]?.ar : RUN_MODE[status.run_mode]?.en}</Badge>
+            <Badge tone={RUN_MODE[status.run_mode]?.tone || 'neutral'}>{(ar ? RUN_MODE[status.run_mode]?.ar : RUN_MODE[status.run_mode]?.en) || status.run_mode}</Badge>
           </span>
         )}
         <span className="status-chip">

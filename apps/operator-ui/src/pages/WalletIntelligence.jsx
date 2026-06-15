@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState, Sparkline } from '../components/index.jsx';
@@ -10,6 +11,7 @@ export default function WalletIntelligence() {
   const { t, lang } = useI18n();
   const ar = lang === 'ar';
   const { status, connected } = useBackend();
+  const routeLocation = useLocation();
 
   const [wallets, setWallets] = useState([]);
   const [analysis, setAnalysis] = useState({}); // wallet_id -> {loading|data|error}
@@ -37,20 +39,22 @@ export default function WalletIntelligence() {
   }
   useEffect(() => { if (connected) load(); }, [connected]);
 
-  // unified-search / history deep-link: #/wallets?address=… registers (idempotent) + analyzes it
+  // unified-search / history deep-link: #/wallets?address=… registers (idempotent) + analyzes it.
+  // Keyed on the query so a NEW ?address while mounted re-fires; alive-guarded against unmount.
   useEffect(() => {
-    if (!connected) return;
-    const q = new URLSearchParams(window.location.hash.split('?')[1] || '');
-    const addr = q.get('address');
-    if (!addr || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return;
+    if (!connected) return undefined;
+    const addr = new URLSearchParams(routeLocation.search || '').get('address');
+    if (!addr || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) return undefined;
+    let alive = true;
     (async () => {
       const r = await api.registerWallet({ tracked_wallet_address: addr, label: 'searched' });
       const w = r.data?.wallet;
       await load();
-      if (w?.wallet_id) { setSelectedId(w.wallet_id); analyze(w); }
+      if (alive && w?.wallet_id) { setSelectedId(w.wallet_id); analyze(w); }
     })();
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connected]);
+  }, [connected, routeLocation.search]);
 
   function note(tone, a, e) { setMsg({ tone, text: ar ? a : e }); }
   const statsOf = (w) => analysis[w.wallet_id]?.data?.stats;
@@ -430,7 +434,7 @@ function WalletAnalysis({ ar, res }) {
           </div>
           {intel.reasons?.length > 0 && (
             <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
-              {intel.reasons.map((r, i) => (<li key={i} style={{ padding: '3px 0', display: 'flex', gap: 6, alignItems: 'baseline' }}><Badge tone={sev(r.severity)}>{r.severity}</Badge><span className="fs-xs">{r.text}</span></li>))}
+              {intel.reasons.map((r) => (<li key={r.code} style={{ padding: '3px 0', display: 'flex', gap: 6, alignItems: 'baseline' }}><Badge tone={sev(r.severity)}>{r.severity}</Badge><span className="fs-xs">{r.text}</span></li>))}
             </ul>
           )}
           <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>{ar ? `الثقة: ${intel.confidence} · تقديري من السلوك على السلسلة` : `confidence: ${intel.confidence} · heuristic from on-chain behavior`}</p>

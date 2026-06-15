@@ -142,7 +142,7 @@ const api = createApi({
   broadcast: (p) => broadcastRef(p),
   paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
-  analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
+  analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
   discoverFromLeaders: () => discoverFromLeadersImpl({
     leaders: wallets.list().filter((w) => w.follow_enabled).map((w) => w.tracked_wallet_address),

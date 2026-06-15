@@ -21,7 +21,14 @@ export async function checkMarketFilters({ mint, rpc, cfg, priceUsdPerToken }) {
 
   if (wantFdv) {
     const s = rpc ? await rpc.rpc('getTokenSupply', [mint, { commitment: 'confirmed' }]) : { ok: false };
-    const supplyUi = s.ok ? Number(s.result?.value?.uiAmount) : NaN;
+    // uiAmount is null for supply > 2^53; prefer uiAmountString, then amount/10**decimals
+    const v = s.ok ? s.result?.value : null;
+    let supplyUi = NaN;
+    if (v) {
+      if (v.uiAmountString != null && v.uiAmountString !== '') supplyUi = Number(v.uiAmountString);
+      else if (v.amount != null && Number.isFinite(Number(v.decimals))) supplyUi = Number(v.amount) / 10 ** Number(v.decimals);
+      else supplyUi = Number(v.uiAmount);
+    }
     if (Number.isFinite(supplyUi) && supplyUi > 0 && Number.isFinite(priceUsdPerToken) && priceUsdPerToken > 0) {
       const fdv = supplyUi * priceUsdPerToken;
       if (Number.isFinite(minFdv) && fdv < minFdv) reasons.push(`fdv_${Math.round(fdv)}_below_min_${minFdv}`);

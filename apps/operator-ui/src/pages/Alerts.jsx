@@ -172,7 +172,7 @@ function AlertFeed({ ar }) {
           : (
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, maxHeight: 360, overflow: 'auto' }}>
               {view.map((a, i) => (
-                <li key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--c-border)', flexWrap: 'wrap' }}>
+                <li key={`${a.src}|${a.ts || ''}|${a.text}|${i}`} style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--c-border)', flexWrap: 'wrap' }}>
                   <Badge tone={tone(a.sev)}>{a.sev}</Badge>
                   <span className="muted fs-xs">{a.src}</span>
                   <span className="fs-sm" style={{ flex: 1, minWidth: 0 }}>{a.text}</span>

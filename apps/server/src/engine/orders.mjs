@@ -47,10 +47,15 @@ export function createOrdersStore({ file = DEFAULT_FILE } = {}) {
     return order;
   }
 
+  // Compare-and-set: only overwrite an order that is STILL 'open' in storage. pollOrders snapshots
+  // an open order, awaits the (slow) buy, then writes the result here — if a cancel_order landed
+  // during that await the persisted status is no longer 'open', so we DON'T resurrect/clobber it
+  // (and a limit-buy that already fired can never be flipped back to 'open' and re-fire).
   function replace(order_id, updated) {
     const s = load();
     const i = s.orders.findIndex((o) => o.order_id === order_id);
     if (i === -1) return { ok: false, error: 'order_not_found' };
+    if (s.orders[i].status !== 'open') return { ok: false, error: 'order_not_open' };
     s.orders[i] = { ...updated, order_id };
     save(s);
     return { ok: true, order: s.orders[i] };
