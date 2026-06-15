@@ -205,11 +205,34 @@ try {
   eventSink = null;
 }
 
+// ADR-0001 Phase 8A: read-only runtime-readiness probes. Each is best-effort + fail-open and reports
+// per-backend status WITHOUT mutating anything or opening live. Postgres is the only hard blocker (it's
+// the operational SoT when configured); Redis (cache) and ClickHouse (analytics) only ever degrade.
+const runtimeProbes = {
+  storage: async () => {
+    if (storageBackend.backend !== 'postgres') return { backend: storageBackend.backend || 'json', status: 'ok' };
+    try { await storageBackend.executor.query('SELECT 1', []); return { backend: 'postgres', status: 'ok' }; }
+    catch { return { backend: 'postgres', status: 'fail' }; } // configured SoT down -> blocker
+  },
+  hotState: async () => {
+    const backend = hotState?.backend || 'memory';
+    if (backend !== 'redis') return { backend, status: 'ok' };
+    try { await hotState.get('__readiness_probe__'); return { backend: 'redis', status: 'ok' }; }
+    catch { return { backend: 'redis', status: 'degraded' }; } // cache down -> degraded, never blocked
+  },
+  eventSink: async () => {
+    const backend = eventSink?.backend || 'none';
+    if (backend !== 'clickhouse') return { backend, status: 'disabled' };
+    try { return { backend: 'clickhouse', status: (await eventSink.client.ping()) ? 'ok' : 'degraded' }; }
+    catch { return { backend: 'clickhouse', status: 'degraded' }; } // analytics down -> degraded
+  },
+};
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

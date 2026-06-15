@@ -22,7 +22,7 @@ function diagSummary(readiness) {
 // DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
 const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null }) {
   // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
   // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
   // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
@@ -255,6 +255,45 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/status') return { status: 200, body: statusPayload() };
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
+        if (path === '/api/runtime/readiness') {
+          // ADR-0001 Phase 8A: structured, READ-ONLY runtime health across storage / hot-state /
+          // event-sink / providers / signer / diagnostics / activation. Never opens live, never mutates.
+          // Postgres (configured SoT) is the only hard blocker; Redis/ClickHouse only ever degrade;
+          // real-money send stays structurally disabled regardless of anything reported here.
+          const status = statusPayload();
+          const act = readiness();
+          const safeProbe = async (fn, fallback) => { if (typeof fn !== 'function') return fallback; try { return (await fn()) || fallback; } catch { return { ...fallback, status: 'degraded' }; } };
+          const storage = await safeProbe(runtimeProbes && runtimeProbes.storage, { backend: 'json', status: 'ok' });
+          const hot_state = await safeProbe(runtimeProbes && runtimeProbes.hotState, { backend: 'memory', status: 'ok' });
+          const event_sink = await safeProbe(runtimeProbes && runtimeProbes.eventSink, { backend: 'none', status: 'disabled' });
+          const providers = providerStatuses(status.providers);
+          const providerDegraded = Object.values(providers).some((s) => s === 'down' || s === 'degraded');
+          const blockers = [];
+          if (storage.status === 'fail') blockers.push('storage_unavailable');
+          let overall = 'ready';
+          if (storage.status === 'fail') overall = 'blocked';
+          else if (storage.status === 'degraded' || hot_state.status === 'degraded' || event_sink.status === 'degraded' || providerDegraded) overall = 'degraded';
+          return { status: 200, body: {
+            overall,
+            mode: status.mode || null,
+            run_mode: status.run_mode || null,
+            operating_state: status.operating_state?.operating_state || null,
+            storage, hot_state, event_sink, providers,
+            signer: status.signer || null,
+            diagnostics: { backend: diagnostics ? 'package' : 'legacy', available: !!diagnostics },
+            activation: {
+              live_send_enabled: false,        // STRUCTURAL hard stop — real-money send authority is absent in this build
+              activation_required: true,
+              mode: status.mode || null,        // 'real_live' here means ARMED, not able-to-send
+              live_engine: status.engine?.live_engine || null,
+              real_live_ready: !!act.real_live_ready,
+              blockers: act.blockers || [],
+            },
+            blockers,
+            safety: DIAG_SAFETY,                // this endpoint reads only: no transaction, position, or intent
+            checked_at: new Date().toISOString(),
+          } };
+        }
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
         if (path === '/api/providers/health') {

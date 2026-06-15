@@ -54,6 +54,7 @@ export const api = {
   diagnosticsStatus: () => call('GET', '/api/diagnostics/status'),
   runDiagnostics: (opts = {}) => call('POST', '/api/diagnostics/run', opts),
   diagnosticsProviderTest: () => call('POST', '/api/diagnostics/provider-test', {}),
+  runtimeReadiness: () => call('GET', '/api/runtime/readiness'), // ADR-0001 Phase 8A (read-only runtime health)
 
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),
