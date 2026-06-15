@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/storage",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure storage kernel (ADR-0001 Phase 4A): repository interfaces + record mappers + injected adapters (memory / injected-JSON / injected-SQL shape / injected event-writer). No db drivers, no node:fs — all mechanisms are injected (DI) per docs/architecture/package-boundaries.md. Foundation for Phase 4B Postgres/Redis/ClickHouse wiring.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}
