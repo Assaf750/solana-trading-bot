@@ -32,6 +32,7 @@ export const api = {
   status: () => call('GET', '/api/status'),
   config: () => call('GET', '/api/config'),
   readiness: () => call('GET', '/api/readiness'),
+  modes: () => call('GET', '/api/modes'),
   wallets: () => call('GET', '/api/wallets'),
   secrets: () => call('GET', '/api/secrets'),
   audit: (limit = 50) => call('GET', `/api/audit?limit=${limit}`),

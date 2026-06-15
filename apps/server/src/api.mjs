@@ -3,6 +3,7 @@
 // Vault/session endpoints are local ops surfaces (auth-like), not trading commands.
 // RULE: no response ever contains a raw secret — refs + masked previews only.
 import { computeReadiness } from './readiness.mjs';
+import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier }) {
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
@@ -28,7 +29,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
 
   function statusPayload() {
     const cfg = config.get();
-    return {
+    const payload = {
       operating_state: operatingState.get(),
       mode: cfg.mode,
       config_version: cfg.config_version,
@@ -43,6 +44,8 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           : 'ready_gated_by_owner_activation',
       },
     };
+    payload.run_mode = deriveRunMode(payload); // operator-facing mode (read_only/paper/live_armed/live_active)
+    return payload;
   }
 
   const commands = {
@@ -209,6 +212,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/status') return { status: 200, body: statusPayload() };
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
+        if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/wallets') return { status: 200, body: { wallets: wallets.list() } };
         if (path === '/api/secrets') return { status: 200, body: { secrets: vault.listRefs() } };
         if (path.startsWith('/api/audit')) {

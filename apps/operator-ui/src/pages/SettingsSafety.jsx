@@ -59,6 +59,7 @@ export default function SettingsSafety() {
   const [notif, setNotif] = useState({});
   const [lists, setLists] = useState({ token_blacklist: '', token_whitelist: '' });
   const [market, setMarket] = useState({});
+  const [modesData, setModesData] = useState(null);
   const [activePreset, setActivePreset] = useState(null);
   const [saveMsg, setSaveMsg] = useState(null);
   const [confirmLive, setConfirmLive] = useState('');
@@ -110,6 +111,7 @@ export default function SettingsSafety() {
         token_whitelist: (d.lists?.token_whitelist || []).join('\n'),
       });
       setMarket({ min_fdv_usd: g(d.market_filters, 'min_fdv_usd'), max_fdv_usd: g(d.market_filters, 'max_fdv_usd'), min_holders: g(d.market_filters, 'min_holders') });
+      api.modes().then((m) => { if (m.ok) setModesData(m.data); });
       setActivePreset(null);
     }
   }
@@ -213,6 +215,7 @@ export default function SettingsSafety() {
     { key: 'risk', ico: '🛡', label: { en: 'Risk & EV', ar: 'المخاطر و EV' }, badge: complete ? null : 'danger' },
     { key: 'execution', ico: '⚡', label: { en: 'Execution', ar: 'التنفيذ' } },
     { key: 'notifications', ico: '🔔', label: { en: 'Notifications', ar: 'التنبيهات' } },
+    { key: 'modes', ico: '🎚', label: { en: 'Modes', ar: 'الأوضاع' } },
     { key: 'activation', ico: '🔴', label: { en: 'Real-live', ar: 'التفعيل الحقيقي' }, badge: blockerN ? 'warn' : 'ok' },
   ];
 
@@ -545,6 +548,36 @@ export default function SettingsSafety() {
         </Card>
       )}
 
+      {tab === 'modes' && (
+        <Card title={ar ? 'أوضاع التشغيل' : 'Run modes'}
+          sub={ar ? 'الوضع النشط مشتق من حالة النظام الحقيقية. لكل وضع: ماذا يفعل، وماذا يحتاج ليعمل.' : 'The active mode is derived from real system state. For each: what it does, and what it still needs.'}>
+          {!modesData ? <p className="muted">{ar ? 'جارٍ التحميل…' : 'loading…'}</p> : (
+            <div className="stack" style={{ gap: 'var(--s-3)' }}>
+              {modesData.modes.map((m) => (
+                <div key={m.id} style={{ border: `1px solid ${m.active ? 'var(--c-brand)' : 'var(--c-border)'}`, borderRadius: 'var(--radius)', padding: 'var(--s-3)', background: m.active ? 'var(--c-brand-bg)' : 'transparent', opacity: m.available || m.active ? 1 : 0.6 }}>
+                  <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+                    <strong>{m.title}</strong>
+                    <span className="row" style={{ gap: 6 }}>
+                      {m.active && <Badge tone="ok">{ar ? 'نشط الآن' : 'active now'}</Badge>}
+                      {!m.available && !m.active && <Badge tone="neutral">{ar ? 'غير متاح' : 'unavailable'}</Badge>}
+                    </span>
+                  </div>
+                  <p className="muted fs-sm" style={{ margin: '4px 0' }}>{m.purpose}</p>
+                  <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBlockEnd: m.needs?.length ? 6 : 0 }}>
+                    {m.can.map((c, i) => <Badge key={i} tone="ok">✓ {c}</Badge>)}
+                  </div>
+                  {m.needs?.length > 0 && (
+                    <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                      {m.needs.map((n, i) => <Badge key={i} tone="warn">{ar ? 'يحتاج' : 'needs'}: {n}</Badge>)}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
       {tab === 'activation' && (
         <Card title={t('settings.realLive')} right={
           readiness?.real_live_ready
@@ -605,7 +638,7 @@ export default function SettingsSafety() {
         </Card>
       )}
 
-      {tab !== 'activation' && (
+      {tab !== 'activation' && tab !== 'modes' && (
         <div className="settings-savebar">
           <button className="btn primary" onClick={save}>{ar ? '💾 حفظ كل الإعدادات' : '💾 Save all settings'}</button>
           {saveMsg && <Badge tone={saveMsg.tone}>{saveMsg.text}</Badge>}

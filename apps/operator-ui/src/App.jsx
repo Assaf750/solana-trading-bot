@@ -19,20 +19,30 @@ import SettingsSafety from './pages/SettingsSafety.jsx';
 import Alerts from './pages/Alerts.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
+// operator-facing run mode (server-derived) -> header chip label + tone
+const RUN_MODE = {
+  read_only: { en: 'READ-ONLY', ar: 'قراءة فقط', tone: 'neutral' },
+  paper: { en: 'PAPER', ar: 'ورقي', tone: 'info' },
+  live_armed: { en: 'LIVE · ARMED', ar: 'حقيقي · مُسلّح', tone: 'warn' },
+  live_active: { en: 'LIVE · ACTIVE', ar: 'حقيقي · نشط', tone: 'danger' },
+};
+
 const NAV = [
   { sec: { en: 'Overview', ar: 'النظرة العامة' } },
   { to: '/command', key: 'command', ico: '◈' },
-  { sec: { en: 'Trading', ar: 'التداول' } },
-  { to: '/workspace', key: 'workspace', ico: '▤' },
+  { sec: { en: 'Discover & analyze', ar: 'الاكتشاف والتحليل' } },
   { to: '/radar', key: 'radar', ico: '◎' },
   { to: '/tokens', key: 'tokens', ico: '⬡' },
   { to: '/wallets', key: 'wallets', ico: '◇' },
+  { sec: { en: 'Trade', ar: 'التداول' } },
+  { to: '/workspace', key: 'workspace', ico: '▤' },
+  { sec: { en: 'Reports & alerts', ar: 'التقارير والتنبيهات' } },
   { to: '/analytics', key: 'analytics', ico: '▦' },
-  { sec: { en: 'Setup & System', ar: 'الإعداد والنظام' } },
+  { to: '/alerts', key: 'alerts', ico: '⚑' },
+  { sec: { en: 'Setup & system', ar: 'الإعداد والنظام' } },
   { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/funds', key: 'funds', ico: '◰' },
   { to: '/settings', key: 'settings', ico: '⚙' },
-  { to: '/alerts', key: 'alerts', ico: '⚑' },
   { to: '/help', key: 'help', ico: '?' }
 ];
 
@@ -72,6 +82,12 @@ function TopBar({ onOpenCmdk, onOpenTweaks }) {
           )}
         </div>
         <span className="topbar-spacer" />
+        {connected && status?.run_mode && (
+          <span className="status-chip">
+            <span className="muted">{ar ? 'الوضع' : 'Mode'}:</span>
+            <Badge tone={RUN_MODE[status.run_mode]?.tone || 'neutral'}>{ar ? RUN_MODE[status.run_mode]?.ar : RUN_MODE[status.run_mode]?.en}</Badge>
+          </span>
+        )}
         <span className="status-chip">
           <span className="muted">{t('app.operatingState')}:</span>
           <Badge tone={opState === 'ACTIVE' ? 'ok' : opState === 'KILLED' || opState === 'OFFLINE' ? 'danger' : 'warn'}>
