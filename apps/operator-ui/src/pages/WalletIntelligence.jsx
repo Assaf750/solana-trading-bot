@@ -379,8 +379,48 @@ function WalletAnalysis({ ar, res }) {
   const hold = s.avg_hold_seconds != null ? `${Math.round(s.avg_hold_seconds / 60)} min` : '—';
   const bot = s.bot_signals || {};
   const rapidTone = bot.rapid_flip_ratio > 0.4 ? 'danger' : bot.rapid_flip_ratio > 0.15 ? 'warn' : 'ok';
+  const intel = res.intelligence;
+  const TIER = { copy_allowed: { ar: 'مسموح بالنسخ', en: 'Copy allowed', tone: 'ok' }, watch_only: { ar: 'مراقبة فقط', en: 'Watch only', tone: 'warn' }, candidate: { ar: 'مرشّح', en: 'Candidate', tone: 'info' }, degraded: { ar: 'متدهور', en: 'Degraded', tone: 'warn' }, banned: { ar: 'محظور', en: 'Banned', tone: 'danger' }, insufficient_data: { ar: 'بيانات غير كافية', en: 'Insufficient data', tone: 'neutral' } };
+  const CLS = { smart_money: { ar: 'مال ذكي', en: 'Smart money' }, sniper: { ar: 'قنّاص', en: 'Sniper' }, dev_suspect: { ar: 'مطوّر مشبوه', en: 'Dev suspect' }, noise: { ar: 'ضوضاء', en: 'Noise' }, insufficient: { ar: 'غير كافٍ', en: 'Insufficient' } };
+  const sev = (v) => (v === 'high' ? 'danger' : v === 'med' ? 'warn' : v === 'low' ? 'info' : 'neutral');
+  const sc = (v, inv) => (v == null ? 'var(--c-text-faint)' : inv ? (v >= 70 ? 'var(--c-danger)' : v >= 40 ? 'var(--c-warn)' : 'var(--c-ok)') : (v >= 60 ? 'var(--c-ok)' : v >= 35 ? 'var(--c-warn)' : 'var(--c-danger)'));
+  const SCORES = [['copyability', ar ? 'قابلية النسخ' : 'Copyability', false], ['latency_sensitivity', ar ? 'حساسية السرعة' : 'Latency sens.', true], ['entry_quality', ar ? 'جودة الدخول' : 'Entry quality', false], ['exit_quality', ar ? 'جودة الخروج' : 'Exit quality', false], ['risk_compatibility', ar ? 'توافق المخاطر' : 'Risk compat', false], ['consistency', ar ? 'الاتساق' : 'Consistency', false], ['liquidity_compatibility', ar ? 'توافق السيولة' : 'Liquidity', false]];
   return (
     <div className="stack" style={{ gap: 'var(--s-3)' }}>
+      {intel && (
+        <div style={{ border: '1px solid var(--c-border)', borderRadius: 'var(--radius)', padding: 'var(--s-3)' }}>
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 6 }}>
+            <strong className="fs-sm">{ar ? '🧠 ذكاء قابلية النسخ' : '🧠 Copyability intelligence'}</strong>
+            <span className="row" style={{ gap: 6 }}>
+              <Badge tone="neutral">{ar ? CLS[intel.classification]?.ar : CLS[intel.classification]?.en}</Badge>
+              <Badge tone={TIER[intel.tier]?.tone}>{ar ? TIER[intel.tier]?.ar : TIER[intel.tier]?.en}</Badge>
+            </span>
+          </div>
+          {intel.scores?.copyability != null && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px var(--s-3)', marginBlockStart: 8 }}>
+              {SCORES.map(([k, label, inv]) => (
+                <div key={k} className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                  <span className="muted fs-xs">{label}</span>
+                  <span className="mono fs-xs" style={{ color: sc(intel.scores[k], inv), fontWeight: 700 }}>{intel.scores[k] == null ? '—' : `${intel.scores[k]}`}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', marginBlockStart: 8 }}>
+            {intel.flags?.wash_trading && <Badge tone="danger">{ar ? 'غسل تداول' : 'wash'}</Badge>}
+            {intel.flags?.fake_profit && <Badge tone="danger">{ar ? 'ربح وهمي' : 'fake profit'}</Badge>}
+            {intel.flags?.dev_suspect && <Badge tone="danger">{ar ? 'مطوّر مشبوه' : 'dev suspect'}</Badge>}
+            <Badge tone="neutral">{ar ? 'مصدر الربح' : 'profit src'}: {intel.profit_source}</Badge>
+            {intel.typical_trade_sol != null && <Badge tone="info">~{intel.typical_trade_sol}◎/{ar ? 'صفقة' : 'trade'}</Badge>}
+          </div>
+          {intel.reasons?.length > 0 && (
+            <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0 0' }}>
+              {intel.reasons.map((r, i) => (<li key={i} style={{ padding: '3px 0', display: 'flex', gap: 6, alignItems: 'baseline' }}><Badge tone={sev(r.severity)}>{r.severity}</Badge><span className="fs-xs">{r.text}</span></li>))}
+            </ul>
+          )}
+          <p className="faint fs-xs" style={{ marginBlockStart: 6 }}>{ar ? `الثقة: ${intel.confidence} · تقديري من السلوك على السلسلة` : `confidence: ${intel.confidence} · heuristic from on-chain behavior`}</p>
+        </div>
+      )}
       {s.status === 'low_confidence' && <Badge tone="warn">{ar ? `ثقة منخفضة (${s.trades_closed} صفقة)` : `low confidence (${s.trades_closed})`}</Badge>}
       <div className="kpi-strip" style={{ margin: 0 }}>
         <Stat label={ar ? 'الربح' : 'Win rate'} value={wr} tone={s.win_rate >= 0.5 ? 'pos' : 'neg'} />

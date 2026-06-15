@@ -3,6 +3,7 @@
 // point-in-time read-model: win rate, FIFO realized PnL (in SOL), trade-outcome
 // distribution, avg hold, and bot/wash signals. No money, no signing — analytics only.
 import { detectLeaderSwap } from './swap-detector.mjs';
+import { assessCopyability } from './wallet-intelligence.mjs';
 
 const RAPID_FLIP_SECONDS = 5;
 const OUTCOME_BUCKETS = [
@@ -152,6 +153,8 @@ export async function analyzeWallet({ address, rpc, jupiter, maxSignatures = 150
   }
 
   const solPriceUsd = await cachedSolPriceUsd(jupiter);
+  const stats = computeWalletStats(events, { solPriceUsd });
+  const intelligence = assessCopyability({ stats, events });
 
-  return { ok: true, fetched, signatures_scanned: sigs.length, stats: computeWalletStats(events, { solPriceUsd }) };
+  return { ok: true, fetched, signatures_scanned: sigs.length, stats, intelligence };
 }
