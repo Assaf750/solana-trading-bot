@@ -56,6 +56,11 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
       mark_usd: cost_usd, mark_ts: nowIso(), mark_status: 'valid',
       mark_history: [Math.round(cost_usd * 1e6) / 1e6], // seed the real mark series with the entry value
       intent_id, // live intent that opened this position (for SENT_UNCONFIRMED reconciliation)
+      // Paper realism: the buy transaction also pays a network/priority fee that price-impact does
+      // NOT capture, so charge it (proportionally) at exit. SIMULATED book only — the LIVE book
+      // carries 0 here because live realized P&L comes from the REAL on-chain native-SOL proceeds,
+      // already net of every fee paid; charging an estimate on top would double-count.
+      entry_fee_usd: simulated ? (fee_usd_est || 0) : 0,
       simulated,
     };
     s.positions.push(position);
@@ -79,13 +84,17 @@ export function createPaperPortfolio({ file = DEFAULT_FILE, simulated = true } =
     const f = Math.min(1, Math.max(0, fraction));
     const qtySold = p.qty_ui * f;
     const costPart = p.cost_usd * f;
-    const realized = proceeds_usd - costPart - (fee_usd_est || 0);
+    // entry-side fee charged proportionally to the fraction exited (paper book only — see recordEntry).
+    // Mirrors costPart, so partial exits sum to exactly one entry fee over a full round trip.
+    const entryFeePart = (p.entry_fee_usd || 0) * f;
+    const realized = proceeds_usd - costPart - (fee_usd_est || 0) - entryFeePart;
     p.qty_ui -= qtySold;
     p.cost_usd -= costPart;
+    p.entry_fee_usd = (p.entry_fee_usd || 0) - entryFeePart;
     p.realized_usd = (p.realized_usd || 0) + realized; // per-position net P&L (sums partials) for leader stats
     if (f >= 1 || p.qty_ui <= 0) {
       p.position_state = 'CLOSED';
-      p.qty_ui = 0; p.cost_usd = 0;
+      p.qty_ui = 0; p.cost_usd = 0; p.entry_fee_usd = 0;
       p.closed_at = nowIso();
     } else if (Number.isFinite(p.mark_usd) && p.mark_status === 'valid') {
       // partial exit: shrink the mark to the remaining quantity so unrealized P&L isn't inflated

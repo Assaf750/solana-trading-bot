@@ -165,19 +165,40 @@ test('portfolio: entry -> mark -> partial exit -> full exit, FIFO P&L correct', 
     copy_mode: 'full_mirror', tp_pct: 50, sl_pct: 30,
   });
   assert.equal(pf.openCount(), 1);
-  // sell half for 80 USD => realized = 80 - 50(cost half) - 0.05 = 29.95
+  // Paper realism: BOTH the buy fee and each sell fee are charged. The 0.05 entry fee is spread
+  // proportionally across the exits (0.025 + 0.025), so a full round trip costs entry+exit fees.
+  // sell half for 80 USD => realized = 80 - 50(cost half) - 0.05(exit) - 0.025(half entry fee) = 29.925
   const r1 = pf.recordExit({ position_id: pos.position_id, fraction: 0.5, proceeds_usd: 80, fee_usd_est: 0.05, reason: 'leader_partial_sell_mirrored' });
   assert.equal(r1.ok, true);
-  assert.ok(Math.abs(r1.realized_usd - 29.95) < 1e-9);
+  assert.ok(Math.abs(r1.realized_usd - 29.925) < 1e-9, `r1 ${r1.realized_usd}`);
   assert.equal(r1.closed, false);
-  // sell rest for 40 => realized = 40 - 50 - 0.05 = -10.05
+  // sell rest for 40 => realized = 40 - 50 - 0.05(exit) - 0.025(remaining entry fee) = -10.075
   const r2 = pf.recordExit({ position_id: pos.position_id, fraction: 1, proceeds_usd: 40, fee_usd_est: 0.05, reason: 'leader_full_exit_mirrored' });
   assert.equal(r2.closed, true);
-  assert.ok(Math.abs(r2.realized_usd - -10.05) < 1e-9);
+  assert.ok(Math.abs(r2.realized_usd - -10.075) < 1e-9, `r2 ${r2.realized_usd}`);
   const s = pf.summary();
   assert.equal(s.simulated, true);
-  assert.ok(Math.abs(s.realized_pnl_usd - 19.9) < 0.01);
+  assert.ok(Math.abs(s.realized_pnl_usd - 19.85) < 0.01, `total ${s.realized_pnl_usd}`);
   assert.equal(s.open_positions, 0);
+});
+
+test('paper realism: a full round trip charges BOTH the entry and exit fee', () => {
+  const pf = createPaperPortfolio({ file: 'test-paper-roundtrip.json', simulated: true });
+  const pos = pf.recordEntry({ leader_address: LEADER, wallet_id: 'w1', token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 100, fee_usd_est: 0.05, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  // exit at exactly cost (100) -> the ONLY P&L is the two fees: -(0.05 entry + 0.05 exit) = -0.10
+  const r = pf.recordExit({ position_id: pos.position_id, fraction: 1, proceeds_usd: 100, fee_usd_est: 0.05, reason: 'leader_full_exit_mirrored' });
+  assert.ok(Math.abs(r.realized_usd - -0.10) < 1e-9, `round-trip fee ${r.realized_usd}`);
+});
+
+test('live accounting unchanged: the LIVE book never charges the entry-fee estimate', () => {
+  // live book (simulated:false) books realized from REAL net proceeds; the entry fee estimate must
+  // NOT be charged (it would double-count the fee already reflected in the on-chain proceeds).
+  const pf = createPaperPortfolio({ file: 'test-live-nofee.json', simulated: false });
+  const pos = pf.recordEntry({ leader_address: LEADER, wallet_id: 'w1', token_mint: MEME, qty_ui: 100, decimals: 6, cost_usd: 100, fee_usd_est: 0.05, price_impact_pct: 0, copy_mode: 'follow_entry_user_exit', tp_pct: 50, sl_pct: 30 });
+  assert.equal(pos.entry_fee_usd, 0); // live carries no entry-fee estimate
+  // live exit passes fee_usd_est: 0 (proceeds already net) -> realized is exactly proceeds - cost
+  const r = pf.recordExit({ position_id: pos.position_id, fraction: 1, proceeds_usd: 130, fee_usd_est: 0, reason: 'take_profit_hit' });
+  assert.equal(r.realized_usd, 30); // 130 - 100, no fee estimate applied
 });
 
 // ---------- risk gates ----------

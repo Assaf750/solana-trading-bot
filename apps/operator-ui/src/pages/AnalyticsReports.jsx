@@ -122,7 +122,7 @@ export default function AnalyticsReports() {
       <DangerNote tone={live ? 'danger' : 'sim'}>
         {live
           ? (ar ? '🔴 وضع حقيقي — نتائج تداول فعلي بمالك على السلسلة. المقياس غير المتوفّر يُعرض «غير متوفّر».' : '🔴 REAL-LIVE — actual on-chain results with your funds. Unavailable metrics are shown as “unavailable”.')
-          : (ar ? 'كل الأرقام محاكاة (paper) بأسعار سوق حقيقية — لا تُخلط بنتائج حقيقية.' : 'All numbers are simulated (paper) at real prices — never mixed with live results.')}
+          : (ar ? 'كل الأرقام محاكاة (paper) بأسعار سوق حقيقية، مع خصم رسوم تنفيذ تقديرية للدخول والخروج — لا تُخلط بنتائج حقيقية.' : 'All numbers are simulated (paper) at real prices, with an estimated execution fee charged on both entry and exit — never mixed with live results.')}
       </DangerNote>
 
       <Card title={<span>{ar ? 'منحنى الأرباح المحقّقة' : 'Realized equity curve'} {!live && <SimulatedBadge />}</span>}
