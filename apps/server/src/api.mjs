@@ -7,6 +7,14 @@ import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
 import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
 
+// ADR-0001 Phase 5B: map a DiagnosticRun readiness (valid/warning/invalid) to an operator-facing
+// summary. `safe_to_run_live` is ADVISORY ONLY — it never arms or activates live trading; it merely
+// reports whether the pre-flight checks all passed.
+function diagSummary(readiness) {
+  const overall = readiness === 'valid' ? 'pass' : readiness === 'warning' ? 'warn' : 'fail';
+  return { overall, safe_to_run_live: readiness === 'valid' };
+}
+
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
@@ -222,6 +230,12 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
         if (path === '/api/providers/health') return { status: 200, body: { providers: providerHealth ? providerHealth.snapshot() : {} } };
+        // ADR-0001 Phase 5B: read-only live-readiness rollup (connectivity + provider health).
+        // Present only when DIAGNOSTIC_BACKEND=package wired the adapter; never trades.
+        if (diagnostics && path === '/api/diagnostics/status') {
+          const r = await diagnostics.runLiveReadinessDiagnostic();
+          return { status: 200, body: { ok: true, ...diagSummary(r.readiness), readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at } };
+        }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
           const limit = Number(qs.get('limit')) || 50;
@@ -441,11 +455,16 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           }
           return { status: res.ok ? 200 : 400, body: res };
         }
-        // ADR-0001 Phase 5A: pre-flight diagnostics (read-only; never trades). Only present when
-        // DIAGNOSTIC_BACKEND=package wired a DiagnosticExecutionAdapter; otherwise falls through to 404.
-        if (diagnostics && path === '/api/diagnostics/run') {
+        // ADR-0001 Phase 5A/5B: pre-flight diagnostics (read-only; never opens a position, claims an
+        // intent, or broadcasts). Present only when DIAGNOSTIC_BACKEND=package wired the adapter;
+        // otherwise these fall through to 404. `/execution-test` is an explicit alias of `/run`.
+        if (diagnostics && (path === '/api/diagnostics/run' || path === '/api/diagnostics/execution-test')) {
           const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
-          return { status: 200, body: { ok: true, run } };
+          return { status: 200, body: { ok: true, run, ...diagSummary(run.readiness) } };
+        }
+        if (diagnostics && path === '/api/diagnostics/provider-test') {
+          const check = await diagnostics.runProviderHealthCheck();
+          return { status: 200, body: { ok: true, check, overall: check.status } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

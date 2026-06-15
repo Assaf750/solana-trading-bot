@@ -19,6 +19,7 @@ import AnalyticsReports from './pages/AnalyticsReports.jsx';
 import MyWalletsFunds from './pages/MyWalletsFunds.jsx';
 import SettingsSafety from './pages/SettingsSafety.jsx';
 import Alerts from './pages/Alerts.jsx';
+import Diagnostics from './pages/Diagnostics.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
 // operator-facing run mode (server-derived) -> header chip label + tone
@@ -46,6 +47,7 @@ const NAV = [
   { sec: { en: 'Setup & system', ar: 'الإعداد والنظام' } },
   { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/funds', key: 'funds', ico: '◰' },
+  { to: '/diagnostics', key: 'diagnostics', ico: '⚕' },
   { to: '/settings', key: 'settings', ico: '⚙' },
   { to: '/help', key: 'help', ico: '?' }
 ];
@@ -209,6 +211,7 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsReports />} />
             <Route path="/risk" element={<RiskCenter />} />
             <Route path="/funds" element={<MyWalletsFunds />} />
+            <Route path="/diagnostics" element={<Diagnostics />} />
             <Route path="/settings" element={<SettingsSafety />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/help" element={<HelpGlossary />} />

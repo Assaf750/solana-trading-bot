@@ -64,6 +64,7 @@ export default {
     analytics: 'التحليلات والتقارير',
     risk: 'مركز المخاطر',
     funds: 'محافظي والأموال',
+    diagnostics: 'التشخيص',
     settings: 'الإعدادات والأمان',
     alerts: 'التنبيهات',
     help: 'المساعدة / المسرد'
