@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/risk",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Hard-risk entry gate + risk-limit validation, budget shape, reject reasons and result normalization (ADR-0001 Phase 2C). Pure; Hard-Risk limits are binding and fail-safe. apps/server delegates instead of reimplementing the gate.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}
