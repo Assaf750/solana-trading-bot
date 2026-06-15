@@ -50,6 +50,8 @@ export default function Diagnostics() {
 
   const [run, setRun] = useState(null);
   const [summary, setSummary] = useState(null); // { overall, safe_to_run_live }
+  const [safety, setSafety] = useState(null); // server-declared guarantees (Phase 5C)
+  const [provider, setProvider] = useState(null); // dedicated provider-test result
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
   const [disabled, setDisabled] = useState(false);
@@ -63,9 +65,20 @@ export default function Diagnostics() {
     if (r.ok && r.data?.ok) {
       setRun(r.data.run);
       setSummary({ overall: r.data.overall, safe_to_run_live: r.data.safe_to_run_live });
+      setSafety(r.data.safety || null);
     } else {
       setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل التشخيص' : 'diagnostic failed') });
     }
+  }
+
+  async function providerTest() {
+    setBusy(true); setMsg(null);
+    const r = await api.diagnosticsProviderTest();
+    setBusy(false);
+    if (r.status === 404) { setDisabled(true); return; }
+    setDisabled(false);
+    if (r.ok && r.data?.ok) { setProvider(r.data); setSafety(r.data.safety || null); }
+    else setMsg({ tone: 'danger', text: r.data?.error || (ar ? 'فشل فحص المزوّدين' : 'provider test failed') });
   }
 
   if (!connected) {
@@ -97,6 +110,8 @@ export default function Diagnostics() {
           <button className="btn primary" onClick={runTest} disabled={busy}>
             {busy ? (ar ? 'جارٍ التشغيل…' : 'Running…') : (ar ? 'تشغيل اختبار التنفيذ' : 'Run Execution Test')}
           </button>
+          <button className="btn" onClick={providerTest} disabled={busy}>{ar ? 'فحص المزوّدين' : 'Provider test'}</button>
+          {provider && <Badge tone={STATUS_TONE[provider.overall] || 'neutral'}>{ar ? 'المزوّدون' : 'providers'}: {(provider.overall || '').toUpperCase()}</Badge>}
           {run?.created_at && <span className="muted fs-xs">{ar ? 'آخر تشغيل' : 'last run'}: <span className="mono" dir="ltr">{run.created_at}</span></span>}
           {summary && (
             <span className="muted fs-xs">
@@ -105,6 +120,14 @@ export default function Diagnostics() {
             </span>
           )}
         </div>
+        {safety && (
+          <div className="row fs-xs muted" style={{ gap: 'var(--s-2)', flexWrap: 'wrap', marginBlockStart: 8 }} aria-label={ar ? 'ضمانات الأمان' : 'safety guarantees'}>
+            {safety.diagnostic_only && <Badge tone="sim">{ar ? 'تشخيص فقط' : 'diagnostic only'}</Badge>}
+            {safety.no_transaction_sent && <Badge tone="sim">{ar ? 'لا معاملة' : 'no transaction sent'}</Badge>}
+            {safety.no_position_opened && <Badge tone="sim">{ar ? 'لا مركز' : 'no position opened'}</Badge>}
+            {safety.no_intent_claimed && <Badge tone="sim">{ar ? 'لا نيّة تنفيذ' : 'no intent claimed'}</Badge>}
+          </div>
+        )}
         {msg && <div style={{ marginBlockStart: 8 }}><Badge tone={msg.tone}>{msg.text}</Badge></div>}
         {disabled && (
           <div style={{ marginBlockStart: 'var(--s-3)' }}>

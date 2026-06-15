@@ -15,6 +15,12 @@ function diagSummary(readiness) {
   return { overall, safe_to_run_live: readiness === 'valid' };
 }
 
+// ADR-0001 Phase 5C: every diagnostics response declares these guarantees explicitly, so any caller
+// (UI or legacy action routed here) carries the same contract: a diagnostic NEVER sends a
+// transaction, opens a position, or claims an execution intent. These are structural facts about the
+// DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
+const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
+
 export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null }) {
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
@@ -234,7 +240,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         // Present only when DIAGNOSTIC_BACKEND=package wired the adapter; never trades.
         if (diagnostics && path === '/api/diagnostics/status') {
           const r = await diagnostics.runLiveReadinessDiagnostic();
-          return { status: 200, body: { ok: true, ...diagSummary(r.readiness), readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at } };
+          return { status: 200, body: { ok: true, ...diagSummary(r.readiness), readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY } };
         }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
@@ -460,11 +466,11 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         // otherwise these fall through to 404. `/execution-test` is an explicit alias of `/run`.
         if (diagnostics && (path === '/api/diagnostics/run' || path === '/api/diagnostics/execution-test')) {
           const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
-          return { status: 200, body: { ok: true, run, ...diagSummary(run.readiness) } };
+          return { status: 200, body: { ok: true, run, ...diagSummary(run.readiness), safety: DIAG_SAFETY } };
         }
         if (diagnostics && path === '/api/diagnostics/provider-test') {
           const check = await diagnostics.runProviderHealthCheck();
-          return { status: 200, body: { ok: true, check, overall: check.status } };
+          return { status: 200, body: { ok: true, check, overall: check.status, safety: DIAG_SAFETY } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

@@ -100,6 +100,16 @@ test('diagnostic route never calls liveExecutor, never mutates positions, never 
   assert.equal(posCounter.n, 0, 'no portfolio mutation');
 });
 
+// ---------- safety guarantees on every response (Phase 5C) ----------
+test('every diagnostics response declares the safety guarantees (diagnostic_only / no tx / no position / no intent)', async () => {
+  const { api } = mkApi();
+  const expected = { diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true };
+  for (const [method, path] of [['POST', '/api/diagnostics/run'], ['POST', '/api/diagnostics/execution-test'], ['POST', '/api/diagnostics/provider-test'], ['GET', '/api/diagnostics/status']]) {
+    const r = await api.handle({ method, path, body: {} });
+    assert.deepEqual(r.body.safety, expected, `${method} ${path}`);
+  }
+});
+
 // ---------- provider failure mapping ----------
 test('provider failure maps to fail/warn', async () => {
   const down = mkApi({ providerHealth: stubHealth({ rpc: { status: 'down', error_pct: 90 } }) });

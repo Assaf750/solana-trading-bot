@@ -166,6 +166,7 @@ export default function SetupWizard() {
             disabled={!step1Done} />
           <button className="btn" onClick={doRpc} disabled={!step1Done || !rpc.trim()}>{ar ? 'حفظ مشفّراً' : 'Store encrypted'}</button>
           <button className="btn" onClick={doTest} disabled={!step1Done || !rpcDone}>{ar ? '🔌 اختبار' : '🔌 Test'}</button>
+          <Link to="/diagnostics" className="mono fs-xs" style={{ alignSelf: 'center' }}>{ar ? 'فحص تنفيذ كامل ← التشخيص' : 'Full pre-flight → Diagnostics'}</Link>
         </div>
         {connTest?.testing && <p className="muted">{ar ? 'جارٍ الاختبار…' : 'testing…'}</p>}
         {connTest && !connTest.testing && (connTest.ok
