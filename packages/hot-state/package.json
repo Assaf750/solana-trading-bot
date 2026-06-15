@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/hot-state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Pure hot-state interface + in-memory reference store (ADR-0001 Phase 6A): locks / TTL get-set / rate-limits / cursors / provider-health + readiness cache. Hot-state is CACHE ONLY — never source of truth (Postgres/JSON is SoT); every entry is rebuildable. No redis driver, no timers, no network — the clock is injected and the Redis-backed store lives in apps/server. See docs/architecture/package-boundaries.md.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}
