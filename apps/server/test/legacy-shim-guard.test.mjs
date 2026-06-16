@@ -50,14 +50,20 @@ test('RISK_BACKEND: shim removed (3B.2) — env value has no effect; gate is @so
   assert.ok(!/process\.env\.RISK_BACKEND|legacyCheckEntryGates/.test(src), 'risk-gates no longer carries the RISK shim'); // comment may name the removed flag
 });
 
-// ---------- PROVIDER_BACKEND — both monitors are usable under every flag value ----------
-test('PROVIDER_BACKEND: legacy + default + unknown all build a working provider-health monitor', () => {
+// ---------- PROVIDER_BACKEND — shim REMOVED in 3B.4; the env var is now inert (confirmed below) ----------
+// Phase 3B.4 REMOVED the PROVIDER_BACKEND shim after 3B.3/3B.4 proved byte-identical parity for all six
+// dispatch points (jupiter / rpc incl. subscribeWallets streaming / provider-health / helius-das /
+// jito-tip / index jito glue). The wrappers now delegate straight to @soltrade/provider-adapters.
+test('PROVIDER_BACKEND: shim removed (3B.4) — env value has no effect; providers come from the package', () => {
   for (const val of ['legacy', undefined, 'garbage']) {
     const m = withEnv('PROVIDER_BACKEND', val, () => createProviderHealth());
     assert.equal(typeof m.record, 'function', `record present (PROVIDER_BACKEND=${val})`);
-    assert.equal(typeof m.snapshot, 'function', `snapshot present (PROVIDER_BACKEND=${val})`);
     m.record('rpc', true, 10, null);
-    assert.ok(m.snapshot().rpc, `snapshot reflects a recorded provider (PROVIDER_BACKEND=${val})`);
+    assert.ok(m.snapshot().rpc, `snapshot works regardless of PROVIDER_BACKEND=${val}`);
+  }
+  for (const f of ['jupiter-client', 'rpc-client', 'provider-health', 'helius-das', 'jito-tip-tx']) {
+    const src = readFileSync(join(ROOT, 'apps', 'server', 'src', 'engine', `${f}.mjs`), 'utf8');
+    assert.ok(!/process\.env\.PROVIDER_BACKEND/.test(src), `${f}: PROVIDER_BACKEND dispatch removed`); // comment may name it
   }
 });
 

@@ -102,8 +102,9 @@ const hotSigner = process.env.HOT_EXECUTOR_BIN
 // execution.submit_backend='jito' AND the URL is set; the live-executor falls back to RPC on any
 // failure. The URL is resolved from the vault at call time and never logged.
 // Jito bundle sender + tip floor — OWNED by @soltrade/provider-adapters (ADR-0001 Phase 2D). The
-// server delegates behind PROVIDER_BACKEND (default=package); the URL is resolved from the vault at
-// call time (never logged) and injected via getBundleUrl. The legacy in-process glue is retained.
+// PROVIDER_BACKEND legacy in-process glue was REMOVED in Phase 3B.4 after parity was proven
+// byte-identical (url-unset / unavailable / http-error / json-rpc-error / no-result / success + tip
+// floor). The block-engine URL is resolved from the vault at call time (never logged) via getBundleUrl.
 const jitoProvider = createJitoProvider({
   request: (u, o) => fetch(u, o),
   getBundleUrl: () => {
@@ -114,46 +115,8 @@ const jitoProvider = createJitoProvider({
     return { ok: true, url: r.value };
   },
 });
-async function jitoSendBundle(txsBase64) {
-  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyJitoSendBundle(txsBase64) : jitoProvider.sendBundle(txsBase64);
-}
-async function getJitoTipFloor() {
-  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyGetJitoTipFloor() : jitoProvider.getTipFloor();
-}
-async function legacyJitoSendBundle(txsBase64) {
-  const ref = config.get().providers?.jito_url_ref;
-  if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
-  const r = vault.getSecretForUse(ref.slice(6));
-  if (!r.ok) return { ok: false, error: 'jito_url_unavailable' };
-  try {
-    const res = await fetch(`${r.value.replace(/\/+$/, '')}/api/v1/bundles`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [txsBase64, { encoding: 'base64' }] }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) return { ok: false, error: `jito_http_${res.status}` };
-    const j = await res.json();
-    if (j.error) return { ok: false, error: `jito_${j.error.code ?? 'err'}` };
-    // a 200 with no bundle id is NOT an accept — treat as failure so submitSigned falls back to RPC
-    if (!j.result) return { ok: false, error: 'jito_no_bundle_id' };
-    return { ok: true, result: j.result };
-  } catch (e) {
-    return { ok: false, error: `jito_failed_${String(e?.name || 'err')}` };
-  }
-}
-// Live Jito tip floor (dynamic-tip mode). Public endpoint; best-effort with a short timeout —
-// any failure makes resolveTipLamports fall back to the fixed jito_tip_lamports.
-async function legacyGetJitoTipFloor() {
-  try {
-    const res = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', { signal: AbortSignal.timeout(5000) });
-    if (!res.ok) return null;
-    const j = await res.json();
-    return Array.isArray(j) ? j[0] : j;
-  } catch {
-    return null;
-  }
-}
+const jitoSendBundle = (txsBase64) => jitoProvider.sendBundle(txsBase64);
+const getJitoTipFloor = () => jitoProvider.getTipFloor();
 // ADR-0001 Phase 4B.1: the decision-ledger store comes from the same storage backend resolved above.
 const decisionLedgerStore = await createDecisionLedgerStore(storageBackend);
 const liveExecutor = createLiveExecutor({

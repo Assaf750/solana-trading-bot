@@ -16,7 +16,7 @@ now.
 | Bucket | Meaning | Items |
 |---|---|---|
 | **Keep (not legacy)** | Active, correct, no action | JSON stores (default SoT), paper-engine/paper-portfolio (simulation substrate), kill-switch / hard-risk / signer-session (operator safety controls — NOT activation locks), Postgres/Redis/ClickHouse backends |
-| **Keep as compatibility shim** | Legacy path retained behind a flag (default = new package); rollback insurance | `*_BACKEND=legacy` paths (PROVIDER / DECISION_LEDGER / POSITIONS / RISK) |
+| **Keep as compatibility shim** | Legacy path retained behind a flag (default = new package); rollback insurance | `*_BACKEND=legacy` paths: DECISION_LEDGER / POSITIONS (RISK removed 3B.2 §7, PROVIDER removed 3B.4 §9) |
 | **Needs migration later** | Larger move, own phase + tests required | Paper → Diagnostic Adapter (full), legacy pruning after a soak (Phase 3B), Rust signing/exec boundary |
 | **Do not touch yet** | Out of scope / risky now | execution pipeline, risk/provider logic, activation command, JSON fallback removal |
 
@@ -40,9 +40,13 @@ now.
 | `DIAGNOSTIC_BACKEND=legacy` (default) | "no diagnostic adapter wired" (not a duplicate impl) | `@soltrade/execution` when `=package` | server default | None | keep; consider flipping default to `package` in a later phase |
 | Hot-state / event-sink backends | optional Redis cache / ClickHouse analytics | `@soltrade/hot-state`, `@soltrade/storage` event-writer | server when enabled (defaults: memory / none) | None | keep; never SoT |
 
-### Env flags (all currently live — none dead/obsolete)
+> **Update (3B.4):** the six `PROVIDER_BACKEND=legacy` rows above were REMOVED in Phase 3B.4 (see §9), and
+> `engine/risk-gates.mjs legacyCheckEntryGates` in 3B.2 (§7). The table is the original 9A inventory; the
+> only remaining behind-a-flag shims are `DECISION_LEDGER_BACKEND` and `POSITIONS_BACKEND`.
+
+### Env flags
 `STORAGE_BACKEND` (json|postgres) · `HOT_STATE_BACKEND` (memory|redis) · `EVENT_SINK_BACKEND` (none|clickhouse) ·
-`DIAGNOSTIC_BACKEND` (legacy|package) · `PROVIDER_BACKEND` / `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND` / `RISK_BACKEND` (legacy|package, default package) ·
+`DIAGNOSTIC_BACKEND` (legacy|package) · `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND` (legacy|package, default package; `RISK_BACKEND` removed 3B.2, `PROVIDER_BACKEND` removed 3B.4) ·
 `SOLTRADE_PORT` · `SOLTRADE_DATA_DIR` · `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE`.
 
 ---
@@ -163,3 +167,41 @@ files and `index.mjs`, make the wrappers package-only (mirroring the 3B.2 RISK r
 `PROVIDER_BACKEND` to the "Removed flags" note. Remaining shims after 3B.3: `PROVIDER_BACKEND` (parity
 5/6, removal pending the two blockers), `DECISION_LEDGER_BACKEND`, `POSITIONS_BACKEND` (all kept,
 default-off, behind their flags).
+
+## 9. Phase 3B.4 — both blockers closed; PROVIDER_BACKEND REMOVED
+
+The two 3B.3 blockers were closed and parity was proven for **all 6/6** dispatch points, so the
+`PROVIDER_BACKEND` legacy shim was removed (the package was already the default, so the active runtime is
+unchanged — this deletes the unused rollback path).
+
+**Blocker 1 — `rpc.subscribeWallets` streaming parity (closed).** Built a streaming-parity harness
+(fake `WebSocket` + `node:test` `mock.timers`, no network) that drives an identical scripted scenario —
+open → subscriptions → `logsNotification` → inline `transactionNotification` → malformed/errored frames →
+close → gap window → bounded-backoff reconnect — through the **real legacy and real package** clients via
+the flag, and asserted the full observable trace (`onUp` / `onLeaderActivity` / `onGap` / re-subscribe /
+socket count) was **byte-identical**, plus identical gRPC-ingestor dispatch args. The harness is retained
+as `apps/server/test/provider-stream-parity.test.mjs` (now driving the package path against that golden
+trace; gRPC dispatch also covered by `rpc-transport.test.mjs`).
+
+**Blocker 2 — `index.mjs` jito glue (closed).** Proved `legacyJitoSendBundle` / `legacyGetJitoTipFloor`
+byte-identical to the package `createJitoProvider.sendBundle` / `getTipFloor` over a shared mock `request`
+across every branch (url unset / unavailable / HTTP error / JSON-RPC error / no-result / success + tip
+floor array/object/null). The inline glue was deleted; `index.mjs` now calls `jitoProvider` directly.
+
+**Removed:** `legacyCreateJupiterClient` (jupiter-client), `legacyCreateRpcClient` (rpc-client),
+`legacyCreateProviderHealth` (provider-health), `legacyCreateDas` (helius-das), `legacyBuildTipTransferTx`
+/ `legacySelectTipLamports` (jito-tip-tx), and `legacyJitoSendBundle` / `legacyGetJitoTipFloor` (index.mjs),
+plus every `process.env.PROVIDER_BACKEND` dispatch. Each wrapper now delegates straight to
+`@soltrade/provider-adapters` (the server still injects the live mechanisms — fetch, WebSocket, the gRPC
+ingestor factory, USDC_MINT, the vault-resolved bundle URL). The pure RPC helpers (`isHeliusHost`,
+`buildWalletSubscriptions`, `parseStreamNotification`) stay exported (used by `rpc-transport.test.mjs`).
+
+**Updated with it:** `live-first-runtime-flags.md` (PROVIDER_BACKEND → "Removed flags"); `backend-defaults.test.mjs`
+(PROVIDER removal guard — no env dispatch, no legacy impl, delegates to the package);
+`legacy-shim-guard.test.mjs` (PROVIDER section asserts the env var is inert + the source no longer
+dispatches); `docs-consistency.test.mjs` (PROVIDER_BACKEND dropped from the canonical-flag list);
+`provider-shim-parity.test.mjs` (reframed: the 3B.3 parity tests now double as package behavioural
+coverage + proof the flag is inert). `.env.example` never referenced `PROVIDER_BACKEND`.
+
+**Remaining shims after 3B.4:** `DECISION_LEDGER_BACKEND`, `POSITIONS_BACKEND` (both kept, default-off,
+behind their flags). Keep JSON fallback + paper-engine.
