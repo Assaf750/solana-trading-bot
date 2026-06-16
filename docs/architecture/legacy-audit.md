@@ -417,9 +417,8 @@ Everything below is OPEN; everything in §1–§15 is DONE.
    deploy (no target environment / orchestrator manifest / secrets-management integration yet).
 3. **Optional Rust submit/bundle deepening.** `services/hot-executor` is the official signer (Phase
    Rust-1); a later phase may move more of the execution path (tx submit / Jito bundle send) into the crate.
-4. **`services/*` unused-scaffold audit.** Per-dir audit of the ~14 unconnected `services/*` dirs above —
-   classify each as wire / extract-into-a-package / delete, then execute. (`services/signer-service` is
-   already empty.)
+4. **`services/*` unused-scaffold audit — DONE** (Phase Services-Audit, §18): 13 empty placeholder dirs
+   removed; `services/` now holds only the real, used dirs (`hot-executor`, `ingestor`, `analytics`).
 
 ## 17. Phase Deploy-1 — Docker image + CI build (no behavior change)
 
@@ -445,3 +444,29 @@ env-configurable bind host (default preserved).
 
 **Out of scope (still §16.2 remaining):** registry push, a real cloud deploy / orchestrator manifest, and
 secrets-management integration.
+
+## 18. Phase Services-Audit — classify + purge unconnected `services/*` scaffold (no behavior change)
+
+Full audit of every `services/*` dir (content size + every cross-reference in apps / packages / scripts /
+docs / CI / Dockerfile / compose / tests).
+
+| service | evidence | class | action |
+|---|---|---|---|
+| `hot-executor` | 7 files, 474 Rust lines; used via `HOT_EXECUTOR_BIN` + the CI `rust` job | binary-runtime | KEEP |
+| `ingestor` | 8 files, 320 JS lines; imported by `apps/server` (`createGrpcIngestor`) + copied into the image | wired-runtime | KEEP |
+| `analytics` | 17 files, real Python (backtest / leader-scoring + 4 unittest cases); ADR-documented offline ClickHouse sidecar (advisory) | keep-for-next-phase | KEEP |
+| `provider-adapters` · `risk-gates` · `intent-ledger` | `.gitkeep` only (0 code); superseded by `packages/provider-adapters` · `packages/risk` · `packages/decision-ledger` | package-duplicate | **DELETE** |
+| `decision-engine` · `execution-adapter` · `exit-manager` · `position-lifecycle-state-machine` · `calibration-store` · `cost-pipeline` · `protocol-constant-monitor` · `rpc-health-monitor` · `signer-service` · `stream-ingestion` | `.gitkeep` only (0 code); 0 references; not in runtime / CI / Docker | empty-scaffold / placeholder | **DELETE** |
+
+**Removed:** the 13 empty placeholder dirs (each held only a `.gitkeep`). None was imported anywhere, in
+the Dockerfile (it copies only `services/ingestor`), or in CI (only `services/hot-executor`), so deletion
+is behavior-neutral. `services/` now contains exactly the three real dirs: `hot-executor`, `ingestor`,
+`analytics`.
+
+**Kept `analytics`** because it is real, tested, standalone Python with an explicit ADR plan (offline
+analytics over ClickHouse, advisory-only) — not scaffold. It is not wired into the Node runtime and is not
+built by CI/Docker; wiring it (or moving it under a dedicated path) is future work, not this phase.
+
+**Docs:** this §18; §16.4 marked done; `merge-readiness.md` updated. The Dockerfile / CI / deploy.md were
+unaffected (they reference only the kept dirs). The ADR / RESTRUCTURE_PLAN architecture-plan docs are left
+as historical records (they describe the target design, not live paths).

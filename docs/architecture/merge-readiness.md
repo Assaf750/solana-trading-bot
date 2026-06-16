@@ -68,4 +68,6 @@ smoke) → 11A (this review + flags reference + merge note).
    (supervisor loop / command lifecycle / fills into `packages/trading-engine`); (2) deploy — the image
    build is **DONE** (Phase Deploy-1: Dockerfile + CI `docker` job + deploy runbook); registry push +
    cloud deploy remain; (3) optional Rust submit/bundle deepening; (4) the `services/*` unused-scaffold
-   audit (~14 unconnected dirs).
+   audit is **DONE** (Phase Services-Audit: 13 empty placeholder dirs removed; `services/` = `hot-executor`
+   + `ingestor` + `analytics`). Net open items: engine extraction slices, deploy registry-push/cloud-deploy,
+   optional Rust submit/bundle deepening.
