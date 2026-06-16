@@ -78,3 +78,26 @@ needs a dead-code proof per export and is not attempted in 9A/9B.
 All compatibility shims are **KEPT** (rollback insurance) and remain default-off; nothing was removed.
 Defaults are now locked by a regression test so they cannot silently flip. Actual shim removal stays in
 Phase 3B (after a production soak).
+
+## 6. Phase 3B.1 — legacy-shim behavior guarded before pruning (no removal)
+
+Added `apps/server/test/legacy-shim-guard.test.mjs` — **behavioral** coverage of the legacy shims so a
+future removal (3B.2) is safe. Still **no deletion, no behavior/default change**.
+
+| Flag | What was checked (behaviorally) | Status |
+|---|---|---|
+| `RISK_BACKEND` | `checkEntryGates`: legacy output is **byte-identical** to package (allow + reject paths); default + unknown resolve to package | **parity-guarded** |
+| `PROVIDER_BACKEND` | `createProviderHealth` builds a working monitor (record→snapshot) under legacy / default / unknown | **behavior-guarded** |
+| `POSITIONS_BACKEND` | `createPaperPortfolio` book accepts an entry (recordEntry → openCount) under legacy / default / unknown | **behavior-guarded** |
+| `DECISION_LEDGER_BACKEND` | dispatch source-guarded (`=== 'legacy' ? legacyLedger : packageLedger`); heavy to instantiate, so behavior left to its existing live-executor tests | **source-guarded** |
+
+What was checked: each shim runs under `=legacy`, the package backend is the default, and an unknown
+value never falls back to legacy. What was NOT removed: nothing — paper-engine, JSON fallback, routes,
+and all four shims remain. What is now protected: RISK legacy↔package parity + PROVIDER/POSITIONS
+instantiation across flag values (in addition to the Phase-9B default-pattern guards).
+
+**Recommended 3B.2 targets** (only after a soak, each behind its own small PR): once RISK parity has
+held, remove `legacyCheckEntryGates` + the `RISK_BACKEND` dispatch (delegate straight to `@soltrade/risk`);
+then the PROVIDER family (`legacyCreate*` in jupiter-client / rpc-client / provider-health / helius-das /
+jito-tip-tx) once provider parity is added; `POSITIONS_BACKEND` legacy book; `DECISION_LEDGER_BACKEND`
+`legacyLedger` last (most sensitive). Keep JSON fallback + paper-engine.
