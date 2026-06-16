@@ -1,8 +1,8 @@
-// hot-executor-client.mjs — Node client for the Rust services/hot-executor process.
-// Manages a persistent child and talks JSON-lines over stdin/stdout. The Rust loop processes one
-// request per line in order, so responses are correlated FIFO. Used ONLY when the owner enables
-// the Rust signer backend (config.execution.signer_backend = 'rust' + HOT_EXECUTOR_BIN set); the
-// live-executor falls back to in-process signing on any failure, so this can never block a sign.
+// hot-executor-client.mjs — Node client for the Rust services/hot-executor process, the OFFICIAL
+// signing/execution boundary (ADR-0001 Phase Rust-1). Manages a persistent child and talks JSON-lines
+// over stdin/stdout; the Rust loop processes one request per line in order, so responses are correlated
+// FIFO. The live-executor PREFERS this whenever it is configured (signer_backend defaults to 'rust' +
+// HOT_EXECUTOR_BIN set) and falls back to in-process signing on ANY failure, so it can never block a sign.
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 

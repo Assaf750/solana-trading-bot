@@ -311,3 +311,39 @@ trading-engine with no `paperEngine` var; `paper_engine` status field preserved;
 liveExecutor) into a PURE `packages/trading-engine`, leaving `paper-engine.mjs` as a simulation-only book.
 That is a large code move; this phase only split the name/ownership so the runtime no longer reads as
 "paper owns live."
+
+## 13. Phase Rust-1 — hot-executor made the official signing/execution boundary
+
+`services/hot-executor` (Rust, fee-payer-locked ed25519) is now the OFFICIAL signer instead of an opt-in.
+Open-by-design / ready-when-configured: the in-process `tx-signer.mjs` stays as the documented dev/local +
+**fail-safe fallback** (any hot-executor failure falls back to it), so a missing/dead helper can never
+block a live signature. No activation gate, no hard stop — readiness is informational.
+
+**Current state (before):** hot-executor ran only when `HOT_EXECUTOR_BIN` was set AND the operator flipped
+`execution.signer_backend` to `rust` (default was `node` = in-process). CI built+tested the crate (CI-1)
+but the runtime didn't prefer it.
+
+**Done:**
+- `execution.signer_backend` **default flipped `node` → `rust`** (config-service.mjs; enum + validation
+  unchanged). With the gate `signer_backend === 'rust' && hotSigner`, the runtime now PREFERS the
+  hot-executor whenever the binary is configured; `node` is the explicit in-process dev/local override.
+  When the binary is absent, `hotSigner` is null → graceful in-process fallback (ready-when-configured).
+- **Runtime readiness gained a `signing_backend` capability** (api.mjs + a new `signerBackend` probe in
+  index.mjs that pings the helper): `available` (configured + responding) / `not_configured` (no binary,
+  in-process active) / `unavailable` (configured but down, still falls back). It is added to
+  `capability_status` + the body but **never changes `overall`** (informational; guarded by a test).
+- **Docs/headers** position hot-executor as official + in-process as the dev/local fail-safe fallback
+  (live-executor.mjs, hot-executor-client.mjs, tx-signer.mjs, index.mjs). `.env.example` gained a
+  `HOT_EXECUTOR_BIN` section; `live-first-runtime-flags.md` documents the flag + the signing-boundary role;
+  `merge-readiness.md` + `ci.md` updated.
+- **Operator UI**: the Runtime-readiness card shows a `signing_backend` badge (backend + status).
+
+**Tests:** `runtime-readiness.test.mjs` gained a `signing_backend` test (capability values + proof it never
+changes `overall`). `live-executor.test.mjs` is unchanged (the `signer_backend: 'rust'` routing + fallback
+tests still pass — the gate is unchanged, only the default moved). The Rust crate's 8 `cargo test` cases
+run in CI (Phase CI-1).
+
+**Not changed (safety):** the fail-safe fallback to in-process signing is intact — the Rust boundary is
+preferred, never mandatory, so live signing can never be blocked by a helper problem. Deferred: making the
+crate the signer requires the operator to build + deploy the binary; a future phase may move more of the
+execution path (submit/bundle) into the crate.

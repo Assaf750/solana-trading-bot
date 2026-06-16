@@ -29,7 +29,10 @@ smoke) → 11A (this review + flags reference + merge note).
   canonical and only (guarded by `apps/server/test/no-legacy-flags-guard.test.mjs`).
 - **paper-engine kept** as the simulation / sandbox portfolio substrate (never a readiness tool).
 - **JSON fallback kept** as the default operational store (snapshot / recovery).
-- **Rust signing/exec boundary not started** (an ADR target for a later phase).
+- **Rust signing/exec boundary is the OFFICIAL signer** (Phase Rust-1) — `services/hot-executor` is
+  preferred whenever configured (`HOT_EXECUTOR_BIN` set; `signer_backend` defaults to `rust`), with the
+  in-process signer as the documented fail-safe fallback. Remaining: the operator builds + deploys the
+  binary, and a future phase may extract more of the execution path into the crate.
 - **Stream-cursor wiring deferred** — the ingestor is push-based gRPC with no durable polling cursor;
   the `getCursor`/`setCursor` capability is ready but unwired (would change ingestion behavior).
 - **Unused-export pruning deferred** — needs a dead-code proof per export (Phase 3B).
@@ -54,6 +57,8 @@ smoke) → 11A (this review + flags reference + merge note).
    preflight/provider/execution/connectivity test path, on by default; `/api/providers/test-connection`
    retired). The `trading-engine` name/ownership split is **DONE** (Phase 5F — the runtime consumes
    `createTradingEngine`; paper-engine is the simulation/implementation substrate behind it; zero behavior
-   change). Remaining restructure work: the Rust signing/execution boundary, a production/CI/deploy
-   checklist, dead-export pruning, and the full physical extraction of the live orchestration into a pure
-   `packages/trading-engine` (paper-engine still holds the implementation).
+   change). Production CI hardening is **DONE** (Phase CI-1 — tests+guards / UI build / Rust crate jobs).
+   The Rust signing/execution boundary is **DONE as the official signer** (Phase Rust-1 — preferred when
+   configured, fail-safe in-process fallback, `signing_backend` readiness capability). Remaining
+   restructure work: a deploy/image pipeline, dead-export pruning, and the full physical extraction of the
+   live orchestration into a pure `packages/trading-engine` (paper-engine still holds the implementation).

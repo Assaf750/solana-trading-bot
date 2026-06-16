@@ -90,6 +90,27 @@ test('signer reports available/not_configured + can_sign — never locked/unlock
   assert.ok(!/locked|unlocked/i.test(JSON.stringify(r.body.signer)));
 });
 
+test('signing_backend reports the Rust boundary capability — informational, never blocks (Phase Rust-1)', async () => {
+  // no signerBackend probe -> official Rust boundary not configured; the in-process fallback is active
+  const off = await get(apiWith());
+  assert.equal(off.body.signing_backend.backend, 'in_process');
+  assert.equal(off.body.signing_backend.status, 'not_configured');
+  assert.equal(off.body.signing_backend.official, 'rust');
+  assert.equal(off.body.capability_status.signing_backend, 'not_configured');
+  // hot-executor configured + responding -> available
+  const up = await get(apiWith({ runtimeProbes: { signerBackend: async () => ({ backend: 'rust', status: 'available' }) } }));
+  assert.equal(up.body.signing_backend.status, 'available');
+  assert.equal(up.body.signing_backend.backend, 'rust');
+  // configured but DOWN -> unavailable, but it must NOT change `overall` (in-process fail-safe fallback)
+  const baseProbes = { storage: async () => ({ backend: 'postgres', status: 'ok' }) };
+  const ph = { snapshot: () => ({ rpc: { status: 'healthy' } }) };
+  const base = await get(apiWith({ runtimeProbes: baseProbes, providerHealth: ph }));
+  const down = await get(apiWith({ runtimeProbes: { ...baseProbes, signerBackend: async () => ({ backend: 'rust', status: 'unavailable' }) }, providerHealth: ph }));
+  assert.equal(down.body.signing_backend.status, 'unavailable');
+  assert.equal(down.body.overall, base.body.overall); // informational — signing_backend never changes overall
+  assert.ok(!/locked|unlocked|hard[_ ]stop/i.test(JSON.stringify(down.body.signing_backend)));
+});
+
 test('a thrown probe degrades safely (never crashes, never blocks)', async () => {
   const r = await get(apiWith({ runtimeProbes: { storage: async () => { throw new Error('boom'); } } }));
   assert.equal(r.status, 200);

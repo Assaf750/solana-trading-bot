@@ -93,8 +93,10 @@ const notifier = createNotifier({ config, getSecret: (name) => vault.getSecretFo
 // LIVE book + executor — real money path, fully gated (mode + signer session + kill
 // switch + readiness); separate file from the paper book, never mixed
 const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false, positionStore: await createPositionStore(storageBackend, { file: 'live-portfolio.json', simulated: false }) });
-// Optional Rust hot-executor for signing — active only when the binary path is set AND the owner
-// flips execution.signer_backend='rust'. Any failure falls back to in-process signing (fail-safe).
+// The Rust hot-executor is the OFFICIAL signing/execution boundary (ADR-0001 Phase Rust-1). It is the
+// preferred path whenever configured (HOT_EXECUTOR_BIN set + execution.signer_backend defaults to 'rust');
+// the in-process signer (tx-signer.mjs) is the documented dev/local + fail-safe fallback — ANY hot-executor
+// failure falls back to it, so a missing/dead helper can never block a live signature (ready-when-configured).
 const hotSigner = process.env.HOT_EXECUTOR_BIN
   ? createHotExecutorClient({ binPath: process.env.HOT_EXECUTOR_BIN })
   : null;
@@ -202,6 +204,14 @@ const runtimeProbes = {
     if (backend !== 'clickhouse') return { backend, status: 'disabled' };
     try { return { backend: 'clickhouse', status: (await eventSink.client.ping()) ? 'ok' : 'degraded' }; }
     catch { return { backend: 'clickhouse', status: 'degraded' }; } // analytics down -> degraded
+  },
+  // Signing/execution boundary: the OFFICIAL path is the Rust hot-executor (configured via
+  // HOT_EXECUTOR_BIN). Informational only — the in-process signer is the fail-safe fallback, so this
+  // never blocks: not_configured = no binary (in-process active); unavailable = configured but down.
+  signerBackend: async () => {
+    if (!hotSigner) return { backend: 'in_process', status: 'not_configured' };
+    try { const r = await hotSigner.ping(); return { backend: 'rust', status: r?.ok ? 'available' : 'unavailable' }; }
+    catch { return { backend: 'rust', status: 'unavailable' }; }
   },
 };
 

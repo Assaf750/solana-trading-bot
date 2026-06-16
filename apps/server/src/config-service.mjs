@@ -46,7 +46,7 @@ const DEFAULTS = {
     sizing_mode: 'fixed_usd',
     sizing_value: 10,
     usdc_quote_enabled: false,
-    signer_backend: 'node',        // 'node' (in-process) | 'rust' (services/hot-executor)
+    signer_backend: 'rust',        // 'rust' = services/hot-executor (OFFICIAL signing boundary, default; used when HOT_EXECUTOR_BIN is set, else falls back to in-process) | 'node' = in-process dev/local fallback
     submit_backend: 'rpc',         // 'rpc' (sendTransaction) | 'jito' (bundle + tip; falls back to rpc)
     jito_tip_account: null,        // base58 Jito tip account (required for the jito backend)
     jito_tip_lamports: 10000,      // fixed tip per bundle (lamports), and the fallback for dynamic

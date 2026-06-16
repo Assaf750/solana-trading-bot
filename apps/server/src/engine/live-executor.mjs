@@ -225,9 +225,10 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       return { ok: false, error: 'audit_unavailable_before_sign' };
     }
 
-    // Sign. Backend is selectable per-call: 'rust' routes to the hot-executor (verified
-    // byte-identical to the in-process signer); ANY hot-executor failure falls back to in-process
-    // so a dead/misconfigured helper can NEVER block a live signature (fail-safe).
+    // Sign. The OFFICIAL boundary is the Rust hot-executor (signer_backend defaults to 'rust'; verified
+    // byte-identical to the in-process signer). It is used whenever configured (hotSigner present); ANY
+    // hot-executor failure falls back to the in-process signer (the dev/local fallback) so a dead/missing
+    // helper can NEVER block a live signature (fail-safe, ready-when-configured). 'node' forces in-process.
     let signed = null;
     if (config.get().execution?.signer_backend === 'rust' && hotSigner) {
       const r = await hotSigner.sign({ txBase64: swap.txBase64, seed: kpRes.seed });

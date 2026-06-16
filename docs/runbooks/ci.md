@@ -10,7 +10,7 @@ signing/execution boundary lands.
 |---|---|---|
 | **Tests + architecture guards** | `node --test`, then the smokes in skip-clean mode | Every unit/integration test **and** the architecture / package-boundary / mechanism-guard code-hygiene checks (they run inside the suite). Then `npm run smoke:{postgres,redis,clickhouse,full-stack}` must each load and **SKIP cleanly (exit 0)** with no env — catching a broken smoke import even though the smokes never touch live services. |
 | **Operator UI build** | `npm ci` + `npm run build` (in `apps/operator-ui`) | The Vite production build of the operator console — a broken import, JSX error, or bad dependency fails here. |
-| **Rust hot-executor** | `cargo build --locked` + `cargo test` (in `services/hot-executor`) | The latency-critical fee-payer-locked ed25519 signing crate (the future execution boundary). `--locked` keeps the build reproducible against the tracked `Cargo.lock`. |
+| **Rust hot-executor** | `cargo build --locked` + `cargo test` (in `services/hot-executor`) | The latency-critical fee-payer-locked ed25519 signing crate — the **official signing/execution boundary** (Phase Rust-1; preferred when `HOT_EXECUTOR_BIN` is set, with the in-process signer as fail-safe fallback). `--locked` keeps the build reproducible against the tracked `Cargo.lock`. |
 
 The jobs are independent and run in parallel; any failure blocks the merge.
 

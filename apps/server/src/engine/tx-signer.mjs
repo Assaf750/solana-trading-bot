@@ -1,4 +1,7 @@
-// tx-signer.mjs — Ed25519 transaction signing over the owner's vault-held key.
+// tx-signer.mjs — in-process Ed25519 transaction signing over the owner's vault-held key. This is the
+// dev/local + FAIL-SAFE FALLBACK signer; the OFFICIAL signing/execution boundary is the Rust
+// services/hot-executor (ADR-0001 Phase Rust-1). The live-executor prefers the hot-executor whenever it
+// is configured and falls back here on any failure, so this path always keeps signing available.
 // SECURITY CONTRACT:
 //  - the raw key is fetched from the vault AT SIGN TIME, used, and never returned/logged
 //  - the derived public key is exposed (it is public on-chain anyway)
