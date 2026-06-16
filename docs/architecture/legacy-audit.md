@@ -415,8 +415,9 @@ Everything below is OPEN; everything in §1–§15 is DONE.
 2. **Deploy / image pipeline.** Image build is **DONE** (Phase Deploy-1 — `Dockerfile` + `.dockerignore`,
    the CI `docker` job builds it, `docs/runbooks/deploy.md`). REMAINING: registry push + a real cloud
    deploy (no target environment / orchestrator manifest / secrets-management integration yet).
-3. **Optional Rust submit/bundle deepening.** `services/hot-executor` is the official signer (Phase
-   Rust-1); a later phase may move more of the execution path (tx submit / Jito bundle send) into the crate.
+3. **Rust submit/bundle deepening — DECIDED: not now (Phase Rust-2, §20).** The boundary stays at
+   signing; the network POST (submit / Jito bundle) remains in the JS control plane by design. Revisit
+   only if a measured latency need justifies adding a network stack to the signer.
 4. **`services/*` unused-scaffold audit — DONE** (Phase Services-Audit, §18): 13 empty placeholder dirs
    removed; `services/` now holds only the real, used dirs (`hot-executor`, `ingestor`, `analytics`).
 
@@ -494,3 +495,35 @@ the store, the EV-gate verdict) stays in paper-engine; the package owns the deci
 **Still in paper-engine (mechanism-bound, future slices):** the supervisor loop, the command lifecycle,
 fills/exits, and `status()` assembly — they need rpc / jupiter / stores / liveExecutor injected before they
 can move into the pure package.
+
+## 20. Phase Rust-2 — execution boundary evaluated; formally closed at signing (no behavior change)
+
+**Question:** move tx submit / Jito bundle SEND into `services/hot-executor`, or document that the Rust
+boundary is signing-only for now?
+
+**Findings (current state):**
+- The Rust crate handles ops `sign` + the PURE payload helpers `build_submit` (sendTransaction body),
+  `build_bundle` (Jito bundle body), `select_tip` (tip-floor math). Its deps are crypto/encoding/serde only
+  — **no HTTP / async-runtime crate; it never opens a socket.** `submit.rs`'s own header states this is
+  intentional ("PURE (no network): the TS control plane performs the actual POST ... retries, and the
+  intent ledger (idempotency) stays in TS").
+- The JS client (`hot-executor-client.mjs`) exposes only `sign` / `ping` / `close`; the `build_*`/`select_tip`
+  ops exist + are cargo-tested but are not wired (the JS layer builds its own bodies via
+  `@soltrade/provider-adapters` + `jito-tip-tx`, which are parity-proven).
+- The SEND is entirely JS: `live-executor.submitSigned()` → `rpc.rpc('sendTransaction', …)` or the Jito
+  path `jitoSendBundle([...])`, with retries + the decision-ledger intent idempotency in JS.
+
+**Decision: do NOT deepen now — keep the boundary at signing.** Rationale: moving the POST into the
+fee-payer-locked signer would add an HTTP client + async runtime to the most security-critical component,
+enlarging its attack surface, while the latency-relevant body/tip math is *already* compiled in Rust as
+pure helpers. The clean split — **Rust = sign (+ pure payload/tip math), network-free; JS = network POST +
+retries + intent-ledger idempotency** — is the correct architecture. No execution path changed.
+
+**Added (guard, prevents responsibility mixing):** `apps/server/test/rust-boundary-guard.test.mjs` —
+(a) `services/hot-executor/Cargo.toml` must carry no HTTP/async crate (reqwest/hyper/tokio/ureq/… ), so the
+signer stays network-free; (b) `live-executor` sends via `rpc.sendTransaction` / `jitoSendBundle`; (c) the
+hot-executor client surface is `sign`/`ping`/`close` only (it never POSTs). Docs: §16.3 marked decided;
+`merge-readiness.md` + `deploy.md` note the network-free signing boundary.
+
+**Revisit criterion:** only a *measured* latency win from a single sign+submit round-trip would justify
+adding a network stack to the signer; until then, signing-only is the intended, guarded boundary.

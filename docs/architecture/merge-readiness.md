@@ -69,7 +69,8 @@ smoke) → 11A (this review + flags reference + merge note).
    leader-insights logic (Engine-3); remaining slices: supervisor loop / command lifecycle / fills /
    status() assembly (mechanism-bound — need rpc/jupiter/stores/liveExecutor injected); (2) deploy — the image
    build is **DONE** (Phase Deploy-1: Dockerfile + CI `docker` job + deploy runbook); registry push +
-   cloud deploy remain; (3) optional Rust submit/bundle deepening; (4) the `services/*` unused-scaffold
-   audit is **DONE** (Phase Services-Audit: 13 empty placeholder dirs removed; `services/` = `hot-executor`
-   + `ingestor` + `analytics`). Net open items: engine extraction slices, deploy registry-push/cloud-deploy,
-   optional Rust submit/bundle deepening.
+   cloud deploy remain; (3) Rust submit/bundle deepening — **DECIDED not now** (Phase Rust-2: the boundary
+   stays at signing; the network POST stays in JS by design; the signer is kept network-free, guarded);
+   (4) the `services/*` unused-scaffold audit is **DONE** (Phase Services-Audit: 13 empty placeholder dirs
+   removed; `services/` = `hot-executor` + `ingestor` + `analytics`). Net open items: engine extraction
+   slices, and deploy registry-push / cloud-deploy.
