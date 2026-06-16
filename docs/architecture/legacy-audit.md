@@ -66,4 +66,15 @@ now.
 
 paper-engine removal · JSON fallback removal · legacy route removal · removing used wrappers · any change
 to execution / risk / provider logic or the activation command. Unused-export pruning is deferred: it
-needs a dead-code proof per export and is not attempted in 9A.
+needs a dead-code proof per export and is not attempted in 9A/9B.
+
+## 5. Phase 9B — safe shim cleanup executed (no removal, no behavior/default change)
+
+| Item | Action | Status | Safety proof |
+|---|---|---|---|
+| Default-backend invariants | Added `apps/server/test/backend-defaults.test.mjs` | **guarded** | PROVIDER / DECISION_LEDGER / POSITIONS / RISK select `legacy` only on the literal `'legacy'` (default = package); STORAGE/HOT_STATE/EVENT_SINK default json/memory/none; DIAGNOSTIC opt-in. Read-only source-pattern + pure-config test. |
+| `risk-gates.mjs` / `live-executor.mjs` legacy dispatch | Added a deprecation-timeline comment (prune in 3B after soak) | **deprecated-commented** | comment-only; the `RISK_BACKEND` / `DECISION_LEDGER_BACKEND` dispatch is unchanged (still default=package). |
+
+All compatibility shims are **KEPT** (rollback insurance) and remain default-off; nothing was removed.
+Defaults are now locked by a regression test so they cannot silently flip. Actual shim removal stays in
+Phase 3B (after a production soak).

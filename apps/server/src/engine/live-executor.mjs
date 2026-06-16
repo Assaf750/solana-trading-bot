@@ -93,6 +93,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     retryableStatuses: RETRYABLE_STATUSES,
     intentIdFor: sha256IntentId,
   });
+  // packageLedger is the DEFAULT; `legacy` is a rollback shim — deprecate/prune in 3B after soak.
   const ledgerApi = process.env.DECISION_LEDGER_BACKEND === 'legacy' ? legacyLedger : packageLedger;
   const { intentIdFor, claimIntent, setIntent, getIntent, listIntents, pendingIntents: pendingIntentsImpl } = ledgerApi;
 

@@ -6,6 +6,7 @@
 import { checkEntryGates as packageCheckEntryGates } from '../../../../packages/risk/src/index.mjs';
 
 export function checkEntryGates(args) {
+  // @soltrade/risk is the DEFAULT; the `legacy` branch is a rollback shim — deprecate/prune in 3B after soak.
   return process.env.RISK_BACKEND === 'legacy' ? legacyCheckEntryGates(args) : packageCheckEntryGates(args);
 }
 
