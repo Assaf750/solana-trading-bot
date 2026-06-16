@@ -139,12 +139,13 @@ const paperEngine = createPaperEngine({
 const das = createDas({ rpc });
 const tokenMeta = createTokenMetadata({ dasResolve: (mint) => das.getAssetMeta(mint) });
 
-// ADR-0001 Phase 5A: DiagnosticExecutionAdapter — pre-flight diagnostics over the SAME live
-// providers (read-only; never opens a position, claims an intent, or broadcasts). Behind a flag
-// (DIAGNOSTIC_BACKEND=package); default 'legacy' leaves it unconstructed and the engine untouched.
-const diagnostics = process.env.DIAGNOSTIC_BACKEND === 'package'
-  ? createDiagnosticExecutionAdapter({ rpc, jupiter, jito: jitoProvider, providerHealth })
-  : null;
+// ADR-0001 Phase 5A/5E: DiagnosticExecutionAdapter — the OFFICIAL pre-flight / provider / execution-test
+// path, over the SAME live providers (read-only; never opens a position, claims an intent, or broadcasts).
+// Phase 5E made it the only checking path, so it is now ALWAYS wired by default; set DIAGNOSTIC_BACKEND=legacy
+// only to disable it (escape hatch). The adapter is read-only, so always-on adds no trading risk.
+const diagnostics = process.env.DIAGNOSTIC_BACKEND === 'legacy'
+  ? null
+  : createDiagnosticExecutionAdapter({ rpc, jupiter, jito: jitoProvider, providerHealth });
 
 // ADR-0001 Phase 6A/6B: optional hot-state cache (provider-health + readiness only; never SoT).
 // memory by default. FAIL-OPEN even at boot: if HOT_STATE_BACKEND=redis but Redis is unreachable, fall

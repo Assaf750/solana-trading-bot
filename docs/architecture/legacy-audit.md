@@ -249,5 +249,37 @@ flags remain); "Removed flags" now lists all four. This document — final-statu
 `@soltrade/provider-adapters`, `@soltrade/positions`, `@soltrade/decision-ledger`. KEPT (not legacy):
 JSON store (default SoT / fallback), paper-engine (simulation substrate), the real operational backends
 (Postgres / Redis / ClickHouse via `STORAGE`/`HOT_STATE`/`EVENT_SINK`), and `DIAGNOSTIC_BACKEND`
-(opt-in diagnostic adapter). Still pending restructure work: full Paper→Diagnostic migration, the Rust
-signing/execution boundary, and a production/CI/deploy checklist.
+(diagnostic adapter). Still pending restructure work after this pass: the Rust signing/execution boundary
+and a production/CI/deploy checklist. (The Paper→Diagnostic checking-path migration was completed in §11.)
+
+## 11. Phase 5E — Full Paper → Diagnostic migration (Diagnostics is the only checking path)
+
+**Finding:** the paper-engine was already NOT a checking/preflight path — every paper-engine route is pure
+simulation (positions / trades / engine-events / orders / latency / leader-insights / manual commands).
+The diagnostics routes use the `DiagnosticExecutionAdapter`, never the paper-engine. The one check route
+left outside Diagnostics was `/api/providers/test-connection` (an `rpc.testConnection()` probe), not
+backed by the paper-engine.
+
+**Done:**
+- **Diagnostics is now ALWAYS on by default** — `index.mjs` builds the adapter unless
+  `DIAGNOSTIC_BACKEND=legacy` (escape hatch). The adapter is read-only, so always-on adds no trading risk;
+  this makes Diagnostics available as the single checking path.
+- **`/api/providers/test-connection` removed.** The connectivity probe moved to a focused diagnostics
+  route `POST /api/diagnostics/connectivity` (`adapter.runConnectivityCheck()`, which wraps the same
+  `rpc.testConnection()` and carries the diagnostic safety block). The operator-UI callers (SetupWizard +
+  MyWalletsFunds "Quick RPC check") + the `testProviderConnection` client method were rewired to it.
+- **paper-engine KEPT** — it is the load-bearing simulation/trading engine (drives the simulated book and,
+  in live mode, the live-executor), NOT a test path; it was never a deletion candidate. Run-mode wording
+  already frames Paper as simulation (Phases 5C/5D).
+
+**Tests:** `backend-defaults` (DIAGNOSTIC defaults ON); `server-core` (404 reworded — it is the
+no-adapter-injected case, not an env default); `diagnostics-api` (added `/connectivity` to the disabled-404
+list + an enabled-backend connectivity test); `open-by-design-guard` (new guard: `/api/providers/test-connection`
+is gone, `/api/diagnostics/connectivity` exists, the client uses `diagnosticsConnectivity`).
+
+**Docs:** `live-first-runtime-flags.md` (DIAGNOSTIC default → on; Diagnostics = the only checking surface;
+connectivity replaced test-connection); this §11; `merge-readiness.md` (Paper→Diagnostic checking-path done).
+
+**Outcome:** Diagnostics (`@soltrade/execution`) is the single path for preflight / provider / execution /
+connectivity testing. Paper remains only an explicit local simulation. Still NOT a deletion: paper-engine
+(needed for simulation + as the live orchestrator until a dedicated `trading-engine` extraction).

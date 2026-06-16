@@ -200,8 +200,9 @@ test('api: update_config command works; invalid patch rejected with CONFIG_VALID
   assert.equal(bad.body.api_error_code, 'CONFIG_VALIDATION_FAILED');
 });
 
-test('api: POST /api/diagnostics/run is 404 by default (DIAGNOSTIC_BACKEND off); active only when an adapter is wired', async () => {
-  // default stack injects no diagnostics adapter -> route falls through to 404 (no behavior change)
+test('api: POST /api/diagnostics/run is 404 when no diagnostics adapter is injected; active only when wired', async () => {
+  // this harness injects no diagnostics adapter -> route falls through to 404. (At real boot the adapter
+  // is wired by default since Phase 5E; DIAGNOSTIC_BACKEND=legacy disables it -> the same null path.)
   const off = await S.api.handle({ method: 'POST', path: '/api/diagnostics/run', body: {} });
   assert.equal(off.status, 404);
   assert.equal(off.body.api_error_code, 'RESOURCE_NOT_FOUND');

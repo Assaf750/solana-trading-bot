@@ -534,15 +534,9 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           if (r.ok) remember({ type: 'wallet_analysis', address, status: r.stats?.status || null, tier: r.intelligence?.tier || null, win_rate: r.stats?.win_rate ?? null });
           return { status: r.ok ? 200 : 502, body: r };
         }
-        if (path === '/api/providers/test-connection') {
-          // runtime readiness probe — confirms the stored RPC key actually works.
-          // requires an unlocked vault (the key lives there); never echoes the key.
-          if (!vault.isUnlocked()) return { status: 409, body: { ok: false, error: 'vault_locked' } };
-          if (!rpc) return { status: 503, body: { ok: false, error: 'rpc_client_unavailable' } };
-          const r = await rpc.testConnection();
-          audit({ audit_scope: 'config', audit_reason: r.ok ? 'provider_connection_test_ok' : 'provider_connection_test_failed', command_type: null, detail: { ok: r.ok, provider: r.provider, latency_ms: r.latency_ms, error: r.error } });
-          return { status: r.ok ? 200 : 502, body: r };
-        }
+        // (ADR-0001 Phase 5E) The legacy /api/providers/test-connection probe was removed — the
+        // connectivity check now lives at /api/diagnostics/connectivity so Diagnostics is the single
+        // checking path. See the diagnostics routes below.
         if (path === '/api/signer/wallet') {
           // confirm the execution wallet: public address + live SOL balance + connected.
           const d = signer.deriveAddress();
@@ -632,6 +626,14 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const check = await diagnostics.runProviderHealthCheck();
           const event_written = await recordEvent('provider.health_check', { overall: check.status, degraded: check.degraded, providers: providerStatuses(check.providers) });
           return { status: 200, body: { ok: true, check, overall: check.status, safety: DIAG_SAFETY, event_sink: { enabled: eventEnabled, written: event_written } } };
+        }
+        if (diagnostics && path === '/api/diagnostics/connectivity') {
+          // ADR-0001 Phase 5E: focused live connectivity probe (RPC reachable + latency/slot/provider).
+          // The diagnostics adapter is the ONLY checking path now — this replaced the legacy
+          // /api/providers/test-connection. Read-only: runConnectivityCheck wraps rpc.testConnection().
+          const check = await diagnostics.runConnectivityCheck();
+          const event_written = await recordEvent('diagnostic.connectivity', { ok: check.ok, status: check.status, provider: check.provider, latency_ms: check.latency_ms });
+          return { status: 200, body: { ok: check.ok, check, safety: DIAG_SAFETY, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }

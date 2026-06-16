@@ -81,6 +81,16 @@ test('Diagnostics is wired as the readiness/execution-test entry (nav + route + 
   assert.ok(existsSync(join(PAGES, 'Diagnostics.jsx')), 'Diagnostics page present');
 });
 
+// ---------- Diagnostics is the ONLY checking path (Phase 5E) ----------
+test('the legacy /api/providers/test-connection probe is gone; connectivity lives under Diagnostics', () => {
+  const api = readFileSync(join(ROOT, 'apps', 'server', 'src', 'api.mjs'), 'utf8');
+  assert.ok(!/['"]\/api\/providers\/test-connection['"]/.test(api), 'legacy test-connection route must be removed');
+  assert.ok(/['"]\/api\/diagnostics\/connectivity['"]/.test(api), 'diagnostics connectivity route present');
+  const client = readFileSync(join(ROOT, 'apps', 'operator-ui', 'src', 'api', 'client.js'), 'utf8');
+  assert.ok(!/testProviderConnection/.test(client), 'client must not call the legacy provider test');
+  assert.ok(/diagnosticsConnectivity/.test(client), 'client uses the diagnostics connectivity check');
+});
+
 // ---------- local full-stack runbook (Phase 10A) ----------
 test('local full-stack runbook exists, is open-by-design, and states the data-layer roles', () => {
   const p = join(ROOT, 'docs', 'runbooks', 'local-full-stack.md');

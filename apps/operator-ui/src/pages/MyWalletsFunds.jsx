@@ -77,9 +77,11 @@ export default function MyWalletsFunds() {
   }
 
   async function testConnection() {
+    // ADR-0001 Phase 5E: the connectivity check goes through Diagnostics (the single checking path).
     setConnTest({ testing: true });
-    const r = await api.testProviderConnection();
-    setConnTest(r.data);
+    const r = await api.diagnosticsConnectivity();
+    const c = r.data?.check || {};
+    setConnTest({ ok: !!c.ok, provider: c.provider, current_slot: c.detail?.current_slot, latency_ms: c.latency_ms, enhanced_stream: c.detail?.enhanced_stream, error: c.detail?.error || r.data?.error });
   }
 
   async function checkWallet() {

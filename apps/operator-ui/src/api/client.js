@@ -50,10 +50,11 @@ export const api = {
   strategyScenarios: () => call('GET', '/api/strategy/scenarios'),
   simulateStrategy: (strategy, scenario) => call('POST', '/api/strategy/simulate', { strategy, scenario }),
 
-  // diagnostics (ADR-0001 Phase 5B) — read-only pre-flight; 404 unless DIAGNOSTIC_BACKEND=package.
+  // diagnostics (ADR-0001 Phase 5B/5E) — read-only pre-flight; the ONLY checking path (on by default).
   diagnosticsStatus: () => call('GET', '/api/diagnostics/status'),
   runDiagnostics: (opts = {}) => call('POST', '/api/diagnostics/run', opts),
   diagnosticsProviderTest: () => call('POST', '/api/diagnostics/provider-test', {}),
+  diagnosticsConnectivity: () => call('POST', '/api/diagnostics/connectivity', {}), // replaced /api/providers/test-connection (5E)
   runtimeReadiness: () => call('GET', '/api/runtime/readiness'), // ADR-0001 Phase 8A (read-only runtime health)
   analyticsSummary: (hours = 24) => call('GET', `/api/analytics/summary?hours=${hours}`), // ADR-0001 Phase 7C (optional)
 
@@ -82,7 +83,6 @@ export const api = {
   vaultLock: () => call('POST', '/api/vault/lock', {}),
   storeSecret: (name, value) => call('POST', '/api/secrets', { name, value }),
   deleteSecret: (name) => call('DELETE', `/api/secrets/${encodeURIComponent(name)}`),
-  testProviderConnection: () => call('POST', '/api/providers/test-connection', {}),
   analyzeWallet: (address) => call('POST', '/api/wallets/analyze', { address }),
   analyzeToken: (mint) => call('GET', `/api/tokens/${encodeURIComponent(mint)}/analysis`),
   discoverTokenTraders: (mint) => call('POST', '/api/discover/token-traders', { mint }),
