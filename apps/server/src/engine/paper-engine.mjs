@@ -1,7 +1,12 @@
-// paper-engine.mjs — the live-data PAPER trading engine (simulated fills, real market).
-// Supervises: leader-wallet ingestion (WS) -> swap detection -> risk gates ->
-// exit feasibility -> paper fill -> TP/SL monitoring. Fail-closed at every step.
-// REAL money never moves here: quotes only, fills simulated, always labeled simulated.
+// paper-engine.mjs — the trading-engine IMPLEMENTATION substrate. ADR-0001 Phase 5F separated the
+// name/ownership: the runtime orchestrator is OWNED by `trading-engine.mjs` (which re-exports
+// `createPaperEngine` as `createTradingEngine`); this file holds the implementation. A later phase
+// extracts the live orchestration into a pure `packages/trading-engine`, leaving this simulation-only.
+// ---
+// The live-data engine (simulated fills in PAPER mode, real market data). Supervises: leader-wallet
+// ingestion (WS) -> swap detection -> risk gates -> exit feasibility -> fill -> TP/SL monitoring.
+// Fail-closed at every step. In PAPER mode quotes only, fills simulated, always labeled simulated;
+// LIVE execution (real money) is delegated to the injected liveExecutor — never signed here.
 import { detectLeaderSwap, WSOL_MINT, USDC_MINT } from './swap-detector.mjs';
 import { checkEntryGates } from './risk-gates.mjs';
 import { checkTokenSafety } from './token-safety.mjs';
