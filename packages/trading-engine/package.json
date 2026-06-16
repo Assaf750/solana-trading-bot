@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/trading-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Runtime trading orchestrator (ADR-0001). PURE domain kernel: owns the engine lifecycle state machine (deriveDesiredState) and the engine composition (composeTradingEngine), which assembles the runtime engine from an INJECTED, mechanism-bound substrate (apps/server paper-engine today). No fs/network/SDK — substrate is injected. Phase Engine-2 begins the physical extraction from apps/server paper-engine.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}

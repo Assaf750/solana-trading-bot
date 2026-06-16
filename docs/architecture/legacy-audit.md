@@ -347,3 +347,36 @@ run in CI (Phase CI-1).
 preferred, never mandatory, so live signing can never be blocked by a helper problem. Deferred: making the
 crate the signer requires the operator to build + deploy the binary; a future phase may move more of the
 execution path (submit/bundle) into the crate.
+
+## 14. Phase Engine-2 — physical `packages/trading-engine` extraction (begun; pure-first)
+
+Phase 5F split the engine name/ownership with a wrapper (`apps/server/engine/trading-engine.mjs` re-exported
+`createPaperEngine`). Engine-2 begins the PHYSICAL extraction: a real, PURE `@soltrade/trading-engine`
+package now OWNS the orchestration logic + the composition entry. Pure-first because `paper-engine.mjs` is
+mechanism-bound (fs / rpc / jupiter / liveExecutor) and cannot move into a package wholesale — so the first
+extraction is the genuinely pure slice, with the impure substrate INJECTED. Zero behavior change.
+
+**Created:** `packages/trading-engine/` (package.json + src/index.mjs + src/index.d.ts + test). It imports
+NO mechanisms (pure; passes the package-boundary/mechanism guard with no allowlist change). It exports:
+- `deriveDesiredState(inputs)` — the engine **lifecycle state machine**, extracted byte-for-byte from
+  paper-engine's in-line `desiredState()` (ordering kill > vault > rpc > wallets > operator-pause > active).
+- `composeTradingEngine({ substrateFactory, deps })` — the composition entry: builds the runtime engine
+  from an injected substrate (today returns it unchanged → zero behavior change).
+- `ENGINE_STATES` — the lifecycle state constants.
+
+**Wired:**
+- `apps/server/engine/paper-engine.mjs` now imports `deriveDesiredState` and its `desiredState()` just
+  gathers the inputs (killBlocked / vaultUnlocked / rpcConfigured / followedCount / operatingState) and
+  delegates — the state-machine LOGIC is owned by the package, not paper-engine.
+- `apps/server/engine/trading-engine.mjs` no longer re-exports paper-engine; it imports
+  `composeTradingEngine` from the package and injects `createPaperEngine` as the substrate. `index.mjs` is
+  unchanged (`createTradingEngine(deps)` builds the same engine as before).
+
+**Tests/docs:** `packages/trading-engine/test` (state-machine branches + composition delegation);
+`apps/server/test/trading-engine.test.mjs` updated (composes via the package; paper-engine consumes the
+state machine; `paper_engine` status field preserved). `paper-engine.test.mjs` unchanged (75 tests still
+exercise the substrate). flags doc Trading-engine role + merge-readiness updated.
+
+**Deferred:** moving the heavier orchestration (the supervisor loop, command lifecycle, fills) into the
+package — that requires inverting more mechanism dependencies (inject rpc/jupiter/stores into pure logic)
+and is a large, behavior-sensitive move. paper-engine remains the mechanism-bound substrate until then.
