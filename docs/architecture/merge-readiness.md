@@ -65,6 +65,7 @@ smoke) → 11A (this review + flags reference + merge note).
    behavior change). Dead-export pruning is **DONE** (Phase Clean-1 — the duplicate rpc-client stream
    helpers removed; coverage moved to the live package copies). **Remaining restructure work** (the
    authoritative list lives in `legacy-audit.md` §16): (1) the engine physical-extraction next slices
-   (supervisor loop / command lifecycle / fills into `packages/trading-engine`); (2) a deploy/image
-   pipeline; (3) optional Rust submit/bundle deepening; (4) the `services/*` unused-scaffold audit
-   (~14 unconnected dirs).
+   (supervisor loop / command lifecycle / fills into `packages/trading-engine`); (2) deploy — the image
+   build is **DONE** (Phase Deploy-1: Dockerfile + CI `docker` job + deploy runbook); registry push +
+   cloud deploy remain; (3) optional Rust submit/bundle deepening; (4) the `services/*` unused-scaffold
+   audit (~14 unconnected dirs).

@@ -73,3 +73,14 @@ jobs:
       - name: cargo test
         run: cargo test
         working-directory: services/hot-executor
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      # Phase Deploy-1: prove the production image builds end-to-end (UI build + server runtime). No push,
+      # no registry, no deploy — this only fails if the image cannot be built. ubuntu-latest has Docker.
+      - name: Build production image (no push)
+        run: docker build -t soltrade:ci .
