@@ -46,7 +46,11 @@ export function parseStreamNotification(msg) {
 // `request` (fetch-compatible) and `wsFactory` (url => WebSocket-like) are injected so the package
 // stays free of live network primitives (mechanism-guard pure); the server passes fetch/WebSocket.
 export function createRpcProvider({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory, health, request, wsFactory } = {}) {
-  async function rpc(method, params) {
+  // `prebuiltBody` (Phase Rust-4): when provided, this EXACT JSON-RPC body is POSTed verbatim instead of
+  // being assembled here — so the Rust hot-executor (the hot-path execution owner) can own request-body
+  // assembly while the POST + retries + health + error-mapping (and the caller's idempotency) stay in JS.
+  // `method` is still used only as the health-record label. Omit it for the unchanged JS-assembled path.
+  async function rpc(method, params, { body: prebuiltBody = null } = {}) {
     const url = getRpcUrl();
     if (!url) return { ok: false, error: 'rpc_url_unavailable' };
     const t0 = Date.now();
@@ -58,7 +62,7 @@ export function createRpcProvider({ getRpcUrl, getGrpcEndpoint, grpcIngestorFact
         const res = await request(url, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+          body: JSON.stringify(prebuiltBody || { jsonrpc: '2.0', id: 1, method, params }),
           signal: AbortSignal.timeout(10000),
         });
         if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500 * attempt)); continue; }

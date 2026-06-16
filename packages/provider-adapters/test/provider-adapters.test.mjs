@@ -81,6 +81,15 @@ test('rpc: simulate result normalization (ok vs on-chain err)', async () => {
   assert.equal(r.error, 'sim_tx_error');
 });
 
+test('rpc: a pre-built body ({ body }) is POSTed verbatim (Phase Rust-4 — Rust-assembled request body, JS POST)', async () => {
+  const r0 = mkReq(() => jsonRes({ result: 'SIG' }));
+  const rpc = createRpcProvider({ getRpcUrl: () => 'http://x', request: r0.request });
+  const body = { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: ['RUSTTX', { encoding: 'base64', skipPreflight: false, maxRetries: 3 }] };
+  const r = await rpc.rpc('sendTransaction', ['IGNORED_PARAMS'], { body });
+  assert.deepEqual(r, { ok: true, result: 'SIG' }, 'POST + error-mapping still done by JS');
+  assert.deepEqual(JSON.parse(r0.calls[0].opts.body), body, 'the EXACT pre-built (Rust) body was POSTed, not the JS-assembled params');
+});
+
 test('rpc: subscribeWallets picks injected gRPC factory when endpoint configured', () => {
   const calls = [];
   const rpc = createRpcProvider({
@@ -108,6 +117,15 @@ test('jito sendBundle: exact payload + url; error strings parity', async () => {
   assert.equal((await createJitoProvider({ getBundleUrl: () => ({ ok: false, error: 'jito_url_unset' }), request: r0.request }).sendBundle([])).error, 'jito_url_unset');
   const httpErr = createJitoProvider({ getBundleUrl: () => ({ ok: true, url: 'https://j' }), request: mkReq(() => jsonRes({}, { ok: false, status: 429 })).request });
   assert.equal((await httpErr.sendBundle([])).error, 'jito_http_429');
+});
+
+test('jito sendBundle: a pre-built body ({ body }) is POSTed verbatim (Phase Rust-4 — Rust-assembled bundle body, JS POST)', async () => {
+  const r0 = mkReq(() => jsonRes({ result: 'bundleX' }));
+  const jito = createJitoProvider({ getBundleUrl: () => ({ ok: true, url: 'https://j/' }), request: r0.request });
+  const body = { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [['t1', 't2'], { encoding: 'base64' }] };
+  const r = await jito.sendBundle(['IGNORED'], { body });
+  assert.deepEqual(r, { ok: true, result: 'bundleX' });
+  assert.deepEqual(JSON.parse(r0.calls[0].opts.body), body, 'the EXACT pre-built (Rust) bundle body was POSTed');
 });
 
 test('jito selectTipLamports parity (dynamic, fixed-floor, cap, bucket snap, fallback)', () => {

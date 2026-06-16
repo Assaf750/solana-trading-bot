@@ -260,4 +260,54 @@ mod tests {
         })).unwrap();
         assert!(!handle(bad).ok, "a bad leg fails the whole bundle (caller falls back)");
     }
+
+    // ---- Phase Rust-4: op-dispatch (handle) tests for the request-body assembly the JS client consumes ----
+    #[test]
+    fn build_submit_op_returns_send_transaction_body() {
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_submit", "intent_id": "i1", "signed_tx_base64": "SIGNEDTX", "skip_preflight": true, "max_retries": 5
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        assert_eq!(resp.intent_id.as_deref(), Some("i1"), "correlation id echoed");
+        let body = resp.request.expect("request body present");
+        assert_eq!(body["method"], "sendTransaction");
+        assert_eq!(body["params"][0], "SIGNEDTX");
+        assert_eq!(body["params"][1]["encoding"], "base64");
+        assert_eq!(body["params"][1]["skipPreflight"], true);
+        assert_eq!(body["params"][1]["maxRetries"], 5);
+        let bad: Request = serde_json::from_value(serde_json::json!({ "op": "build_submit" })).unwrap();
+        assert!(!handle(bad).ok, "missing signed tx -> error (caller falls back)");
+    }
+
+    #[test]
+    fn build_bundle_op_returns_send_bundle_body_and_bounds() {
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_bundle", "intent_id": "i2", "signed_txs": ["A", "B"]
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        assert_eq!(resp.intent_id.as_deref(), Some("i2"));
+        let body = resp.request.expect("request body present");
+        assert_eq!(body["method"], "sendBundle");
+        assert_eq!(body["params"][0].as_array().unwrap().len(), 2);
+        assert_eq!(body["params"][1]["encoding"], "base64");
+        let six: Vec<String> = (0..6).map(|i| format!("t{i}")).collect();
+        let big: Request = serde_json::from_value(serde_json::json!({ "op": "build_bundle", "signed_txs": six })).unwrap();
+        assert!(!handle(big).ok, ">5 legs rejected at the op level");
+        let none: Request = serde_json::from_value(serde_json::json!({ "op": "build_bundle" })).unwrap();
+        assert!(!handle(none).ok, "missing signed_txs -> error");
+    }
+
+    #[test]
+    fn select_tip_op_returns_tip_lamports() {
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "select_tip", "tip_floor": [{ "landed_tips_50th_percentile": 0.00001 }], "level": "normal"
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        assert_eq!(resp.tip_lamports, Some(10000));
+        let bad: Request = serde_json::from_value(serde_json::json!({ "op": "select_tip" })).unwrap();
+        assert!(!handle(bad).ok, "missing tip_floor -> error");
+    }
 }

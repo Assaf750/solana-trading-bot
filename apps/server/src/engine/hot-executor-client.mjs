@@ -74,6 +74,27 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     return { ok: false, error: r.error || 'sign_bundle_failed' };
   }
 
+  /** Build the JSON-RPC `sendTransaction` request BODY via Rust (Phase Rust-4) — PURE assembly, no
+   *  network. Returns { ok, body } (the full {jsonrpc,id,method,params} object) or { ok:false } so the
+   *  caller can fall back to JS-built assembly. The JS control plane still performs the POST (with its
+   *  retries / health / error-mapping) and owns the decision-ledger idempotency. */
+  async function buildSubmit({ signedTxBase64, skipPreflight = false, maxRetries = 3 }) {
+    const id = `c${seq += 1}`;
+    const r = await request({ op: 'build_submit', intent_id: id, signed_tx_base64: signedTxBase64, skip_preflight: skipPreflight, max_retries: maxRetries }, id);
+    if (r.ok && r.request) return { ok: true, body: r.request };
+    return { ok: false, error: r.error || 'build_submit_failed' };
+  }
+
+  /** Build the Jito `sendBundle` request BODY via Rust (Phase Rust-4). Returns { ok, body } (the full
+   *  {jsonrpc,id,method,params} object) or { ok:false } so the caller can fall back to JS assembly. The
+   *  POST + idempotency stay in JS; the signer never touches the network. */
+  async function buildBundle({ signedTxs }) {
+    const id = `c${seq += 1}`;
+    const r = await request({ op: 'build_bundle', intent_id: id, signed_txs: signedTxs }, id);
+    if (r.ok && r.request) return { ok: true, body: r.request };
+    return { ok: false, error: r.error || 'build_bundle_failed' };
+  }
+
   function ping() { return request({ op: 'ping' }); }
 
   function close() {
@@ -84,5 +105,5 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     failAll('client_closed');
   }
 
-  return { sign, signBundle, ping, close };
+  return { sign, signBundle, buildSubmit, buildBundle, ping, close };
 }

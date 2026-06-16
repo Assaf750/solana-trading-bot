@@ -66,14 +66,17 @@ export function selectTipLamports({ floor, percentile = 50, fixedLamports = 1000
 export function createJitoProvider({ getBundleUrl, b58decode, request, tipFloorUrl = 'https://bundles.jito.wtf/api/v1/bundles/tip_floor' } = {}) {
   const buildTipTransferTx = typeof b58decode === 'function' ? makeTipTransferBuilder(b58decode) : undefined;
 
-  async function sendBundle(txsBase64) {
+  // `prebuiltBody` (Phase Rust-4): when provided, this EXACT JSON-RPC body is POSTed verbatim instead of
+  // being assembled here — so the Rust hot-executor can own bundle-body assembly while the POST stays in
+  // JS (the caller keeps idempotency). Omit it for the unchanged JS-assembled path.
+  async function sendBundle(txsBase64, { body: prebuiltBody = null } = {}) {
     const u = typeof getBundleUrl === 'function' ? getBundleUrl() : null;
     if (!u || !u.ok || !u.url) return { ok: false, error: (u && u.error) || 'jito_url_unset' };
     try {
       const res = await request(`${u.url.replace(/\/+$/, '')}/api/v1/bundles`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [txsBase64, { encoding: 'base64' }] }),
+        body: JSON.stringify(prebuiltBody || { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [txsBase64, { encoding: 'base64' }] }),
         signal: AbortSignal.timeout(10000),
       });
       if (!res.ok) return { ok: false, error: `jito_http_${res.status}` };

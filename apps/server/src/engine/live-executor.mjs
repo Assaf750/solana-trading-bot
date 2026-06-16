@@ -123,13 +123,33 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
             if (rb?.ok && rb.signed?.[0]) tipSignedTx = rb.signed[0];
           }
           if (!tipSignedTx) tipSignedTx = signSerializedTransaction({ txBase64: tipTx, seed }).signedTxBase64;
-          const res = await jitoSendBundle([signedTxBase64, tipSignedTx]);
+          const bundleTxs = [signedTxBase64, tipSignedTx];
+          // Phase Rust-4: assemble the Jito sendBundle request BODY via the Rust hot-executor when
+          // configured (the execution owner owns hot-path assembly); the POST stays here in JS. Fail-safe:
+          // any hot-executor failure leaves bundleBody null -> jitoSendBundle assembles the body itself.
+          let bundleBody = null;
+          if (cfg.execution?.signer_backend === 'rust' && hotSigner && typeof hotSigner.buildBundle === 'function') {
+            const bb = await hotSigner.buildBundle({ signedTxs: bundleTxs });
+            if (bb?.ok && bb.body) bundleBody = bb.body;
+          }
+          const res = await jitoSendBundle(bundleTxs, bundleBody ? { body: bundleBody } : undefined);
           // on accept, the swap tx still lands under its deterministic signature
           if (res?.ok) return { ok: true, result: signatureB58, via: 'jito' };
         }
       } catch { /* fall through to RPC */ }
     }
-    return rpc.rpc('sendTransaction', [signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
+    // Phase Rust-4: assemble the sendTransaction request BODY via the Rust hot-executor when configured;
+    // the POST itself — retries, health recording, JSON-RPC error mapping (the `rpc_*` codes the caller
+    // keys idempotency off) — stays here in JS. Fail-safe: any hot-executor failure leaves submitBody null
+    // -> rpc.rpc() assembles the body itself (byte-for-byte the same params).
+    const skipPreflight = false;
+    const maxRetries = 3;
+    let submitBody = null;
+    if (cfg.execution?.signer_backend === 'rust' && hotSigner && typeof hotSigner.buildSubmit === 'function') {
+      const sb = await hotSigner.buildSubmit({ signedTxBase64, skipPreflight, maxRetries });
+      if (sb?.ok && sb.body) submitBody = sb.body;
+    }
+    return rpc.rpc('sendTransaction', [signedTxBase64, { encoding: 'base64', skipPreflight, maxRetries }], submitBody ? { body: submitBody } : undefined);
   }
 
   async function confirmSignature(signatureB58) {

@@ -117,7 +117,9 @@ const jitoProvider = createJitoProvider({
     return { ok: true, url: r.value };
   },
 });
-const jitoSendBundle = (txsBase64) => jitoProvider.sendBundle(txsBase64);
+// Phase Rust-4: forward the optional pre-built body ({ body }) so the live-executor can have the Rust
+// hot-executor assemble the bundle request body while this JS path still performs the POST.
+const jitoSendBundle = (txsBase64, opts) => jitoProvider.sendBundle(txsBase64, opts);
 const getJitoTipFloor = () => jitoProvider.getTipFloor();
 // ADR-0001 Phase 4B.1: the decision-ledger store comes from the same storage backend resolved above.
 const decisionLedgerStore = await createDecisionLedgerStore(storageBackend);
