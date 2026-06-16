@@ -96,15 +96,17 @@ Deploy the **published image** with external datastores; never bake secrets in. 
 
 ## Rust hot-executor (hot-path execution owner) — build or pass `HOT_EXECUTOR_BIN`
 
-The Rust hot-executor is the **hot-path execution owner** (Phases Rust-3/Rust-4, expanding from the Phase
-Rust-1 official signer) and is **network-free by design**: it signs **every leg of the executed bundle** (the
-swap *and* the Jito tip leg via `sign_bundle`, Rust-3) and **assembles the submit + bundle request bodies**
-(`build_submit` / `build_bundle`, Rust-4) — but the actual network POST (sendTransaction / Jito bundle),
-retries, and intent-ledger idempotency stay in the JS control plane (which falls back to JS-built bodies if
-the helper is absent). So the container needs **no extra network egress for the signer** — it only talks over
+The Rust hot-executor is the **hot-path execution owner** (Phases Rust-3/Rust-4/Rust-5, expanding from the
+Phase Rust-1 official signer) and is **network-free by design**: it signs **every leg of the executed bundle**
+(the swap *and* the Jito tip leg via `sign_bundle`, Rust-3), **assembles the submit + bundle request bodies**
+(`build_submit` / `build_bundle`, Rust-4), and understands a whole **buy/sell execution command** as one unit
+(`build_execution_plan`, Rust-5 — sign all legs + assemble the body in one call, returning a self-describing
+envelope) — but the actual network POST (sendTransaction / Jito bundle), retries, and intent-ledger
+idempotency stay in the JS control plane (which falls back to the JS sign+assemble path if the helper is
+absent or errors). So the container needs **no extra network egress for the signer** — it only talks over
 stdin/stdout. Rust expands as the execution owner one safe, tested step at a time; the only remaining step
 (the POST itself) stays in JS until a measured latency win justifies moving it (see
-`docs/architecture/legacy-audit.md` §22–§23).
+`docs/architecture/legacy-audit.md` §22–§24).
 
 The base image runs the in-process signer (fail-safe fallback); readiness shows
 `signing_backend = not_configured`. To activate the official Rust signer, provide a **Linux** binary and

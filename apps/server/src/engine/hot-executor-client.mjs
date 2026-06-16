@@ -95,6 +95,19 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     return { ok: false, error: r.error || 'build_bundle_failed' };
   }
 
+  /** Build a whole buy/sell EXECUTION ENVELOPE via Rust (Phase Rust-5) — sign every unsigned leg AND
+   *  assemble the submit/bundle request body in ONE call. Returns { ok, envelope } where envelope =
+   *  { mode, leg_count, side?, signatures:[b58,…], signed_txs:[base64,…], submit_body|bundle_body }, or
+   *  { ok:false } so the caller can fall back to the existing sign+submit path. PURE in Rust (no network,
+   *  no idempotency): the JS control plane persists signatures[0], performs the POST, and owns the ledger. */
+  async function buildExecutionPlan({ unsignedTxs, seed, mode = 'rpc', side = null, skipPreflight = false, maxRetries = 3 }) {
+    const seedArr = Buffer.isBuffer(seed) ? [...seed] : seed;
+    const id = `c${seq += 1}`;
+    const r = await request({ op: 'build_execution_plan', intent_id: id, unsigned_txs: unsignedTxs, seed: seedArr, execution_mode: mode, side, skip_preflight: skipPreflight, max_retries: maxRetries }, id);
+    if (r.ok && r.envelope) return { ok: true, envelope: r.envelope };
+    return { ok: false, error: r.error || 'build_execution_plan_failed' };
+  }
+
   function ping() { return request({ op: 'ping' }); }
 
   function close() {
@@ -105,5 +118,5 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     failAll('client_closed');
   }
 
-  return { sign, signBundle, buildSubmit, buildBundle, ping, close };
+  return { sign, signBundle, buildSubmit, buildBundle, buildExecutionPlan, ping, close };
 }

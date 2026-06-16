@@ -18,6 +18,14 @@ function mockSpawn() {
         else if (req.op === 'sign_bundle') resp = { ok: true, intent_id: req.intent_id, signed_txs: req.unsigned_txs.map((t) => `SIGNED_${t}`) };
         else if (req.op === 'build_submit') resp = { ok: true, intent_id: req.intent_id, request: { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: [req.signed_tx_base64, { encoding: 'base64', skipPreflight: req.skip_preflight, maxRetries: req.max_retries }] } };
         else if (req.op === 'build_bundle') resp = { ok: true, intent_id: req.intent_id, request: { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [req.signed_txs, { encoding: 'base64' }] } };
+        else if (req.op === 'build_execution_plan') {
+          const signed_txs = req.unsigned_txs.map((t) => `SIGNED_${t}`);
+          const signatures = req.unsigned_txs.map((_t, i) => `SIG_${i}`);
+          const env = { mode: req.execution_mode, leg_count: signed_txs.length, side: req.side, signatures, signed_txs };
+          if (req.execution_mode === 'jito') env.bundle_body = { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [signed_txs, { encoding: 'base64' }] };
+          else env.submit_body = { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: [signed_txs[0], { encoding: 'base64', skipPreflight: req.skip_preflight, maxRetries: req.max_retries }] };
+          resp = { ok: true, intent_id: req.intent_id, envelope: env };
+        }
         else resp = { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
         stdout.write(`${JSON.stringify(resp)}\n`);
         return true;
@@ -61,6 +69,22 @@ test('hot-executor-client: buildBundle returns the Rust-assembled sendBundle bod
   assert.equal(r.ok, true);
   assert.equal(r.body.method, 'sendBundle');
   assert.deepEqual(r.body.params, [['SWAP', 'TIP'], { encoding: 'base64' }]);
+  client.close();
+});
+
+test('hot-executor-client: buildExecutionPlan returns a signed + assembled envelope (Phase Rust-5)', async () => {
+  const client = createHotExecutorClient({ binPath: 'mock', spawnFn: mockSpawn });
+  const jito = await client.buildExecutionPlan({ unsignedTxs: ['SWAP', 'TIP'], seed: Buffer.from([1]), mode: 'jito', side: 'buy' });
+  assert.equal(jito.ok, true);
+  assert.equal(jito.envelope.mode, 'jito');
+  assert.equal(jito.envelope.side, 'buy');
+  assert.deepEqual(jito.envelope.signed_txs, ['SIGNED_SWAP', 'SIGNED_TIP']);
+  assert.deepEqual(jito.envelope.signatures, ['SIG_0', 'SIG_1']);
+  assert.equal(jito.envelope.bundle_body.method, 'sendBundle');
+  const rpc = await client.buildExecutionPlan({ unsignedTxs: ['SWAP'], seed: Buffer.from([1]), mode: 'rpc', side: 'sell' });
+  assert.equal(rpc.ok, true);
+  assert.equal(rpc.envelope.mode, 'rpc');
+  assert.equal(rpc.envelope.submit_body.method, 'sendTransaction');
   client.close();
 });
 

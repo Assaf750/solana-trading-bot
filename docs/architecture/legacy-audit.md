@@ -661,3 +661,64 @@ fallback; bundle body from Rust + fallback). **Verified:** node `--test` full su
 into the signer — gated on §20's *measured* latency criterion (would require adding an HTTP/async stack, so
 it stays out until justified). Until then the split is: **Rust = sign + assemble (network-free); JS = POST +
 idempotency.**
+
+## 24. Phase Rust-5 — Rust understands a buy/sell execution command (the execution envelope)
+
+Rust-3 added per-leg signing; Rust-4 added per-body assembly. Rust-5 **consolidates** them: a single op,
+`build_execution_plan`, that understands a whole buy/sell execution command as one unit — sign EVERY leg AND
+assemble the submit/bundle body in ONE call, returning a self-describing **envelope**. This cuts the hot path
+from two JS↔Rust round-trips (sign, then build) to one, and makes "the execution command" a first-class Rust
+concept. **Still network-free, still no idempotency/db in Rust** — the JS control plane persists the
+deterministic signature, performs the POST, and owns the intent ledger.
+
+**The envelope** (`hotSigner.buildExecutionPlan({ unsignedTxs, seed, mode, side, skipPreflight, maxRetries })`
+→ `{ ok, envelope }`):
+```
+envelope = {
+  mode: "rpc" | "jito",        // which submit path this plan targets
+  leg_count: N,
+  side: "buy" | "sell",        // metadata, echoed
+  signatures: [b58, …],        // per-leg fee-payer signatures; signatures[0] = the swap's on-chain tx id
+  signed_txs: [base64, …],     // the signed legs (swap [+ Jito tip])
+  submit_body | bundle_body    // the assembled JSON-RPC body for the chosen mode
+}
+```
+
+- **Rust** `services/hot-executor/src/main.rs`: new `build_execution_plan` op — signs each unsigned leg
+  (fee-payer-locked, reusing `sign_serialized_transaction`), then builds `submit_body` (rpc, exactly one leg)
+  or `bundle_body` (jito) from the freshly-signed legs. Rejects empty legs / `rpc` mode with >1 leg /
+  unknown mode / a bad leg. New `Request.execution_mode` + `Request.side`, new `Response.envelope`. + cargo
+  tests (rpc mode, jito mode, bad-input matrix). Cargo: **16 tests**.
+- **JS client** `hot-executor-client.mjs`: new `buildExecutionPlan(...)` → `{ ok, envelope }` (or `{ ok:false }`
+  for fallback). Surface is now `sign / signBundle / buildSubmit / buildBundle / buildExecutionPlan / ping /
+  close` — still **no network primitive** (stdin/stdout only).
+- **`live-executor`**: new `buildEnvelopePlan()` helper is the **preferred** path in `executeSwapInner` — it
+  determines the mode (jito needs a fresh blockhash + the unsigned tip leg, built in JS via the parity-proven
+  `buildTipTransferTx`), calls `build_execution_plan`, then returns `{ signed, doPost }`. The money path:
+  persists `SENT_PENDING` with `envelope.signatures[0]` **before** the POST (so an ambiguous send stays
+  reconcilable), then `doPost()` POSTs via the existing JS transports (`jitoSendBundle` / `rpc.rpc`) carrying
+  the envelope body. **Fail-safe at every step** — if `build_execution_plan` is absent (older binary), errors,
+  or returns an incomplete envelope, it falls back to the existing path: sign the swap (Rust `sign` or
+  in-process) + `submitSigned` (with its own Rust-3/Rust-4 logic + fallbacks). The jito `doPost` also falls
+  back to a plain RPC send if the bundle POST fails — a Jito outage can never block the send.
+
+**Invariants preserved (money path):** the deterministic fee-payer signature is still persisted BEFORE
+broadcasting; idempotency (`claimIntent`) is unchanged and in JS; the balance/tip reserve check is unchanged;
+`select_tip` stays the unwired JS-authoritative selector (§23); the `'node'` backend and the entire
+non-envelope path are untouched. No behavior change at default settings — the envelope produces the same
+signed txs + the same request bodies, just in one call.
+
+**Guard** `rust-boundary-guard.test.mjs` (reframed for Rust-5): (a) `Cargo.toml` still carries no HTTP/async
+crate; (b) POST + idempotency stay in JS; (c) the client surface includes `buildExecutionPlan` and holds no
+network primitive; (d) Rust-4 body-sourcing still asserted; (e) **new:** the live-executor uses
+`hotSigner.buildExecutionPlan` via `buildEnvelopePlan`, reads `env.signatures[0]`, and persists `SENT_PENDING`
+before the POST.
+
+**Tests:** cargo **16/16**; client — `buildExecutionPlan` returns a signed+assembled envelope (rpc + jito);
+live-executor — 3 cases (jito envelope used + JS posts it; rpc envelope used + JS posts it; fallback to the
+sign+submit path when `build_execution_plan` fails). **Verified:** node `--test` full suite green; cargo
+`--locked` + test 16/16; docker build OK; UI unchanged (no vite build); smokes skip.
+
+**Next (open, same cadence — unchanged):** the only remaining step is moving the **POST itself** into the
+signer, gated on §20's *measured* latency criterion. The split stays: **Rust = sign + assemble the whole
+execution command (network-free); JS = POST + idempotency.**
