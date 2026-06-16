@@ -5,10 +5,11 @@ behavior**: every new backend is opt-in and the safe defaults (`json` / `memory`
 are unchanged, so a default deployment behaves exactly as before.
 
 ## Status
-- **Branch:** `feat/live-first-unification`
-- **Green guard:** full `node --test` passing (2248+ before this phase's doc-consistency tests);
-  mechanism guard PASS; package-boundary, open-by-design, paper-as-readiness, and backend-defaults
-  guards all green.
+- **Branch:** `feat/live-first-unification` (last phase commit `c557989`, Phase 11A) — **promoted to
+  `main` as the official baseline on 2026-06-16** (merge `--no-ff`, 25 phase commits).
+- **Green guard:** full `node --test` green (**2253** passing, 0 failing); mechanism guard PASS;
+  package-boundary, open-by-design, paper-as-readiness, backend-defaults, and docs-consistency guards all
+  green; vite build green; all four smoke scripts SKIP without env.
 - **External services:** never required for `node --test` (postgres/redis tests use mocks; smokes are
   opt-in and SKIP without env).
 
