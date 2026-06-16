@@ -50,6 +50,11 @@ credentials — pass them at **run** time (env / env-file / orchestrator secret)
 
 ## Rust hot-executor (official signer) — build or pass `HOT_EXECUTOR_BIN`
 
+The Rust hot-executor is the official **signing** boundary and is **network-free by design** (Phase
+Rust-2): it signs and builds pure payloads, but the actual network POST (sendTransaction / Jito bundle),
+retries, and intent-ledger idempotency stay in the JS control plane. So the container needs **no extra
+network egress for the signer** — it only signs over stdin/stdout.
+
 The base image runs the in-process signer (fail-safe fallback); readiness shows
 `signing_backend = not_configured`. To activate the official Rust signer, provide a **Linux** binary and
 set `HOT_EXECUTOR_BIN`:
