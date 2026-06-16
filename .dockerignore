@@ -1,0 +1,12 @@
+# Docker build context excludes — keep the image lean + deterministic.
+**/node_modules
+**/target
+.git
+.github
+data/
+*.log
+C4-Documentation/
+# the operator-ui dist is rebuilt inside the image (build stage); never ship the host's copy
+apps/operator-ui/dist/
+# the untracked root lockfile is not used by the image (root deps resolve fresh; see ci.md)
+package-lock.json

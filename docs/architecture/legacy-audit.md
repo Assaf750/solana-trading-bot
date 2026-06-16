@@ -412,10 +412,36 @@ Everything below is OPEN; everything in §1–§15 is DONE.
    (`superviseTick` / `startSubscription` transitions), the command lifecycle (`closePosition` /
    `resolvePosition` / `manualBuy` / `manualSell` / `addOrder` / `cancelOrder`), and the fills/exits
    pipeline. Requires dependency-inversion (inject rpc / jupiter / stores / liveExecutor into pure logic).
-2. **Deploy / image pipeline.** CI (Phase CI-1) builds + tests but does not build a container image or
-   deploy. Add an image build + a deploy workflow (and a deploy runbook).
+2. **Deploy / image pipeline.** Image build is **DONE** (Phase Deploy-1 — `Dockerfile` + `.dockerignore`,
+   the CI `docker` job builds it, `docs/runbooks/deploy.md`). REMAINING: registry push + a real cloud
+   deploy (no target environment / orchestrator manifest / secrets-management integration yet).
 3. **Optional Rust submit/bundle deepening.** `services/hot-executor` is the official signer (Phase
    Rust-1); a later phase may move more of the execution path (tx submit / Jito bundle send) into the crate.
 4. **`services/*` unused-scaffold audit.** Per-dir audit of the ~14 unconnected `services/*` dirs above —
    classify each as wire / extract-into-a-package / delete, then execute. (`services/signer-service` is
    already empty.)
+
+## 17. Phase Deploy-1 — Docker image + CI build (no behavior change)
+
+A production-runnable image build path. The app behavior is unchanged; the only code change is an
+env-configurable bind host (default preserved).
+
+- **`Dockerfile`** (multi-stage) + **`.dockerignore`**: stage 1 builds the operator UI (`npm ci` +
+  `npm run build`); stage 2 (`node:20-slim`) installs the root runtime deps (`pg` + `redis`, the only
+  ones — pure JS, `--workspaces=false`), copies `apps/server` + `packages` + `services/ingestor` + the
+  built UI dist, and runs `node apps/server/src/index.mjs`. Postgres/Redis/ClickHouse are external (env);
+  no secrets baked in. Validated locally: image builds, the container boots, `/api/runtime/readiness`
+  returns 200 (overall `not_configured`, `read_only:true`), the UI is served (GET `/` → 200), and the
+  CSRF/Host guards still apply (a header-less POST → 403, the route is wired not 404).
+- **Bind host:** added `SOLTRADE_HOST` (default `127.0.0.1` → NO behavior change for non-Docker runs); the
+  image sets `SOLTRADE_HOST=0.0.0.0` so Docker port-forwarding works. The anti-DNS-rebinding Host-header
+  guard in `server.mjs` is unchanged (still requires a localhost Host) — deploy publishes the port to
+  127.0.0.1 / fronts it with a reverse proxy that sets `Host: localhost` (see deploy runbook).
+- **CI:** new `docker` job in `.github/workflows/ci.yml` — `docker build` (no push, no deploy); fails only
+  if the image cannot build.
+- **Docs:** `docs/runbooks/deploy.md` (build/run, env, the Host-header guard, how to build/pass
+  `HOT_EXECUTOR_BIN` for the Rust signer, and the explicit out-of-scope: no secrets baked, no registry
+  push, no cloud deploy).
+
+**Out of scope (still §16.2 remaining):** registry push, a real cloud deploy / orchestrator manifest, and
+secrets-management integration.

@@ -230,7 +230,11 @@ const api = createApi({
 });
 
 const port = Number(process.env.SOLTRADE_PORT) || 8787;
-const { broadcast, url } = startServer({ api, port });
+// Bind host: loopback by default (the trading API is not exposed to the network). SOLTRADE_HOST lets a
+// container bind 0.0.0.0 so Docker port-forwarding works; the anti-DNS-rebinding Host-header guard in
+// server.mjs still requires a localhost Host, so publish the port to 127.0.0.1 / front it with a proxy.
+const host = process.env.SOLTRADE_HOST || '127.0.0.1';
+const { broadcast, url } = startServer({ api, host, port });
 broadcastRef = broadcast;
 
 // Boot state: stay/return to WARMING_UP unless KILLED persisted (a restart never resumes silently).
