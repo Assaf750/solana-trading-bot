@@ -26,8 +26,9 @@ const CHECK_LABEL = {
   sellability: { en: 'Token sellability', ar: 'قابلية البيع' },
   simulation: { en: 'Transaction simulation', ar: 'محاكاة المعاملة' },
 };
-const RUNTIME_TONE = { ready: 'ok', degraded: 'warn', blocked: 'danger' };
-const BACKEND_TONE = { ok: 'ok', disabled: 'neutral', degraded: 'warn', fail: 'danger' };
+// open-by-design capability vocabulary (Phase 8A-R): available | degraded | unavailable | not_configured
+const RUNTIME_TONE = { ready: 'ok', degraded: 'warn', unavailable: 'danger', not_configured: 'neutral' };
+const BACKEND_TONE = { available: 'ok', degraded: 'warn', unavailable: 'danger', not_configured: 'neutral' };
 
 // one-line, human summary per check (kept defensive: only reads fields the adapter actually returns)
 function detailOf(c, ar) {
@@ -121,10 +122,10 @@ export default function Diagnostics() {
           <p className="muted fs-xs">{ar ? 'لا توجد بيانات جاهزية بعد' : 'no readiness data yet'}</p>
         ) : (
           <>
-            <div className="kpi-strip" style={{ margin: 0, gridTemplateColumns: 'repeat(3, 1fr)' }}>
-              {[['storage', runtime.storage], ['hot_state', runtime.hot_state], ['event_sink', runtime.event_sink]].map(([k, v]) => (
+            <div className="kpi-strip" style={{ margin: 0, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {[['storage', runtime.storage], ['hot_state', runtime.hot_state], ['event_sink', runtime.event_sink], ['live_execution', { backend: '', status: runtime.live_execution?.status }]].map(([k, v]) => (
                 <div className="stattile" key={k}>
-                  <span className="lbl">{k.replace('_', ' ')} <span className="muted">· {v?.backend}</span></span>
+                  <span className="lbl">{k.replace(/_/g, ' ')}{v?.backend ? <span className="muted"> · {v.backend}</span> : null}</span>
                   <span className="val" style={{ fontSize: 'var(--fs-md)' }}><Badge tone={BACKEND_TONE[v?.status] || 'neutral'}>{v?.status || '—'}</Badge></span>
                 </div>
               ))}
@@ -134,27 +135,29 @@ export default function Diagnostics() {
               {Object.keys(runtime.providers || {}).length === 0
                 ? <span className="muted fs-xs">—</span>
                 : Object.entries(runtime.providers).map(([n, s]) => (
-                  <Badge key={n} tone={s === 'down' ? 'danger' : s === 'degraded' ? 'warn' : s === 'healthy' ? 'ok' : 'neutral'}>{n}: {s}</Badge>
+                  <Badge key={n} tone={BACKEND_TONE[s] || 'neutral'}>{n}: {s}</Badge>
                 ))}
               <span className="muted fs-xs" style={{ marginInlineStart: 'var(--s-2)' }}>signer:</span>
-              <Badge tone={runtime.signer?.signer_status === 'ready' ? 'ok' : runtime.signer?.signer_status === 'missing' ? 'danger' : 'warn'}>{runtime.signer?.signer_status || '—'}</Badge>
+              <Badge tone={BACKEND_TONE[runtime.signer?.status] || 'neutral'}>{runtime.signer?.status || '—'}</Badge>
+              <span className="muted fs-xs">{ar ? 'يمكنه التوقيع' : 'can sign'}: {runtime.signer?.can_sign ? (ar ? 'نعم' : 'yes') : (ar ? 'لا' : 'no')}</span>
             </div>
-            {/* activation boundary — always shows live send is structurally disabled; NO activation button here */}
-            <DangerNote tone="danger">
-              {ar ? '🔒 الإرسال الحيّ معطّل بنيويًا (live_send_enabled=false). التفعيل قرارك وحدك ويتم من «الإعدادات والأمان» — لا يُفعَّل من هنا.'
-                  : '🔒 Live send is structurally disabled (live_send_enabled=false). Activation is owner-only via Settings & Safety — never from here.'}
-            </DangerNote>
-            <div className="row" style={{ gap: 'var(--s-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-              <Badge tone="danger">{ar ? 'إرسال حيّ: معطّل' : 'live send: OFF'}</Badge>
-              <span className="muted fs-xs">{ar ? 'جاهز للتفعيل الحيّ' : 'real-live ready'}: <Badge tone={runtime.activation?.real_live_ready ? 'warn' : 'neutral'}>{runtime.activation?.real_live_ready ? (ar ? 'نعم' : 'yes') : (ar ? 'لا' : 'no')}</Badge></span>
-              {(runtime.activation?.blockers?.length > 0) && <span className="muted fs-xs">{ar ? 'حواجز التفعيل' : 'activation blockers'}: {runtime.activation.blockers.length}</span>}
-              <button className="btn" onClick={loadRuntime}>{ar ? 'تحديث' : 'Refresh'}</button>
-            </div>
-            {(runtime.blockers?.length > 0) && (
-              <p className="fs-xs" style={{ color: 'var(--c-danger)', marginBlockStart: 6 }}>
-                {ar ? 'حواجز التشغيل' : 'runtime blockers'}: {runtime.blockers.join(' · ')}
+            {runtime.live_execution?.missing_config?.length > 0 && (
+              <p className="fs-xs muted" style={{ marginBlockStart: 6 }}>
+                {ar ? 'إعداد مطلوب لتفعيل التنفيذ الحيّ' : 'configure to enable live execution'}: {runtime.live_execution.missing_config.join(' · ')}
               </p>
             )}
+            {runtime.unavailable_dependencies?.length > 0 && (
+              <p className="fs-xs" style={{ color: 'var(--c-warn)', marginBlockStart: 4 }}>
+                {ar ? 'تبعيات غير متوفرة' : 'unavailable dependencies'}: {runtime.unavailable_dependencies.join(' · ')}
+              </p>
+            )}
+            <DangerNote tone="info">
+              {ar ? 'هذه الصفحة للمراقبة فقط. تصبح القدرات متاحة عند توفّر الإعداد والمتطلبات. لا تفرض هذه الصفحة أي قيود.'
+                  : 'Runtime readiness is informational. Capabilities become available when configured. This page does not enforce gates.'}
+            </DangerNote>
+            <div className="row" style={{ gap: 'var(--s-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <button className="btn" onClick={loadRuntime}>{ar ? 'تحديث' : 'Refresh'}</button>
+            </div>
           </>
         )}
       </Card>

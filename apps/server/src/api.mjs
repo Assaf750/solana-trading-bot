@@ -256,41 +256,64 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
         if (path === '/api/runtime/readiness') {
-          // ADR-0001 Phase 8A: structured, READ-ONLY runtime health across storage / hot-state /
-          // event-sink / providers / signer / diagnostics / activation. Never opens live, never mutates.
-          // Postgres (configured SoT) is the only hard blocker; Redis/ClickHouse only ever degrade;
-          // real-money send stays structurally disabled regardless of anything reported here.
+          // ADR-0001 Phase 8A-R: structured, READ-ONLY runtime status. OPEN-BY-DESIGN — this endpoint is
+          // MONITORING, not enforcement: it reports capability status (available / not_configured /
+          // degraded / unavailable), never imposes a lock/gate/hard-stop. A capability is `available`
+          // once its config + dependencies are present; missing setup reads as `not_configured`; a failed
+          // dependency reads as `degraded`/`unavailable`. cache (Redis) / analytics (ClickHouse) outages
+          // never affect other capabilities. Nothing here opens live or mutates state.
           const status = statusPayload();
-          const act = readiness();
+          const rd = readiness();
           const safeProbe = async (fn, fallback) => { if (typeof fn !== 'function') return fallback; try { return (await fn()) || fallback; } catch { return { ...fallback, status: 'degraded' }; } };
-          const storage = await safeProbe(runtimeProbes && runtimeProbes.storage, { backend: 'json', status: 'ok' });
-          const hot_state = await safeProbe(runtimeProbes && runtimeProbes.hotState, { backend: 'memory', status: 'ok' });
-          const event_sink = await safeProbe(runtimeProbes && runtimeProbes.eventSink, { backend: 'none', status: 'disabled' });
-          const providers = providerStatuses(status.providers);
-          const providerDegraded = Object.values(providers).some((s) => s === 'down' || s === 'degraded');
-          const blockers = [];
-          if (storage.status === 'fail') blockers.push('storage_unavailable');
-          let overall = 'ready';
-          if (storage.status === 'fail') overall = 'blocked';
-          else if (storage.status === 'degraded' || hot_state.status === 'degraded' || event_sink.status === 'degraded' || providerDegraded) overall = 'degraded';
+          const CAP = (s) => ({ ok: 'available', fail: 'unavailable', disabled: 'not_configured' }[s]
+            || (['available', 'unavailable', 'degraded', 'not_configured'].includes(s) ? s : 'available'));
+          const sp = await safeProbe(runtimeProbes && runtimeProbes.storage, { backend: 'json', status: 'ok' });
+          const hp = await safeProbe(runtimeProbes && runtimeProbes.hotState, { backend: 'memory', status: 'ok' });
+          const ep = await safeProbe(runtimeProbes && runtimeProbes.eventSink, { backend: 'none', status: 'disabled' });
+          const storage = { backend: sp.backend, status: CAP(sp.status) };
+          const hot_state = { backend: hp.backend, status: CAP(hp.status) };
+          const event_sink = { backend: ep.backend, status: CAP(ep.status) };
+          const provCap = (s) => ({ healthy: 'available', degraded: 'degraded', down: 'unavailable' }[s] || 'available');
+          const providers = Object.fromEntries(Object.entries(providerStatuses(status.providers)).map(([k, v]) => [k, provCap(v)]));
+
+          // live execution as a CAPABILITY (open-by-design). requirements come from the honest readiness
+          // checks; `missing_config` is the not-yet-configured subset; it becomes available once met.
+          const reqBlockers = (rd.blockers || []).filter((b) => b.blocker !== 'kill_switch_engaged');
+          const missing_config = reqBlockers.map((b) => b.blocker);
+          const requirements = ['hard_risk_limits', 'capital_limit', 'rpc_provider', 'signer_session_bounds', 'signer_ready'];
+          const killEngaged = (rd.blockers || []).some((b) => b.blocker === 'kill_switch_engaged');
+          let liveStatus;
+          if (missing_config.length) liveStatus = 'not_configured';
+          else if (killEngaged || storage.status === 'unavailable' || providers.rpc === 'unavailable') liveStatus = 'unavailable';
+          else if (hot_state.status === 'degraded' || event_sink.status === 'degraded' || Object.values(providers).includes('degraded')) liveStatus = 'degraded';
+          else liveStatus = 'available';
+          const live_execution = { status: liveStatus, requirements, missing_config, can_execute_when_configured: true };
+
+          // signer capability — no locked/unlocked terminology; can_sign is a factual capability check
+          const sg = status.signer || {};
+          const signer = { status: sg.key_imported ? 'available' : 'not_configured', can_sign: !!(sg.key_imported && sg.vault_unlocked && sg.session_active) };
+
+          const degradedAny = [storage.status, hot_state.status, event_sink.status].includes('degraded') || Object.values(providers).includes('degraded');
+          const unavailableCore = storage.status === 'unavailable' || live_execution.status === 'unavailable';
+          const overall = unavailableCore ? 'unavailable' : degradedAny ? 'degraded' : live_execution.status === 'not_configured' ? 'not_configured' : 'ready';
+
+          const unavailable_dependencies = [];
+          if (storage.status === 'unavailable') unavailable_dependencies.push('storage');
+          if (hot_state.status === 'degraded') unavailable_dependencies.push('hot_state');
+          if (event_sink.status === 'degraded') unavailable_dependencies.push('event_sink');
+          for (const [k, v] of Object.entries(providers)) if (v === 'unavailable' || v === 'degraded') unavailable_dependencies.push(`provider:${k}`);
+
           return { status: 200, body: {
             overall,
             mode: status.mode || null,
             run_mode: status.run_mode || null,
             operating_state: status.operating_state?.operating_state || null,
-            storage, hot_state, event_sink, providers,
-            signer: status.signer || null,
-            diagnostics: { backend: diagnostics ? 'package' : 'legacy', available: !!diagnostics },
-            activation: {
-              live_send_enabled: false,        // STRUCTURAL hard stop — real-money send authority is absent in this build
-              activation_required: true,
-              mode: status.mode || null,        // 'real_live' here means ARMED, not able-to-send
-              live_engine: status.engine?.live_engine || null,
-              real_live_ready: !!act.real_live_ready,
-              blockers: act.blockers || [],
-            },
-            blockers,
-            safety: DIAG_SAFETY,                // this endpoint reads only: no transaction, position, or intent
+            capability_status: { storage: storage.status, hot_state: hot_state.status, event_sink: event_sink.status, signer: signer.status, live_execution: live_execution.status },
+            storage, hot_state, event_sink, providers, signer,
+            diagnostics: { backend: diagnostics ? 'package' : 'legacy', status: diagnostics ? 'available' : 'not_configured' },
+            live_execution,
+            unavailable_dependencies,
+            read_only: true,                    // monitoring only — this endpoint never executes, mutates, or gates
             checked_at: new Date().toISOString(),
           } };
         }
