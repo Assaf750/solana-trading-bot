@@ -9,7 +9,6 @@ import { join } from 'node:path';
 process.env.SOLTRADE_DATA_DIR = process.env.SOLTRADE_DATA_DIR || mkdtempSync(join(tmpdir(), 'soltrade-eng-'));
 
 const { detectLeaderSwap, WSOL_MINT } = await import('../src/engine/swap-detector.mjs');
-const { isHeliusHost, buildWalletSubscriptions, parseStreamNotification } = await import('../src/engine/rpc-client.mjs');
 const { computeWalletStats } = await import('../src/engine/wallet-analyzer.mjs');
 const { extractTradersFromTx } = await import('../src/engine/wallet-discovery.mjs');
 const { createPaperPortfolio } = await import('../src/engine/paper-portfolio.mjs');
@@ -64,39 +63,8 @@ test('swap-detector: failed tx / no movement / hostile input => null, never thro
   assert.equal(detectLeaderSwap({ tx: { meta: { get err() { throw new Error('hostile'); } } }, leaderAddress: LEADER }).kind, null);
 });
 
-// ---------- Helius stream integration (pure helpers) ----------
-test('rpc-client: Helius host detected; generic host not', () => {
-  assert.equal(isHeliusHost('https://mainnet.helius-rpc.com/?api-key=x'), true);
-  assert.equal(isHeliusHost('https://api.mainnet-beta.solana.com'), false);
-  assert.equal(isHeliusHost('not a url'), false);
-});
-
-test('rpc-client: default subscription is per-wallet logsSubscribe (reliable on every plan)', () => {
-  const addrs = ['Aaa', 'Bbb', 'Ccc'];
-  const def = buildWalletSubscriptions({ addresses: addrs });
-  assert.equal(def.length, 3);
-  assert.ok(def.every((s) => s.method === 'logsSubscribe'));
-  assert.deepEqual(def[0].params[0].mentions, ['Aaa']);
-  // enhanced is opt-in only (Helius paid Atlas endpoint)
-  const enhanced = buildWalletSubscriptions({ addresses: addrs, enhanced: true });
-  assert.equal(enhanced.length, 1);
-  assert.equal(enhanced[0].method, 'transactionSubscribe');
-  assert.deepEqual(enhanced[0].params[0].accountInclude, addrs);
-});
-
-test('rpc-client: parseStreamNotification extracts inline tx (Helius) and signature-only (logs), drops failed/garbage', () => {
-  const heliusMsg = { method: 'transactionNotification', params: { result: { value: { signature: 'SIG1', transaction: { transaction: { message: {} }, meta: { err: null } } } } } };
-  const p1 = parseStreamNotification(heliusMsg);
-  assert.equal(p1.signature, 'SIG1');
-  assert.ok(p1.tx, 'inline tx present for Helius');
-  const failed = { method: 'transactionNotification', params: { result: { value: { signature: 'SIG2', transaction: { meta: { err: { x: 1 } } } } } } };
-  assert.equal(parseStreamNotification(failed), null, 'failed tx dropped');
-  const logsMsg = { method: 'logsNotification', params: { result: { value: { signature: 'SIG3', err: null } } } };
-  const p3 = parseStreamNotification(logsMsg);
-  assert.equal(p3.signature, 'SIG3');
-  assert.equal(p3.tx, null, 'logs path has no inline tx');
-  assert.equal(parseStreamNotification({ method: 'unknown' }), null);
-});
+// (rpc-client stream pure-helper tests moved to packages/provider-adapters/test in Phase Clean-1 —
+//  they now test the LIVE copies; the duplicate apps/server/engine/rpc-client.mjs copies were removed.)
 
 // ---------- wallet analyzer (pure historical read-model) ----------
 test('wallet-analyzer: empty / no-evidence -> insufficient_evidence, never fabricates', () => {
