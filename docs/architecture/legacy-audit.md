@@ -121,3 +121,45 @@ the in-process `legacyJitoSendBundle` / `legacyGetJitoTipFloor` in `index.mjs`, 
 `provider-health` has a behavioral parity guard so far. Removing it needs provider-by-provider parity
 coverage first. Remaining shims after 3B.2: `PROVIDER_BACKEND`, `DECISION_LEDGER_BACKEND`,
 `POSITIONS_BACKEND` (all kept, default-off, behind their flags).
+
+## 8. Phase 3B.3 — provider shim parity proven; removal DEFERRED to 3B.4 (NOT removed)
+
+Added `apps/server/test/provider-shim-parity.test.mjs` — **behavioral legacy↔package parity** for the
+cleanly-testable PROVIDER_BACKEND dispatch points (no real network: pure helpers, injected clock, shared
+global-`fetch` mock, injected stub rpc). **Decision: PROVIDER_BACKEND is NOT removed in 3B.3** — two
+dispatch points cannot be parity-proven by a unit test, so per the conservative rule (remove only when
+parity is proven *clearly* for every point) the flag stays. No removal, no behavior/default change.
+
+| Dispatch point | File | Parity coverage (3B.3) | Removable? |
+|---|---|---|---|
+| `selectTipLamports` | `engine/jito-tip-tx.mjs` | **proven** — pure; legacy === package over percentile/floor/cap cases | yes |
+| `buildTipTransferTx` | `engine/jito-tip-tx.mjs` | **proven** — pure; legacy base64 === package base64 (valid 32-byte b58 inputs) | yes |
+| `createProviderHealth` | `engine/provider-health.mjs` | **proven** — injected constant clock; snapshot deepEqual over a recorded sequence | yes |
+| `quote` / `usdValueOf` | `engine/jupiter-client.mjs` | **proven** — shared global-`fetch` mock; deepEqual on priced route, no-route, HTTP error | yes |
+| `rpc` | `engine/rpc-client.mjs` | **proven** — shared global-`fetch` mock; deepEqual on result, JSON-RPC error, HTTP error | yes |
+| `getAssetMeta` | `engine/helius-das.mjs` | **proven** — injected stub rpc; deepEqual on hit, miss, bad rpc | yes |
+| `subscribeWallets` | `engine/rpc-client.mjs` | **NOT proven** — long-lived WS + gRPC stream; behaviour is event-driven (reconnect/backoff/gap timers), not a request→response a unit test can compare | **blocker** |
+| `legacyJitoSendBundle` / `legacyGetJitoTipFloor` | `index.mjs` | **NOT proven** — inline in the boot file (not module exports); network bundle-send, not unit-testable in isolation | **blocker** |
+
+In all 6 proven points the legacy output is byte-identical to `@soltrade/provider-adapters`, the package
+backend is the default (unset), and an unknown flag value resolves to the package backend (never legacy).
+
+### What blocks removal, and what 3B.4 needs
+1. **`rpc.subscribeWallets` streaming parity.** Build a streaming-parity harness: inject the *same* stub
+   `wsFactory` + `grpcIngestorFactory` into both the legacy and package clients, drive an identical
+   scripted sequence of fake leader events / disconnects / gaps, and assert the `onLeaderActivity` /
+   `onUp` / `onGap` callbacks fire identically. Until that harness exists, streaming parity is asserted
+   only structurally (both paths consume the same injected factories; the package is a byte-for-byte port
+   of the legacy stream loop) — not good enough to *prove* removal-safety by test.
+2. **`index.mjs` jito glue.** `legacyJitoSendBundle` / `legacyGetJitoTipFloor` are inline in the boot
+   file and reach the network, so they are not unit-testable as-is. 3B.4 should either extract them into a
+   small testable module and add a mock-parity test against `jitoProvider.sendBundle` / `getTipFloor`, or
+   remove them under a documented manual-soak sign-off (the package jito provider is already the default
+   and a byte-for-byte port).
+
+Once both blockers have parity coverage (or a documented soak sign-off), 3B.4 can delete every
+`legacyCreate*` / `legacy*` provider path + the `process.env.PROVIDER_BACKEND` dispatch in all five engine
+files and `index.mjs`, make the wrappers package-only (mirroring the 3B.2 RISK removal), and move
+`PROVIDER_BACKEND` to the "Removed flags" note. Remaining shims after 3B.3: `PROVIDER_BACKEND` (parity
+5/6, removal pending the two blockers), `DECISION_LEDGER_BACKEND`, `POSITIONS_BACKEND` (all kept,
+default-off, behind their flags).
