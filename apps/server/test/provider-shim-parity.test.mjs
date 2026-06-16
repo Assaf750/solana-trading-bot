@@ -1,9 +1,11 @@
-// provider-shim-parity.test.mjs — ADR-0001 Phase 3B.3. Proves the PROVIDER_BACKEND legacy path is
-// behaviourally identical to the @soltrade/provider-adapters package path for the cleanly-testable
-// dispatch points (no real network): jito-tip pure helpers, provider-health (injected clock), and
-// jupiter quote/usdValueOf (shared global-fetch mock). This builds the safety net BEFORE any removal;
-// the removal itself is DEFERRED to 3B.4 (rpc.subscribeWallets streaming + index.mjs jito glue are not
-// unit-provable) — see docs/architecture/legacy-audit.md §8.
+// provider-shim-parity.test.mjs — ADR-0001 Phase 3B.3 (parity proof) → 3B.4 (flag removed). Originally
+// proved the PROVIDER_BACKEND legacy path was byte-identical to @soltrade/provider-adapters for the
+// cleanly-testable dispatch points (no network): jito-tip pure helpers, provider-health (injected
+// clock), jupiter quote/usdValueOf + rpc.rpc (shared global-fetch mock), helius-das (injected stub rpc).
+// In Phase 3B.4 the PROVIDER_BACKEND shim was REMOVED once the last two gaps (rpc.subscribeWallets
+// streaming + index.mjs jito glue) were closed — see docs/architecture/legacy-audit.md §9. The flag is
+// now INERT, so these tests double as (a) package behavioural coverage across inputs and (b) proof that
+// PROVIDER_BACKEND=legacy has no effect (it resolves to the package backend).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -13,7 +15,7 @@ const { createJupiterClient } = await import('../src/engine/jupiter-client.mjs')
 const { createRpcClient } = await import('../src/engine/rpc-client.mjs');
 const { createDas } = await import('../src/engine/helius-das.mjs');
 
-// the dispatch reads PROVIDER_BACKEND at the moment the function/factory runs, so wrap that call
+// PROVIDER_BACKEND is now inert (shim removed in 3B.4); wrapping the call confirms the value is ignored
 function withProvider(val, fn) {
   const prev = process.env.PROVIDER_BACKEND;
   if (val === undefined) delete process.env.PROVIDER_BACKEND; else process.env.PROVIDER_BACKEND = val;

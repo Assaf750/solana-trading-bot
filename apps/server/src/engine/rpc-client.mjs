@@ -59,155 +59,17 @@ export function parseStreamNotification(msg) {
   return null;
 }
 
-// ADR-0001 Phase 2D: RPC calls are OWNED by @soltrade/provider-adapters. The server delegates behind
-// PROVIDER_BACKEND (default=package), injecting the gRPC ingestor factory; legacy retained for rollback.
+// RPC calls (HTTP + wallet stream) are OWNED by @soltrade/provider-adapters (ADR-0001 Phase 2D).
+// The PROVIDER_BACKEND legacy in-process shim was REMOVED in Phase 3B.4 after 3B.3/3B.4 proved the
+// legacy path was byte-identical to the package — including the subscribeWallets streaming trace
+// (subscriptions, onUp/onLeaderActivity/onGap, reconnect/backoff) via a fake-WS + mock-timer harness,
+// and the gRPC dispatch args. The server injects the live mechanisms (gRPC ingestor factory, fetch,
+// WebSocket) into the package provider; the pure helpers above are re-exported for direct callers.
 export function createRpcClient(args) {
-  return process.env.PROVIDER_BACKEND === 'legacy'
-    ? legacyCreateRpcClient(args)
-    : createRpcProvider({ grpcIngestorFactory: createGrpcIngestor, request: (u, o) => fetch(u, o), wsFactory: (u) => new WebSocket(u), ...args });
-}
-
-function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor, health }) {
-  async function rpc(method, params) {
-    const url = getRpcUrl();
-    if (!url) return { ok: false, error: 'rpc_url_unavailable' }; // config state (no URL), not a provider failure -> not recorded
-    const t0 = Date.now();
-    const rec = (r) => { if (health) health.record('rpc', r.ok, Date.now() - t0, r.error); return r; };
-    let attempt = 0;
-    while (attempt < 3) {
-      attempt += 1;
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (res.status === 429) { await new Promise((r) => setTimeout(r, 1500 * attempt)); continue; }
-        if (!res.ok) return rec({ ok: false, error: `rpc_http_${res.status}` });
-        const j = await res.json();
-        if (j.error) return rec({ ok: false, error: `rpc_${j.error.code}`, message: String(j.error.message || '').slice(0, 120) });
-        return rec({ ok: true, result: j.result });
-      } catch (e) {
-        if (attempt >= 3) return rec({ ok: false, error: `rpc_failed_${String(e?.name || 'err')}` });
-        await new Promise((r) => setTimeout(r, 800 * attempt));
-      }
-    }
-    return rec({ ok: false, error: 'rpc_retries_exhausted' });
-  }
-
-  const getHealth = () => rpc('getHealth', []);
-  const getSlot = () => rpc('getSlot', [{ commitment: 'confirmed' }]);
-  const getTransaction = (signature) => rpc('getTransaction', [signature, {
-    encoding: 'jsonParsed', commitment: 'confirmed', maxSupportedTransactionVersion: 0,
-  }]);
-
-  /** Runtime readiness probe used when the owner enters/validates an RPC key. */
-  async function testConnection() {
-    const url = getRpcUrl();
-    if (!url) return { ok: false, error: 'rpc_url_unavailable' };
-    const started = Date.now();
-    const v = await rpc('getVersion', []);
-    const latency_ms = Date.now() - started;
-    if (!v.ok) return { ok: false, error: v.error, latency_ms };
-    const slot = await getSlot();
-    return {
-      ok: true,
-      solana_core: v.result?.['solana-core'] || null,
-      current_slot: slot.ok ? slot.result : null,
-      latency_ms,
-      provider: isHeliusHost(url) ? 'helius' : 'generic',
-      enhanced_stream: isHeliusHost(url),
-    };
-  }
-
-  function wsUrlFromHttp(url) {
-    try {
-      const u = new URL(url);
-      u.protocol = u.protocol === 'http:' ? 'ws:' : 'wss:';
-      return u.toString();
-    } catch { return null; }
-  }
-
-  /**
-   * Subscribe to leader-wallet activity. onLeaderActivity({signature, tx}) fires per event
-   * (tx inline on Helius, null on generic -> engine fetches). Bounded-backoff reconnect;
-   * onGap() fires when the stream has been down longer than gapMs. 60s keepalive frame.
-   */
-  function subscribeWallets({ addresses, onLeaderActivity, onUp, onGap, gapMs = 120000 }) {
-    // Prefer the Yellowstone/Geyser gRPC transport when an endpoint is configured (intra-slot
-    // streaming, reliable under load). Falls back to the universal WebSocket logsSubscribe path —
-    // identical callback contract, so the engine is unchanged either way.
-    const grpc = typeof getGrpcEndpoint === 'function' ? getGrpcEndpoint() : null;
-    if (grpc && grpc.endpoint) {
-      return grpcIngestorFactory({
-        endpoint: grpc.endpoint, token: grpc.token, addresses,
-        onLeaderActivity, onUp, onGap, gapMs,
-      });
-    }
-    let ws = null;
-    let closed = false;
-    let backoff = 1000;
-    let downSince = null;
-    let gapTimer = null;
-    let keepAlive = null;
-    let reconnectTimer = null;
-
-    function connect() {
-      if (closed) return;
-      const http = getRpcUrl();
-      const wsUrl = http ? wsUrlFromHttp(http) : null;
-      if (!wsUrl) { scheduleReconnect(); return; }
-      const helius = isHeliusHost(http);
-      try { ws = new WebSocket(wsUrl); } catch { scheduleReconnect(); return; }
-
-      ws.onopen = () => {
-        backoff = 1000;
-        downSince = null;
-        if (gapTimer) { clearTimeout(gapTimer); gapTimer = null; }
-        // logsSubscribe by default (reliable on every plan); transactionSubscribe is
-        // opt-in only and requires Helius' paid Atlas endpoint.
-        for (const sub of buildWalletSubscriptions({ addresses, enhanced: false })) {
-          try { ws.send(JSON.stringify(sub)); } catch { /* will reconnect */ }
-        }
-        // keepalive: a lightweight frame every 60s (Helius idle close at 10 min)
-        keepAlive = setInterval(() => {
-          try { ws.send(JSON.stringify({ jsonrpc: '2.0', id: 'keepalive', method: 'getHealth' })); }
-          catch { /* socket gone; onclose handles it */ }
-        }, 60000);
-        if (onUp) onUp({ provider: helius ? 'helius' : 'generic' });
-      };
-      ws.onmessage = (ev) => {
-        try {
-          const parsed = parseStreamNotification(JSON.parse(ev.data));
-          if (parsed) onLeaderActivity(parsed);
-        } catch { /* malformed/keepalive-reply frame — ignore */ }
-      };
-      ws.onclose = () => { if (keepAlive) clearInterval(keepAlive); scheduleReconnect(); };
-      ws.onerror = () => { try { ws.close(); } catch { /* already closing */ } };
-    }
-
-    function scheduleReconnect() {
-      if (closed) return;
-      if (!downSince) {
-        downSince = Date.now();
-        gapTimer = setTimeout(() => { if (onGap && !closed) onGap(); }, gapMs);
-      }
-      reconnectTimer = setTimeout(connect, backoff);
-      backoff = Math.min(backoff * 2, 60000);
-    }
-
-    connect();
-    return {
-      close() {
-        closed = true;
-        if (gapTimer) clearTimeout(gapTimer);
-        if (reconnectTimer) clearTimeout(reconnectTimer);
-        if (keepAlive) clearInterval(keepAlive);
-        try { ws?.close(); } catch { /* fine */ }
-      },
-    };
-  }
-
-  return { rpc, getHealth, getSlot, getTransaction, testConnection, subscribeWallets };
+  return createRpcProvider({
+    grpcIngestorFactory: createGrpcIngestor,
+    request: (u, o) => fetch(u, o),
+    wsFactory: (u) => new WebSocket(u),
+    ...args,
+  });
 }

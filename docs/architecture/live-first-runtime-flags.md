@@ -30,14 +30,13 @@ configured; there are no artificial gates.
 | `DIAGNOSTIC_BACKEND` | `legacy` \| `package` | `legacy` | `package` wires the DiagnosticExecutionAdapter (+ `/api/diagnostics/*`); `legacy` = off (opt-in). |
 | `DECISION_LEDGER_BACKEND` | `package` \| `legacy` | `package` | decision-ledger owner = `@soltrade/decision-ledger`; `legacy` = in-process rollback shim. |
 | `POSITIONS_BACKEND` | `package` \| `legacy` | `package` | positions book owner = `@soltrade/positions`; `legacy` = rollback shim. |
-| `PROVIDER_BACKEND` | `package` \| `legacy` | `package` | providers owner = `@soltrade/provider-adapters`; `legacy` = rollback shim. |
 | `SOLTRADE_PORT` | number | `8787` | server HTTP port. |
 | `SOLTRADE_DATA_DIR` | path | `data/` | JSON store directory. |
 | `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE` / `RUN_FULL_STACK_SMOKE` | `1` | unset | opt-in gates for the smoke scripts (never part of `node --test`). |
 | `SOLTRADE_BASE_URL` | URL | — | optional API target for `smoke:full-stack`. |
 
 ## Defaults are locked
-The remaining rollback flags (`PROVIDER_BACKEND` / `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND`)
+The remaining rollback flags (`DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND`)
 select `legacy` ONLY on the literal `'legacy'` (so the default is the package backend);
 `STORAGE`/`HOT_STATE`/`EVENT_SINK` default to `json`/`memory`/`none`; `DIAGNOSTIC` is opt-in.
 This is enforced by `apps/server/test/backend-defaults.test.mjs` — defaults cannot silently flip.
@@ -45,6 +44,10 @@ This is enforced by `apps/server/test/backend-defaults.test.mjs` — defaults ca
 ## Removed flags
 - `RISK_BACKEND` — **removed in Phase 3B.2** (after 3B.1 proved legacy↔package parity). The hard-risk
   gate now delegates straight to `@soltrade/risk`; setting `RISK_BACKEND` has no effect.
+- `PROVIDER_BACKEND` — **removed in Phase 3B.4** (after 3B.3/3B.4 proved legacy↔package parity for all
+  six dispatch points — jupiter, rpc incl. the `subscribeWallets` streaming trace, provider-health,
+  helius-das, jito-tip, and the index.mjs jito bundle/tip-floor glue). The provider wrappers now
+  delegate straight to `@soltrade/provider-adapters`; setting `PROVIDER_BACKEND` has no effect.
 
 See `docs/runbooks/local-full-stack.md` to run the whole stack and `docs/architecture/legacy-audit.md`
 for the legacy/shim inventory.

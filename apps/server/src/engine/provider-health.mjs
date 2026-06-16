@@ -3,65 +3,12 @@
 // provider quietly failing — quotes 429ing, RPC erroring — so we measure REAL call outcomes
 // (success/error + latency) over a sliding window and expose an honest status. No persistence:
 // this is live operational health that should reset on restart, never a stored "estimate".
-
-const WINDOW = 120;       // outcomes kept per provider
-const DEGRADED_PCT = 10;  // error rate >= 10% over the window -> degraded
-const DOWN_PCT = 50;      // error rate >= 50% -> down
-
+//
+// The health monitor is OWNED by @soltrade/provider-adapters (ADR-0001 Phase 2D). The PROVIDER_BACKEND
+// legacy in-process monitor was REMOVED in Phase 3B.4 after 3B.1/3B.3 proved byte-identical snapshots
+// (same sliding window, degraded/down thresholds, percentiles) under an injected clock.
 import { createProviderHealthMonitor } from '../../../../packages/provider-adapters/src/index.mjs';
 
-// ADR-0001 Phase 2D: delegated to @soltrade/provider-adapters behind PROVIDER_BACKEND (legacy retained).
 export function createProviderHealth(args = {}) {
-  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyCreateProviderHealth(args) : createProviderHealthMonitor(args);
-}
-
-function legacyCreateProviderHealth({ window = WINDOW, now = () => Date.now() } = {}) {
-  const providers = new Map(); // name -> { outcomes: [{ok, ms, error, ts}], lastError, lastErrorTs }
-
-  function record(provider, ok, ms, error) {
-    if (!provider) return;
-    let p = providers.get(provider);
-    if (!p) { p = { outcomes: [], lastError: null, lastErrorTs: null }; providers.set(provider, p); }
-    p.outcomes.push({ ok: !!ok, ms: Number.isFinite(ms) ? ms : null, error: ok ? null : (error || 'error'), ts: now() });
-    if (p.outcomes.length > window) p.outcomes.shift();
-    if (!ok) { p.lastError = error || 'error'; p.lastErrorTs = now(); }
-  }
-
-  function pctile(sortedAsc, p) {
-    if (!sortedAsc.length) return null;
-    const idx = Math.min(sortedAsc.length - 1, Math.floor((p / 100) * sortedAsc.length));
-    return sortedAsc[idx];
-  }
-
-  function statusOf(errPct, calls) {
-    if (calls === 0) return 'unknown';
-    if (errPct >= DOWN_PCT) return 'down';
-    if (errPct >= DEGRADED_PCT) return 'degraded';
-    return 'healthy';
-  }
-
-  function snapshot() {
-    const out = {};
-    for (const [name, p] of providers) {
-      const calls = p.outcomes.length;
-      const oks = p.outcomes.reduce((a, o) => a + (o.ok ? 1 : 0), 0);
-      const errors = calls - oks;
-      const errPct = calls ? Math.round((errors / calls) * 1000) / 10 : 0;
-      const lat = p.outcomes.map((o) => o.ms).filter((m) => Number.isFinite(m)).sort((a, b) => a - b);
-      out[name] = {
-        calls,
-        ok: oks,
-        errors,
-        error_pct: errPct,
-        p50_ms: pctile(lat, 50),
-        p90_ms: pctile(lat, 90),
-        last_error: p.lastError,
-        last_error_ts: p.lastErrorTs,
-        status: statusOf(errPct, calls),
-      };
-    }
-    return out;
-  }
-
-  return { record, snapshot };
+  return createProviderHealthMonitor(args);
 }

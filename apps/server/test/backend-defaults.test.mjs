@@ -17,7 +17,8 @@ const { parseRedisConfig } = await import('../src/storage/redis-client.mjs');
 const { parseClickHouseConfig } = await import('../src/storage/clickhouse-client.mjs');
 
 // ---------- engine rollback flags default to the package backend ----------
-// (RISK_BACKEND was removed in Phase 3B.2 — its shim is gone; see the removal guard below.)
+// (RISK_BACKEND was removed in Phase 3B.2 and PROVIDER_BACKEND in Phase 3B.4 — their shims are gone;
+//  see the removal guards below. The remaining rollback flags are DECISION_LEDGER / POSITIONS.)
 test('DECISION_LEDGER / POSITIONS flags gate legacy ONLY on the literal "legacy" (default = package)', () => {
   const cases = [
     ['DECISION_LEDGER_BACKEND', 'apps/server/src/engine/live-executor.mjs', /process\.env\.DECISION_LEDGER_BACKEND\s*===\s*'legacy'/],
@@ -37,12 +38,24 @@ test('RISK_BACKEND shim is REMOVED (3B.2): risk-gates delegates to @soltrade/ris
   assert.match(src, /from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/risk\/src\/index\.mjs'/, 'delegates to @soltrade/risk');
 });
 
-test('PROVIDER_BACKEND defaults to package across every provider shim', () => {
-  for (const f of ['jupiter-client', 'rpc-client', 'provider-health', 'helius-das', 'jito-tip-tx']) {
-    const src = code(read(`apps/server/src/engine/${f}.mjs`));
-    assert.ok(/process\.env\.PROVIDER_BACKEND\s*===\s*'legacy'/.test(src), `${f}: PROVIDER_BACKEND legacy only on explicit 'legacy'`);
-    assert.ok(!/\|\|\s*'legacy'/.test(src), `${f}: must never default to legacy`);
+test('PROVIDER_BACKEND shim is REMOVED (3B.4): every provider wrapper delegates to the package, no env dispatch', () => {
+  // each wrapper now delegates straight to @soltrade/provider-adapters (proven byte-identical in 3B.3/3B.4)
+  const wrappers = {
+    'jupiter-client': /createJupiterProvider/,
+    'rpc-client': /createRpcProvider/,
+    'provider-health': /createProviderHealthMonitor/,
+    'helius-das': /createHeliusProvider/,
+    'jito-tip-tx': /makeTipTransferBuilder/,
+  };
+  for (const [f, delegateRe] of Object.entries(wrappers)) {
+    const src = code(read(`apps/server/src/engine/${f}.mjs`)); // comments may still name the removed flag
+    assert.ok(!/process\.env\.PROVIDER_BACKEND/.test(src), `${f}: PROVIDER_BACKEND dispatch must be gone`);
+    assert.ok(!/legacyCreate|legacyBuild|legacySelect/.test(src), `${f}: legacy in-process impl must be gone`);
+    assert.ok(delegateRe.test(src), `${f}: must delegate to the package provider`);
   }
+  const idx = code(read('apps/server/src/index.mjs'));
+  assert.ok(!/process\.env\.PROVIDER_BACKEND/.test(idx), 'index.mjs: no PROVIDER_BACKEND dispatch');
+  assert.ok(!/legacyJitoSendBundle|legacyGetJitoTipFloor/.test(idx), 'index.mjs: legacy jito glue must be gone');
 });
 
 test('DIAGNOSTIC_BACKEND is opt-in (constructs the adapter only on explicit "package"; default = off)', () => {
