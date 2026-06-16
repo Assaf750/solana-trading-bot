@@ -16,7 +16,8 @@ const BANNED_READINESS = /live_send_enabled|live send\s*:?\s*off|structurally di
 
 const CANONICAL_FLAGS = [
   'STORAGE_BACKEND', 'HOT_STATE_BACKEND', 'EVENT_SINK_BACKEND', 'DIAGNOSTIC_BACKEND',
-  'DECISION_LEDGER_BACKEND', 'POSITIONS_BACKEND', // RISK_BACKEND removed in 3B.2, PROVIDER_BACKEND in 3B.4
+  // legacy rollback flags (RISK / PROVIDER / POSITIONS / DECISION_LEDGER) all removed in the hard legacy
+  // purge — their absence as live flags is guarded by no-legacy-flags-guard.test.mjs.
   'POSTGRES_URL', 'REDIS_URL', 'CLICKHOUSE_URL',
   'RUN_POSTGRES_SMOKE', 'RUN_REDIS_SMOKE', 'RUN_CLICKHOUSE_SMOKE', 'RUN_FULL_STACK_SMOKE',
 ];
