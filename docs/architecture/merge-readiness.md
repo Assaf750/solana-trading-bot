@@ -62,6 +62,9 @@ smoke) → 11A (this review + flags reference + merge note).
    configured, fail-safe in-process fallback, `signing_backend` readiness capability). The physical
    `packages/trading-engine` extraction is **BEGUN** (Phase Engine-2 — the pure package owns the lifecycle
    state machine + composition entry; apps/server composes by injecting the paper-engine substrate; zero
-   behavior change). Remaining restructure work: a deploy/image pipeline, dead-export pruning, and moving
-   the heavier orchestration (supervisor loop / command lifecycle / fills) into `packages/trading-engine`
-   (paper-engine still holds that mechanism-bound implementation).
+   behavior change). Dead-export pruning is **DONE** (Phase Clean-1 — the duplicate rpc-client stream
+   helpers removed; coverage moved to the live package copies). **Remaining restructure work** (the
+   authoritative list lives in `legacy-audit.md` §16): (1) the engine physical-extraction next slices
+   (supervisor loop / command lifecycle / fills into `packages/trading-engine`); (2) a deploy/image
+   pipeline; (3) optional Rust submit/bundle deepening; (4) the `services/*` unused-scaffold audit
+   (~14 unconnected dirs).

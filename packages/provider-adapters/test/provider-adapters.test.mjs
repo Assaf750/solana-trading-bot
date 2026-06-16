@@ -6,6 +6,7 @@ import {
   createProviderHealthMonitor, selectTipLamports, makeTipTransferBuilder,
   normalizeProviderError, normalizeQuoteResult, normalizeRouteResult,
   normalizeBroadcastResult, normalizeSimulationResult,
+  isHeliusHost, buildWalletSubscriptions, parseStreamNotification,
 } from '../src/index.mjs';
 
 // the package takes an injected fetch-compatible transport (mechanism-guard pure); tests inject one.
@@ -152,4 +153,38 @@ test('normalizers: error/quote/route/broadcast shapes', () => {
   assert.equal(normalizeRouteResult({ ok: false, error: 'quote_no_route' }).available, false);
   assert.deepEqual(normalizeBroadcastResult({ ok: true, result: 'SIG', via: 'jito' }), { ok: true, signature: 'SIG', via: 'jito' });
   assert.equal(normalizeBroadcastResult({ ok: false, error: 'x' }).ok, false);
+});
+
+// ---------- RPC stream pure helpers (relocated from apps/server in Phase Clean-1; these are the LIVE
+// copies the runtime uses — the duplicate apps/server/engine/rpc-client.mjs copies were removed) ----------
+test('rpc: Helius host detected; generic host not', () => {
+  assert.equal(isHeliusHost('https://mainnet.helius-rpc.com/?api-key=x'), true);
+  assert.equal(isHeliusHost('https://api.mainnet-beta.solana.com'), false);
+  assert.equal(isHeliusHost('not a url'), false);
+});
+
+test('rpc: default subscription is per-wallet logsSubscribe (reliable on every plan); transactionSubscribe is opt-in', () => {
+  const addrs = ['Aaa', 'Bbb', 'Ccc'];
+  const def = buildWalletSubscriptions({ addresses: addrs });
+  assert.equal(def.length, 3);
+  assert.ok(def.every((s) => s.method === 'logsSubscribe'));
+  assert.deepEqual(def[0].params[0].mentions, ['Aaa']);
+  const enhanced = buildWalletSubscriptions({ addresses: addrs, enhanced: true });
+  assert.equal(enhanced.length, 1);
+  assert.equal(enhanced[0].method, 'transactionSubscribe');
+  assert.deepEqual(enhanced[0].params[0].accountInclude, addrs);
+});
+
+test('rpc: parseStreamNotification extracts inline tx (Helius) + signature-only (logs); drops failed/garbage', () => {
+  const heliusMsg = { method: 'transactionNotification', params: { result: { value: { signature: 'SIG1', transaction: { transaction: { message: {} }, meta: { err: null } } } } } };
+  const p1 = parseStreamNotification(heliusMsg);
+  assert.equal(p1.signature, 'SIG1');
+  assert.ok(p1.tx, 'inline tx present for Helius');
+  const failed = { method: 'transactionNotification', params: { result: { value: { signature: 'SIG2', transaction: { meta: { err: { x: 1 } } } } } } };
+  assert.equal(parseStreamNotification(failed), null, 'failed tx dropped');
+  const logsMsg = { method: 'logsNotification', params: { result: { value: { signature: 'SIG3', err: null } } } };
+  const p3 = parseStreamNotification(logsMsg);
+  assert.equal(p3.signature, 'SIG3');
+  assert.equal(p3.tx, null, 'logs path has no inline tx');
+  assert.equal(parseStreamNotification({ method: 'unknown' }), null);
 });

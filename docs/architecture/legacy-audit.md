@@ -380,3 +380,42 @@ exercise the substrate). flags doc Trading-engine role + merge-readiness updated
 **Deferred:** moving the heavier orchestration (the supervisor loop, command lifecycle, fills) into the
 package — that requires inverting more mechanism dependencies (inject rpc/jupiter/stores into pure logic)
 and is a large, behavior-sensitive move. paper-engine remains the mechanism-bound substrate until then.
+
+## 15. Phase Clean-1 — dead-export prune + final restructure audit (no behavior change)
+
+**Pruned (proven dead):** the three pure stream helpers in `apps/server/engine/rpc-client.mjs`
+(`isHeliusHost` / `buildWalletSubscriptions` / `parseStreamNotification`) were DUPLICATE dead copies — the
+runtime uses the LIVE copies in `@soltrade/provider-adapters` (`packages/provider-adapters/src/rpc.mjs`),
+and the rpc-client copies were imported only by a test. Removed them; `rpc-client.mjs` is now just the
+thin wrapper that injects the gRPC ingestor / fetch / WebSocket into `createRpcProvider`. The three test
+cases moved to `packages/provider-adapters/test` (they now exercise the LIVE copies, which previously had
+no direct coverage). No runtime behavior change.
+
+**Audited, NOT removed (each needs its own scoped phase):**
+- **`services/*` unconnected scaffold** — only `services/ingestor` is JS-wired into apps/server (the gRPC
+  ingestor) and `services/hot-executor` is used via its binary (`HOT_EXECUTOR_BIN`, Phase Rust-1). The
+  other ~14 dirs (analytics, calibration-store, cost-pipeline, decision-engine, execution-adapter,
+  exit-manager, intent-ledger, position-lifecycle-state-machine, protocol-constant-monitor,
+  provider-adapters, risk-gates, rpc-health-monitor, signer-service [empty], stream-ingestion) are the
+  ADR parallel-package world and are NOT imported by the runtime. Removing them is not a "clear" prune —
+  it needs a per-dir audit (cross-references, build status, whether any are planned wiring). Tracked in the
+  final remaining list below.
+- **Stale wording** — a scan found no remaining `legacy backend` / `rollback shim` / `paper owns` framing
+  in runtime `src` (prior phases' wording cleanups were thorough).
+
+## 16. Final restructure remaining list (as of Phase Clean-1)
+
+Everything below is OPEN; everything in §1–§15 is DONE.
+
+1. **Engine physical extraction — next slices.** Move the heavier orchestration from
+   `apps/server/engine/paper-engine.mjs` into `@soltrade/trading-engine`: the supervisor loop
+   (`superviseTick` / `startSubscription` transitions), the command lifecycle (`closePosition` /
+   `resolvePosition` / `manualBuy` / `manualSell` / `addOrder` / `cancelOrder`), and the fills/exits
+   pipeline. Requires dependency-inversion (inject rpc / jupiter / stores / liveExecutor into pure logic).
+2. **Deploy / image pipeline.** CI (Phase CI-1) builds + tests but does not build a container image or
+   deploy. Add an image build + a deploy workflow (and a deploy runbook).
+3. **Optional Rust submit/bundle deepening.** `services/hot-executor` is the official signer (Phase
+   Rust-1); a later phase may move more of the execution path (tx submit / Jito bundle send) into the crate.
+4. **`services/*` unused-scaffold audit.** Per-dir audit of the ~14 unconnected `services/*` dirs above —
+   classify each as wire / extract-into-a-package / delete, then execute. (`services/signer-service` is
+   already empty.)
