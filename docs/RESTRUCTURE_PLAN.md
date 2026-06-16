@@ -96,7 +96,7 @@ Postgres/ClickHouse/Redis.
   > RPC) is robust, exact ms are soft.
 - Jito mechanics changed with BAM (mainnet Sep 2025) — re-verify before tip logic.
 - Local CPMM fee handling is more than headline `x·y=k`.
-- Real-money activation and owner-only secrets/funds remain owner-driven.
+- Starting real-money execution and owner-managed secrets/funds remain owner-driven.
 
 ## Sources
 - Triton / Yellowstone gRPC: https://blog.triton.one/complete-guide-to-solana-streaming-and-yellowstone-grpc/

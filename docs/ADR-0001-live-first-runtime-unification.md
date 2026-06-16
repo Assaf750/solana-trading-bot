@@ -7,7 +7,9 @@
 - **Companion:** `C4-Documentation/` (verified current-state docs + diagrams)
 - **Green guard (non-negotiable each step):** `node --test` stays green; new path lands behind a flag; old path stays until parity is proven.
 
-> القرار باختصار: نُوحّد المنتج حول **Live trading كمسار أصلي (Live-First)**. تصبح `packages/*` هي **Domain Kernel** ومصدر الحقيقة لمنطق التداول، ويتحوّل `apps/server` إلى **Runtime Host / API / Orchestrator** نحيف بلا منطق أعمال. تصبح **PostgreSQL** مصدر الحقيقة التشغيلي، **ClickHouse** مخزن الأحداث/التحليلات، **Redis** طبقة الحالة الساخنة/الأقفال/الحدود. يبقى **JSON** لِـ debug/export/snapshot/recovery فقط. يصبح **Rust** حدّ التوقيع والتنفيذ الرسمي. يتحوّل **Paper** إلى **Diagnostic Adapter** فقط. **كل بوابات الأمان تبقى وتُرقّى** (Live-Native، وليس Live مفتوح).
+> القرار باختصار: نُوحّد المنتج حول **Live trading كمسار أصلي (Live-First)**. تصبح `packages/*` هي **Domain Kernel** ومصدر الحقيقة لمنطق التداول، ويتحوّل `apps/server` إلى **Runtime Host / API / Orchestrator** نحيف بلا منطق أعمال. تصبح **PostgreSQL** مصدر الحقيقة التشغيلي، **ClickHouse** مخزن الأحداث/التحليلات، **Redis** طبقة الحالة الساخنة/الأقفال/الحدود. يبقى **JSON** لِـ debug/export/snapshot/recovery فقط. يصبح **Rust** حدّ التوقيع والتنفيذ الرسمي. يتحوّل **Paper** إلى **Diagnostic Adapter** فقط. **ضوابط الأمان التشغيلية تبقى** (kill switch، حدود المخاطر، حدود جلسة التوقيع) كـ **ضوابط مالك**.
+
+> **تصحيح (Phase 8A-R) — open-by-design:** الجاهزية **مراقبة لا فرض**؛ لا أقفال/بوابات تفعيل مصطنعة ولا hard-stops. القدرات (بما فيها التنفيذ الحيّ) تصبح `available` بمجرّد اكتمال الإعداد والمتطلبات؛ النقص يُعرض كـ `not_configured`، والأعطال كـ `degraded`/`unavailable` — لا كـ "قفل". أي صياغة "بوابة تفعيل لا تُفتَح / `can_send=false` يقفل كل شيء" أدناه **متجاوَزة** بهذا التصحيح. بدء التداول بأموال حقيقية يبقى **خيار المالك** (تمويل + مفتاح + بدء)، وهو خيار لا قفل يفرضه النظام.
 
 ---
 
@@ -20,7 +22,7 @@
 | **حِزم معزولة** | **18 من 52 حزمة** (كلها `*-foundations` غالبًا) بلا أي حافة استيراد داخلة أو خارجة — مُصمَّمة ومختبَرة لكن غير مُركَّبة. |
 | **تخزين هشّ** | المصدر التشغيلي الحقيقي = **13 ملف JSON** في `data/` (`config, paper-portfolio, live-portfolio, intent-ledger, orders, operating-state, kill-switch, history, engine-events, latency-samples, audit, tracked-wallets`) + `vault.enc`. **لا اتصال** بـ Postgres/ClickHouse/Redis في `apps/server` (grep = صفر). |
 | **بنية تحتية معطّلة الوصل** | `infra/docker/compose.yaml` يشغّل المخازن الثلاثة، و`migrations/postgres/000{1,2,3}.sql` + `migrations/clickhouse/0001` موجودة، لكن `packages/data` (المُسجِّل النوعي) غير موصول. |
-| **Paper ثقيل معماريًا** | `paper-engine.mjs` هو الـ supervisor الفعلي للـ pipeline، و`live-executor.mjs` مسار جانبي خلف بوابة تفعيل لا تُفتَح (`can_send`/`seam_ready` ثوابت `false`). |
+| **Paper ثقيل معماريًا** | `paper-engine.mjs` هو الـ supervisor الفعلي للـ pipeline، و`live-executor.mjs` مسار جانبي غير افتراضي. |
 | **نداءات المزوّدين متناثرة** | `engine/{jupiter-client,rpc-client,jito-tip-tx,helius-das,hot-executor-client,provider-health}.mjs` متفرّقة داخل الخادم دون طبقة adapter موحّدة. |
 | **حدّ Rust غير رسمي** | `services/hot-executor` (Rust، توقيع مقفل على fee-payer) يُستدعى عبر `hot-executor-client.mjs` كـ child process اختياري خلف علم — وليس حدًّا رسميًا للتنفيذ. |
 
@@ -310,7 +312,7 @@ Live-First **لا** يعني إزالة أي بوابة. كل ضابط حالي 
 | **Risk budgets** | risk | عدّادات حيّة في Redis + حدود في PG؛ تجاوز ⇒ رفض |
 | **Audit trail** | audit | append-only في PG (+ mirror في CH) |
 
-> الفرق الجوهري عن اليوم: تتحوّل البوابة من "ثابت `can_send=false` يقفل كل شيء" إلى **بوابة تفعيل صريحة قابلة للتشغيل المتحكَّم به** خلف readiness + activation + signer-permissions — أي *تشغيل live محكوم* بدل *قفل بنيوي*. القرار النهائي بالتفعيل الحقيقي يبقى بيد المالك (إدخال المفتاح + خطوة التفعيل).
+> النهج المعتمد (Phase 8A-R) — **open-by-design**: التنفيذ الحيّ **قدرة** تصبح `available` بمجرّد اكتمال الإعداد والمتطلبات (readiness + signer-permissions + الإعدادات)؛ لا أقفال بنيوية ولا بوابات مصطنعة، والجاهزية **مراقبة لا فرض**. تبقى ضوابط التشغيل الحقيقية (kill switch، حدود المخاطر، حدود الجلسة) كـ **ضوابط مالك**. بدء التداول بأموال حقيقية يبقى **خيار المالك** (تمويل المحفظة + إدخال المفتاح + بدء التشغيل) — خيار لا قفل يفرضه النظام.
 
 ---
 
