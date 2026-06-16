@@ -45,8 +45,20 @@ test('Engine-2: apps/server composes via @soltrade/trading-engine; paper-engine 
   assert.match(te, /from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/trading-engine\/src\/index\.mjs'/, 'composes via the package');
   assert.match(te, /composeTradingEngine\(\{ substrateFactory: createPaperEngine/, 'injects the paper-engine substrate');
   assert.ok(!/export \{ createPaperEngine as createTradingEngine \}/.test(te), 'no longer a bare re-export');
-  // the lifecycle state machine is OWNED by the package; paper-engine consumes it (no longer owns it)
+  // the lifecycle state machine + leader-insights logic are OWNED by the package; paper-engine consumes them
   const pe = read('apps/server/src/engine/paper-engine.mjs');
-  assert.match(pe, /import \{ deriveDesiredState \} from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/trading-engine\/src\/index\.mjs'/, 'paper-engine consumes deriveDesiredState from the package');
+  assert.match(pe, /import \{[^}]*\bderiveDesiredState\b[^}]*\} from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/trading-engine\/src\/index\.mjs'/, 'paper-engine consumes deriveDesiredState from the package');
   assert.match(pe, /export function createPaperEngine\(/, 'paper-engine still exports the substrate factory');
+});
+
+test('Engine-3: leader-insights pure logic is OWNED by the package; paper-engine consumes it', () => {
+  const pe = read('apps/server/src/engine/paper-engine.mjs');
+  // paper-engine imports the pure leader-insights helpers from the package and delegates to them
+  assert.match(pe, /import \{[^}]*\brecommendLeader\b[^}]*\bfinalizeLeaderInsights\b[^}]*\} from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/trading-engine\/src\/index\.mjs'/, 'paper-engine imports the leader-insights helpers');
+  assert.match(pe, /return finalizeLeaderInsights\(/, 'leaderInsights() rolls up via the package');
+  assert.match(pe, /recommendation: recommendLeader\(/, 'recommendation comes from the package');
+  // the package exports them
+  assert.equal(typeof pkg.recommendLeader, 'function');
+  assert.equal(typeof pkg.scoreLeader, 'function');
+  assert.equal(typeof pkg.finalizeLeaderInsights, 'function');
 });

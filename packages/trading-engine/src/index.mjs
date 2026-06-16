@@ -4,6 +4,9 @@
 // book, the live-executor delegation) is INJECTED via `substrateFactory`. apps/server owns that substrate
 // (engine/paper-engine.mjs); this package owns the orchestration LOGIC + the composition entry.
 
+// Leader-insights pure logic (Phase Engine-3): recommendLeader / scoreLeader / finalizeLeaderInsights.
+export * from './leader-insights.mjs';
+
 /** Engine lifecycle states (the values surfaced as the `paper_engine` status field). */
 export const ENGINE_STATES = Object.freeze({
   STOPPED: 'stopped',
