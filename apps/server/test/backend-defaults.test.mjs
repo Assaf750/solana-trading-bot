@@ -17,9 +17,9 @@ const { parseRedisConfig } = await import('../src/storage/redis-client.mjs');
 const { parseClickHouseConfig } = await import('../src/storage/clickhouse-client.mjs');
 
 // ---------- engine rollback flags default to the package backend ----------
-test('RISK / DECISION_LEDGER / POSITIONS flags gate legacy ONLY on the literal "legacy" (default = package)', () => {
+// (RISK_BACKEND was removed in Phase 3B.2 — its shim is gone; see the removal guard below.)
+test('DECISION_LEDGER / POSITIONS flags gate legacy ONLY on the literal "legacy" (default = package)', () => {
   const cases = [
-    ['RISK_BACKEND', 'apps/server/src/engine/risk-gates.mjs', /process\.env\.RISK_BACKEND\s*===\s*'legacy'/],
     ['DECISION_LEDGER_BACKEND', 'apps/server/src/engine/live-executor.mjs', /process\.env\.DECISION_LEDGER_BACKEND\s*===\s*'legacy'/],
     ['POSITIONS_BACKEND', 'apps/server/src/engine/paper-portfolio.mjs', /process\.env\.POSITIONS_BACKEND\s*!==\s*'legacy'/],
   ];
@@ -28,6 +28,13 @@ test('RISK / DECISION_LEDGER / POSITIONS flags gate legacy ONLY on the literal "
     assert.ok(re.test(src), `${flag} must select legacy only on the literal 'legacy' (default=package)`);
     assert.ok(!/\|\|\s*'legacy'/.test(src), `${flag} must never default TO legacy`);
   }
+});
+
+test('RISK_BACKEND shim is REMOVED (3B.2): risk-gates delegates to @soltrade/risk, no env dispatch', () => {
+  const src = read('apps/server/src/engine/risk-gates.mjs');
+  assert.ok(!/process\.env\.RISK_BACKEND/.test(src), 'risk-gates.mjs must no longer dispatch on RISK_BACKEND'); // the explanatory comment may name it
+  assert.ok(!/legacyCheckEntryGates/.test(src), 'the legacy in-process gate must be gone');
+  assert.match(src, /from '\.\.\/\.\.\/\.\.\/\.\.\/packages\/risk\/src\/index\.mjs'/, 'delegates to @soltrade/risk');
 });
 
 test('PROVIDER_BACKEND defaults to package across every provider shim', () => {

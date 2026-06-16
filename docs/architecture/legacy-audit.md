@@ -101,3 +101,23 @@ held, remove `legacyCheckEntryGates` + the `RISK_BACKEND` dispatch (delegate str
 then the PROVIDER family (`legacyCreate*` in jupiter-client / rpc-client / provider-health / helius-das /
 jito-tip-tx) once provider parity is added; `POSITIONS_BACKEND` legacy book; `DECISION_LEDGER_BACKEND`
 `legacyLedger` last (most sensitive). Keep JSON fallback + paper-engine.
+
+## 7. Phase 3B.2 — legacy shim prune batch 1 (RISK_BACKEND removed)
+
+**Removed:** the `RISK_BACKEND` legacy shim. `apps/server/src/engine/risk-gates.mjs` no longer carries
+`legacyCheckEntryGates` or the `process.env.RISK_BACKEND` dispatch — it now re-exports `checkEntryGates`
+straight from `@soltrade/risk`. Safe because Phase 3B.1 proved the legacy output was byte-identical to the
+package on both the allow and reject paths, and the only caller (`paper-engine.mjs`) already ran the
+package path by default. No behavior change (parity), no default change, no API/UI change.
+
+Updated with it: `live-first-runtime-flags.md` (RISK_BACKEND moved to a "Removed flags" note);
+`backend-defaults.test.mjs` (RISK dropped from the dispatch-pattern check + a removal guard added);
+`legacy-shim-guard.test.mjs` (RISK section now asserts the env var is inert); `docs-consistency.test.mjs`
+(RISK dropped from the canonical-flag list). `.env.example` never referenced `RISK_BACKEND`.
+
+**PROVIDER_BACKEND — deferred to 3B.3 (NOT removed).** It is wider + higher-risk: the dispatch spans
+five engine files (`jupiter-client`, `rpc-client`, `provider-health`, `helius-das`, `jito-tip-tx`) plus
+the in-process `legacyJitoSendBundle` / `legacyGetJitoTipFloor` in `index.mjs`, and only
+`provider-health` has a behavioral parity guard so far. Removing it needs provider-by-provider parity
+coverage first. Remaining shims after 3B.2: `PROVIDER_BACKEND`, `DECISION_LEDGER_BACKEND`,
+`POSITIONS_BACKEND` (all kept, default-off, behind their flags).
