@@ -1,14 +1,16 @@
-// trading-engine.mjs — the canonical live/runtime trading orchestrator (ADR-0001 target:
-// `packages/trading-engine`). The runtime composition root (index.mjs) consumes `createTradingEngine`;
-// it owns the live path: leader-wallet stream -> swap detection -> copy-trade decision/risk pipeline ->
-// liveExecutor (real money) OR the simulated book (paper mode).
+// trading-engine.mjs — the apps/server composition entry for the runtime trading engine. Phase Engine-2
+// began the physical extraction: the orchestration is now OWNED by @soltrade/trading-engine (the pure
+// package), which holds the lifecycle state machine (deriveDesiredState, consumed by paper-engine) and
+// the composition entry (composeTradingEngine). This module composes the runtime engine by INJECTING the
+// mechanism-bound substrate (paper-engine.mjs — leader-stream / fills / simulated book / liveExecutor
+// delegation) into the package. ZERO behavior change: the composed engine is exactly createPaperEngine(deps).
 //
-// Phase 5F separated the OWNERSHIP/name from `paper-engine.mjs`: the implementation still physically
-// lives in paper-engine.mjs (which holds BOTH the live orchestration and the simulated book), so this
-// module re-exports its factory under the canonical name. This is a name/ownership move ONLY — same
-// factory, same interface, ZERO behavior change. A later phase extracts the live orchestration into a
-// pure `packages/trading-engine` and leaves paper-engine as a simulation-only substrate.
-//
-// NOTE: the engine's `status()` still returns the `paper_engine` health field — that is a stable API
-// contract consumed across the operator UI, so the field name is intentionally retained.
-export { createPaperEngine as createTradingEngine } from './paper-engine.mjs';
+// NOTE: the engine's status() still returns the `paper_engine` health field — a stable operator-UI
+// contract, intentionally retained. A later phase moves more orchestration into the package and the
+// substrate shrinks to a simulation-only book.
+import { composeTradingEngine } from '../../../../packages/trading-engine/src/index.mjs';
+import { createPaperEngine } from './paper-engine.mjs';
+
+export function createTradingEngine(deps) {
+  return composeTradingEngine({ substrateFactory: createPaperEngine, deps });
+}

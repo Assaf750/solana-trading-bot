@@ -16,9 +16,11 @@ configured; there are no artificial gates.
 - **Diagnostics** (`@soltrade/execution`) — the **only** surface for **readiness / provider / execution
   testing** (read-only pre-flight; never trades). On by default since Phase 5E; the connectivity check
   (`/api/diagnostics/connectivity`) replaced the legacy `/api/providers/test-connection` probe.
-- **Trading engine** (`engine/trading-engine.mjs` → ADR-0001 `packages/trading-engine`) — the runtime
-  orchestrator that owns the live path (leader stream → copy pipeline → liveExecutor) and the simulated
-  book. paper-engine is its implementation substrate (Phase 5F name/ownership split).
+- **Trading engine** (`@soltrade/trading-engine` — created in Phase Engine-2) — the runtime orchestrator.
+  The PURE package owns the lifecycle state machine (`deriveDesiredState`) + the composition entry
+  (`composeTradingEngine`); `apps/server/engine/trading-engine.mjs` composes the engine by injecting the
+  mechanism-bound substrate (`paper-engine.mjs` — leader stream / fills / simulated book / liveExecutor
+  delegation). paper-engine is the implementation substrate (it consumes the package's state machine).
 - **Paper** — **simulation** sandbox portfolio model only (the trading engine runs the simulated book in
   paper mode); never a readiness or execution-test tool. All checking goes through Diagnostics.
 - **Signing / execution boundary** (`services/hot-executor`, Rust) — the **official** signer (ADR-0001

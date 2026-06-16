@@ -59,6 +59,9 @@ smoke) → 11A (this review + flags reference + merge note).
    `createTradingEngine`; paper-engine is the simulation/implementation substrate behind it; zero behavior
    change). Production CI hardening is **DONE** (Phase CI-1 — tests+guards / UI build / Rust crate jobs).
    The Rust signing/execution boundary is **DONE as the official signer** (Phase Rust-1 — preferred when
-   configured, fail-safe in-process fallback, `signing_backend` readiness capability). Remaining
-   restructure work: a deploy/image pipeline, dead-export pruning, and the full physical extraction of the
-   live orchestration into a pure `packages/trading-engine` (paper-engine still holds the implementation).
+   configured, fail-safe in-process fallback, `signing_backend` readiness capability). The physical
+   `packages/trading-engine` extraction is **BEGUN** (Phase Engine-2 — the pure package owns the lifecycle
+   state machine + composition entry; apps/server composes by injecting the paper-engine substrate; zero
+   behavior change). Remaining restructure work: a deploy/image pipeline, dead-export pruning, and moving
+   the heavier orchestration (supervisor loop / command lifecycle / fills) into `packages/trading-engine`
+   (paper-engine still holds that mechanism-bound implementation).

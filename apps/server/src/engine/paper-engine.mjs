@@ -16,6 +16,7 @@ import { proportionalLeaderUsd } from './sizing.mjs';
 import { checkMarketFilters } from './market-filters.mjs';
 import { shouldFire, nextOrderState } from './orders.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
+import { deriveDesiredState } from '../../../../packages/trading-engine/src/index.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
 const EVENTS_FILE = 'engine-events.json';
@@ -91,13 +92,15 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
   }
 
   function desiredState() {
-    if (killSwitch.isBlocked({}).blocked) return 'stopped_killed';
-    if (!vault.isUnlocked()) return 'waiting_vault_unlock';
-    if (!rpcUrl()) return 'waiting_rpc_config';
-    if (followedWallets().length === 0) return 'no_followed_wallets';
-    const op = operatingState.get().operating_state;
-    if (op === 'PAUSED' || op === 'KILLED') return 'paused_by_operator';
-    return 'active';
+    // Lifecycle state machine is OWNED by @soltrade/trading-engine (Phase Engine-2). This gathers the
+    // runtime inputs from the injected deps; the derivation (ordering + values) lives in the package.
+    return deriveDesiredState({
+      killBlocked: killSwitch.isBlocked({}).blocked,
+      vaultUnlocked: vault.isUnlocked(),
+      rpcConfigured: !!rpcUrl(),
+      followedCount: followedWallets().length,
+      operatingState: operatingState.get().operating_state,
+    });
   }
 
   function liveMode() {
