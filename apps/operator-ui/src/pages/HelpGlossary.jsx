@@ -7,8 +7,8 @@ import { GLOSSARY } from '../fixtures/index.js';
 const HOWTO = [
   {
     q_ar: 'كيف أبدأ من الصفر؟', q_en: 'How do I start from zero?',
-    a_ar: 'افتح «معالج الإعداد»: أنشئ الخزنة → الصق مفتاح RPC من Helius → طبّق حدود البداية الآمنة → تابِع محفظة رابحة. عندها يبدأ التداول الورقي تلقائياً بأسعار حقيقية.',
-    a_en: 'Open the Setup Wizard: create the vault → paste your Helius RPC → apply safe starter limits → follow a winning wallet. Paper trading then starts automatically at real prices.',
+    a_ar: 'افتح «معالج الإعداد»: أنشئ الخزنة → الصق مفتاح RPC من Helius → طبّق حدود البداية الآمنة → تابِع محفظة رابحة. عندها تبدأ المحاكاة الورقية تلقائياً بأسعار حقيقية (لا أموال حقيقية).',
+    a_en: 'Open the Setup Wizard: create the vault → paste your Helius RPC → apply safe starter limits → follow a winning wallet. Paper (simulation) trading then starts automatically at real prices (no real money).',
   },
   {
     q_ar: 'كيف أحلّل محفظة قبل نسخها؟', q_en: 'How do I analyze a wallet before copying?',

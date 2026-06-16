@@ -385,6 +385,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const { readAuditTail } = await import('./audit-log.mjs');
           return { status: 200, body: { audit: readAuditTail(limit) } };
         }
+        // ADR-0001 Phase 5D: the paper routes below (/api/positions, /api/trades, /api/engine-events,
+        // /api/orders, /api/strategy/simulate) are LOCAL SIMULATION / compatibility surfaces — a sandbox
+        // portfolio model, never a readiness or execution/provider test. Execution + provider testing
+        // lives under /api/diagnostics/* (the DiagnosticExecutionAdapter). Behavior here is unchanged.
         if (path === '/api/positions') {
           const s = portfolio ? portfolio.state() : { positions: [] };
           return { status: 200, body: { simulated: true, positions: s.positions, summary: portfolio ? portfolio.summary() : null } };

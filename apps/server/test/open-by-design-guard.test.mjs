@@ -16,8 +16,10 @@ const PAGES = join(ROOT, 'apps', 'operator-ui', 'src', 'pages');
 // banned readiness/activation framing — specific phrases + field names (not bare locked/blocked, which
 // are legitimate vault/kill-switch state elsewhere).
 const BANNED_READINESS = /live_send_enabled|live send\s*:?\s*off|structurally disabled|activation[_ ]required|owner-only|hard[_ ]stop/i;
-// Paper must not be presented as a readiness / live-execution test surface.
-const BANNED_PAPER = /paper\s+readiness|paper\s+execution\s+test|paper\s+as\s+(a\s+)?live|paper[^.\n]{0,24}readiness tool/i;
+// Paper must not be presented as a readiness / live-execution / preflight test surface (Phase 5D).
+// Paper is a local SIMULATION / sandbox portfolio model only; readiness + execution/provider testing
+// lives under Diagnostics. (Allowed: "Paper simulation", "Legacy simulation", "Paper portfolio".)
+const BANNED_PAPER = /paper\s+readiness|paper\s+execution\s+test|paper\s+pre-?flight|paper\s+live\s+test|paper\s+as\s+(a\s+)?(live|readiness)|paper[^.\n]{0,24}readiness tool/i;
 
 // ---------- API: runtime-readiness response must stay clean ----------
 test('runtime-readiness response carries no lock/gate/hard-stop vocabulary', async () => {
@@ -69,4 +71,12 @@ test('no "Paper as readiness / Paper execution test" wording in UI pages or key 
 // ---------- the audit document exists ----------
 test('legacy audit document exists (Phase 9A deliverable)', () => {
   assert.ok(existsSync(join(ROOT, 'docs', 'architecture', 'legacy-audit.md')));
+});
+
+// ---------- Diagnostics remains the testing entry (Phase 5D) ----------
+test('Diagnostics is wired as the readiness/execution-test entry (nav + route + page)', () => {
+  const app = readFileSync(join(ROOT, 'apps', 'operator-ui', 'src', 'App.jsx'), 'utf8');
+  assert.ok(/to:\s*'\/diagnostics'/.test(app), 'Diagnostics nav entry present');
+  assert.ok(/path="\/diagnostics"/.test(app), 'Diagnostics route present');
+  assert.ok(existsSync(join(PAGES, 'Diagnostics.jsx')), 'Diagnostics page present');
 });
