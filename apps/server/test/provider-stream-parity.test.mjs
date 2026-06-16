@@ -1,13 +1,9 @@
-// provider-stream-parity.test.mjs — ADR-0001 Phase 3B.4. Streaming-parity harness for
-// rpc.subscribeWallets — the one PROVIDER_BACKEND dispatch point that is not a simple request→response.
-// It drives a scripted WebSocket scenario through createRpcClient with a fake socket + mock timers (NO
-// network) and pins the full observable trace: subscriptions sent, onUp, onLeaderActivity (logs + inline
-// tx + ignored malformed/errored frames), onGap after the gap window, and bounded-backoff reconnect.
-//
-// This golden trace was confirmed BYTE-IDENTICAL between the legacy in-process client and the
-// @soltrade/provider-adapters package (driven through the same scenario via PROVIDER_BACKEND) before the
-// legacy shim was removed in 3B.4 — so it both proved removal-safety and now guards the package stream
-// behaviour. The gRPC transport dispatch is covered separately by rpc-transport.test.mjs.
+// provider-stream-parity.test.mjs — streaming behaviour harness for rpc.subscribeWallets. The RPC
+// provider in @soltrade/provider-adapters is the canonical and only path. It drives a scripted WebSocket
+// scenario through createRpcClient with a fake socket + mock timers (NO network) and pins the full
+// observable trace: subscriptions sent, onUp, onLeaderActivity (logs + inline tx + ignored
+// malformed/errored frames), onGap after the gap window, and bounded-backoff reconnect. The gRPC
+// transport dispatch is covered separately by rpc-transport.test.mjs.
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRpcClient } from '../src/engine/rpc-client.mjs';
@@ -54,7 +50,7 @@ function runWsScenario() {
   }
 }
 
-test('subscribeWallets WS streaming trace matches the 3B.4 golden (confirmed legacy ≡ package before removal)', () => {
+test('subscribeWallets WS streaming trace matches the golden (subscribe / activity / gap / reconnect)', () => {
   assert.deepEqual(runWsScenario(), [
     ['up', { provider: 'generic' }],
     ['s0.subs', [{ method: 'logsSubscribe', mentions: ['L1'] }, { method: 'logsSubscribe', mentions: ['L2'] }]],

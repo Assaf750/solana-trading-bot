@@ -24,8 +24,9 @@ corrected to open-by-design) → 9A/9B (legacy audit + safe shim cleanup) → 10
 smoke) → 11A (this review + flags reference + merge note).
 
 ## Known intentional leftovers (by design — NOT blockers)
-- **Legacy shims kept** behind `*_BACKEND=legacy` (PROVIDER / DECISION_LEDGER / POSITIONS / RISK,
-  default `package`) — rollback insurance; deprecation-commented; pruned in **Phase 3B** after a soak.
+- **Legacy shims — ALL REMOVED** (hard legacy purge complete): RISK (3B.2), PROVIDER (3B.4), POSITIONS +
+  DECISION_LEDGER (3B-X). No `*_BACKEND=legacy` rollback flags remain; the `@soltrade/*` package paths are
+  canonical and only (guarded by `apps/server/test/no-legacy-flags-guard.test.mjs`).
 - **paper-engine kept** as the simulation / sandbox portfolio substrate (never a readiness tool).
 - **JSON fallback kept** as the default operational store (snapshot / recovery).
 - **Rust signing/exec boundary not started** (an ADR target for a later phase).
@@ -47,5 +48,7 @@ smoke) → 11A (this review + flags reference + merge note).
 2. Adopt backends incrementally in production via the flags in
    `docs/architecture/live-first-runtime-flags.md` (start `STORAGE_BACKEND=postgres`, then Redis, then
    ClickHouse), using `docs/runbooks/local-full-stack.md` to validate locally first.
-3. Schedule **Phase 3B** (legacy-shim + unused-export pruning) as a follow-up after a production soak,
-   once the package backends have run as the default for long enough.
+3. ~~Schedule **Phase 3B** (legacy-shim pruning)~~ **DONE** — the legacy-shim purge completed across
+   Phases 3B.1–3B.4 + the hard legacy purge (3B-X); all `*_BACKEND=legacy` rollback paths are removed.
+   Remaining restructure work: full Paper→Diagnostic migration, the Rust signing/execution boundary, a
+   production/CI/deploy checklist, and dead-export pruning.

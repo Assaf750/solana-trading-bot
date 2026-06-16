@@ -28,26 +28,31 @@ configured; there are no artificial gates.
 | `EVENT_SINK_BACKEND` | `none` \| `clickhouse` | `none` | Analytics-only event sink (never SoT). |
 | `CLICKHOUSE_URL` (or `CLICKHOUSE_HOST`/`CLICKHOUSE_HTTP_PORT` + `CLICKHOUSE_DB`/`USER`/`PASSWORD`) | URL / parts | — | ClickHouse connection (used only when `EVENT_SINK_BACKEND=clickhouse`). |
 | `DIAGNOSTIC_BACKEND` | `legacy` \| `package` | `legacy` | `package` wires the DiagnosticExecutionAdapter (+ `/api/diagnostics/*`); `legacy` = off (opt-in). |
-| `DECISION_LEDGER_BACKEND` | `package` \| `legacy` | `package` | decision-ledger owner = `@soltrade/decision-ledger`; `legacy` = in-process rollback shim. |
-| `POSITIONS_BACKEND` | `package` \| `legacy` | `package` | positions book owner = `@soltrade/positions`; `legacy` = rollback shim. |
 | `SOLTRADE_PORT` | number | `8787` | server HTTP port. |
 | `SOLTRADE_DATA_DIR` | path | `data/` | JSON store directory. |
 | `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE` / `RUN_FULL_STACK_SMOKE` | `1` | unset | opt-in gates for the smoke scripts (never part of `node --test`). |
 | `SOLTRADE_BASE_URL` | URL | — | optional API target for `smoke:full-stack`. |
 
 ## Defaults are locked
-The remaining rollback flags (`DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND`)
-select `legacy` ONLY on the literal `'legacy'` (so the default is the package backend);
-`STORAGE`/`HOT_STATE`/`EVENT_SINK` default to `json`/`memory`/`none`; `DIAGNOSTIC` is opt-in.
-This is enforced by `apps/server/test/backend-defaults.test.mjs` — defaults cannot silently flip.
+No legacy rollback flags remain — the risk gate, providers, positions book, and intent ledger each
+delegate to their `@soltrade/*` package (the only path; see "Removed flags"). The operational backends
+default safely with empty env: `STORAGE_BACKEND`/`HOT_STATE_BACKEND`/`EVENT_SINK_BACKEND` →
+`json`/`memory`/`none`, and `DIAGNOSTIC_BACKEND` is opt-in. Enforced by
+`apps/server/test/backend-defaults.test.mjs` (operational defaults) +
+`apps/server/test/no-legacy-flags-guard.test.mjs` (no legacy flag is live) — defaults cannot silently flip.
 
 ## Removed flags
+All legacy `legacy|package` rollback shims have been removed; each owner package is now the only path.
 - `RISK_BACKEND` — **removed in Phase 3B.2** (after 3B.1 proved legacy↔package parity). The hard-risk
-  gate now delegates straight to `@soltrade/risk`; setting `RISK_BACKEND` has no effect.
+  gate now delegates straight to `@soltrade/risk`; setting it has no effect.
 - `PROVIDER_BACKEND` — **removed in Phase 3B.4** (after 3B.3/3B.4 proved legacy↔package parity for all
   six dispatch points — jupiter, rpc incl. the `subscribeWallets` streaming trace, provider-health,
-  helius-das, jito-tip, and the index.mjs jito bundle/tip-floor glue). The provider wrappers now
-  delegate straight to `@soltrade/provider-adapters`; setting `PROVIDER_BACKEND` has no effect.
+  helius-das, jito-tip, and the index.mjs jito bundle/tip-floor glue). Providers delegate straight to
+  `@soltrade/provider-adapters`; setting it has no effect.
+- `POSITIONS_BACKEND` / `DECISION_LEDGER_BACKEND` — **removed in the hard legacy purge (Phase 3B-X)**.
+  The positions book delegates straight to `@soltrade/positions` and the intent ledger to
+  `@soltrade/decision-ledger`; the store is still injected by `STORAGE_BACKEND` (JSON default or
+  Postgres), so the data layer is unchanged. Setting either flag has no effect.
 
 See `docs/runbooks/local-full-stack.md` to run the whole stack and `docs/architecture/legacy-audit.md`
 for the legacy/shim inventory.

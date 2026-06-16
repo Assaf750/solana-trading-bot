@@ -8,6 +8,12 @@ now.
 
 > Status of this pass (9A): inventory + classification + small safe cleanups (doc wording + regression
 > guards) only. **No component removed, no behavior changed.** Defaults are unchanged.
+>
+> **FINAL STATUS — hard legacy purge (Phase 3B-X) complete:** every legacy `legacy|package` rollback shim
+> has now been REMOVED (RISK in 3B.2, PROVIDER in 3B.4, POSITIONS + DECISION_LEDGER in 3B-X). There are no
+> legacy backend flags left; the `@soltrade/*` package paths are canonical and only. §2–§9 below are the
+> historical phase log; **§10 is the authoritative final record.** A regression guard
+> (`apps/server/test/no-legacy-flags-guard.test.mjs`) keeps the legacy flags from ever returning as live flags.
 
 ---
 
@@ -16,7 +22,7 @@ now.
 | Bucket | Meaning | Items |
 |---|---|---|
 | **Keep (not legacy)** | Active, correct, no action | JSON stores (default SoT), paper-engine/paper-portfolio (simulation substrate), kill-switch / hard-risk / signer-session (operator safety controls — NOT activation locks), Postgres/Redis/ClickHouse backends |
-| **Keep as compatibility shim** | Legacy path retained behind a flag (default = new package); rollback insurance | `*_BACKEND=legacy` paths: DECISION_LEDGER / POSITIONS (RISK removed 3B.2 §7, PROVIDER removed 3B.4 §9) |
+| **~~Keep as compatibility shim~~ → ALL REMOVED (§10)** | ~~Legacy path retained behind a flag~~ — every legacy backend shim has been deleted | none remaining: RISK removed 3B.2 §7, PROVIDER removed 3B.4 §9, POSITIONS + DECISION_LEDGER removed in the hard legacy purge §10 |
 | **Needs migration later** | Larger move, own phase + tests required | Paper → Diagnostic Adapter (full), legacy pruning after a soak (Phase 3B), Rust signing/exec boundary |
 | **Do not touch yet** | Out of scope / risky now | execution pipeline, risk/provider logic, activation command, JSON fallback removal |
 
@@ -40,14 +46,17 @@ now.
 | `DIAGNOSTIC_BACKEND=legacy` (default) | "no diagnostic adapter wired" (not a duplicate impl) | `@soltrade/execution` when `=package` | server default | None | keep; consider flipping default to `package` in a later phase |
 | Hot-state / event-sink backends | optional Redis cache / ClickHouse analytics | `@soltrade/hot-state`, `@soltrade/storage` event-writer | server when enabled (defaults: memory / none) | None | keep; never SoT |
 
-> **Update (3B.4):** the six `PROVIDER_BACKEND=legacy` rows above were REMOVED in Phase 3B.4 (see §9), and
-> `engine/risk-gates.mjs legacyCheckEntryGates` in 3B.2 (§7). The table is the original 9A inventory; the
-> only remaining behind-a-flag shims are `DECISION_LEDGER_BACKEND` and `POSITIONS_BACKEND`.
+> **Update (3B-X, final):** every legacy row in the table above has now been REMOVED — the six
+> `PROVIDER_BACKEND` rows in 3B.4 (§9), `risk-gates.mjs legacyCheckEntryGates` in 3B.2 (§7), and the
+> `live-executor.mjs legacyLedger` + `paper-portfolio.mjs` legacy book in the hard legacy purge (§10).
+> The table is the original 9A inventory; **no legacy backend shim remains.**
 
-### Env flags
+### Env flags (live operational backends only — no legacy rollback flags remain)
 `STORAGE_BACKEND` (json|postgres) · `HOT_STATE_BACKEND` (memory|redis) · `EVENT_SINK_BACKEND` (none|clickhouse) ·
-`DIAGNOSTIC_BACKEND` (legacy|package) · `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND` (legacy|package, default package; `RISK_BACKEND` removed 3B.2, `PROVIDER_BACKEND` removed 3B.4) ·
+`DIAGNOSTIC_BACKEND` (legacy|package, opt-in adapter — a real operational toggle, not a legacy rollback) ·
 `SOLTRADE_PORT` · `SOLTRADE_DATA_DIR` · `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE`.
+The legacy backend flags `RISK_BACKEND` / `PROVIDER_BACKEND` / `POSITIONS_BACKEND` / `DECISION_LEDGER_BACKEND`
+are all removed (guarded by `apps/server/test/no-legacy-flags-guard.test.mjs`).
 
 ---
 
@@ -205,3 +214,40 @@ coverage + proof the flag is inert). `.env.example` never referenced `PROVIDER_B
 
 **Remaining shims after 3B.4:** `DECISION_LEDGER_BACKEND`, `POSITIONS_BACKEND` (both kept, default-off,
 behind their flags). Keep JSON fallback + paper-engine.
+
+## 10. Phase 3B-X — Hard legacy purge (ALL legacy backend shims removed)
+
+The last two rollback shims were deleted, completing the legacy purge. The package paths were already the
+defaults, so the active runtime is unchanged — this removes the unused legacy code and the flags.
+
+**Removed:**
+- `engine/live-executor.mjs` — deleted the `legacyLedger` in-process intent ledger + the
+  `process.env.DECISION_LEDGER_BACKEND` dispatch (and the now-dead `RETRYABLE_SET`). The executor now uses
+  `@soltrade/decision-ledger` directly (`createDecisionLedger`), with the store still injected by the host
+  (`STORAGE_BACKEND` = JSON default or Postgres). `claimIntent`/`setIntent`/idempotency are unchanged.
+- `engine/paper-portfolio.mjs` — deleted the legacy in-process positions book + the
+  `process.env.POSITIONS_BACKEND` branch (and the now-dead `EMPTY` / `MARK_HISTORY_MAX` / `round2`). The
+  book now comes from `@soltrade/positions` (`createPositionsBook`) directly, store injected by the host.
+
+**Tests:**
+- Deleted `legacy-shim-guard.test.mjs` (it guarded the legacy rollback paths — all now gone) and
+  `provider-shim-parity.test.mjs` (legacy-vs-package framing).
+- Added `no-legacy-flags-guard.test.mjs` — asserts none of `RISK_BACKEND` / `PROVIDER_BACKEND` /
+  `POSITIONS_BACKEND` / `DECISION_LEDGER_BACKEND` is read as a live `process.env` flag in runtime code
+  (apps/server/src, packages, services), none is defined in `.env.example`, and the canonical flags doc
+  lists them only under "Removed flags".
+- Added `provider-behavior.test.mjs` — clean package-behaviour coverage of the provider wrappers (no
+  legacy framing), replacing the deleted shim-parity file.
+- `backend-defaults.test.mjs` slimmed to the live operational flags (storage trio + `DIAGNOSTIC_BACKEND`).
+- `docs-consistency.test.mjs` — `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND` dropped from the canonical
+  flag list. `provider-stream-parity.test.mjs` comments de-legacy-framed (kept as the streaming regression).
+
+**Docs:** `live-first-runtime-flags.md` — the two rows removed; "Defaults are locked" reworded (no legacy
+flags remain); "Removed flags" now lists all four. This document — final-status banner + §10.
+
+**Net result:** no legacy backend flags, no rollback shims. Canonical owners: `@soltrade/risk`,
+`@soltrade/provider-adapters`, `@soltrade/positions`, `@soltrade/decision-ledger`. KEPT (not legacy):
+JSON store (default SoT / fallback), paper-engine (simulation substrate), the real operational backends
+(Postgres / Redis / ClickHouse via `STORAGE`/`HOT_STATE`/`EVENT_SINK`), and `DIAGNOSTIC_BACKEND`
+(opt-in diagnostic adapter). Still pending restructure work: full Paper→Diagnostic migration, the Rust
+signing/execution boundary, and a production/CI/deploy checklist.

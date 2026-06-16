@@ -36,66 +36,26 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
   }
 
   // ---------- intent ledger (idempotency: a retry can NEVER duplicate an on-chain tx) ----------
-  // ADR-0001 Phase 2A: the idempotent intent ledger is OWNED by @soltrade/decision-ledger. The
-  // server delegates to it; the prior in-process implementation stays as a `legacy` backend behind
-  // DECISION_LEDGER_BACKEND until parity is proven, then the package is the default. Both share the
-  // same JSON file + helpers, so the two backends are byte-identical and interchangeable.
+  // The idempotent intent ledger is OWNED by @soltrade/decision-ledger (ADR-0001 Phase 2A) — the
+  // canonical and only path. The store is injected by the host (STORAGE_BACKEND=postgres provides a
+  // Postgres-backed store; default = the JSON store), and the ledger logic is identical either way.
+  // (The legacy in-process ledger was removed in the hard legacy purge — see legacy-audit.md §10.)
   //
   // RETRYABLE statuses PROVABLY never reached the chain — safe to retry (e.g. a stop-loss whose
   // first broadcast hit a transient RPC error). SENT/SENT_PENDING/SENT_UNCONFIRMED/CONFIRMED may
   // have landed, so they stay blocked (no double-spend). FAILED_ON_CHAIN is retryable: a reverted
   // tx provably moved no funds, so a fresh tx (new blockhash/signature) is safe.
   const RETRYABLE_STATUSES = ['FAILED_PRE_SEND', 'FAILED_SEND', 'FAILED_ON_CHAIN'];
-  const RETRYABLE_SET = new Set(RETRYABLE_STATUSES);
   // sha256 intent id — apps/server may use node:crypto (the package may not, by confinement), so we
-  // inject this into the package ledger to keep intent ids byte-identical across both backends.
+  // inject this into the ledger to keep intent ids stable.
   const sha256IntentId = (parts) => `int_${createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 16)}`;
-  const legacyLedger = {
-    _read() { return readJson(INTENTS_FILE, { intents: {} }).value; },
-    _save(l) { writeJson(INTENTS_FILE, l); },
-    intentIdFor: sha256IntentId,
-    claimIntent(intent_id, detail) {
-      const l = legacyLedger._read();
-      const existing = l.intents[intent_id];
-      if (existing && !RETRYABLE_SET.has(existing.status)) {
-        return { ok: false, error: `intent_duplicate_${existing.status}` };
-      }
-      // preserve notional_charged across a retry so a re-broadcast doesn't double-charge the cap
-      l.intents[intent_id] = { status: 'PENDING', ts: nowIso(), detail, notional_charged: existing?.notional_charged === true };
-      legacyLedger._save(l);
-      return { ok: true };
-    },
-    setIntent(intent_id, status, extra = {}) {
-      const l = legacyLedger._read();
-      if (l.intents[intent_id]) {
-        l.intents[intent_id] = { ...l.intents[intent_id], status, ...extra, updated_at: nowIso() };
-        legacyLedger._save(l);
-      }
-    },
-    getIntent(intent_id) { return legacyLedger._read().intents[intent_id] || null; },
-    listIntents(limit = 50) {
-      const l = legacyLedger._read();
-      return Object.entries(l.intents).slice(-limit).map(([id, v]) => ({ intent_id: id, ...v }));
-    },
-    pendingIntents() {
-      const l = legacyLedger._read();
-      return Object.entries(l.intents)
-        .filter(([, v]) => (v.status === 'SENT' || v.status === 'SENT_UNCONFIRMED') && v.signature)
-        .map(([intent_id, v]) => ({ intent_id, status: v.status, signature: v.signature, detail: v.detail || {} }));
-    },
-  };
-  // ADR-0001 Phase 4B.1: the ledger store is injected by the host (STORAGE_BACKEND=postgres provides a
-  // Postgres-backed store; default = the JSON store, unchanged). decision-ledger logic is identical
-  // either way (the store is just read/write).
-  const packageLedger = createDecisionLedger({
+  const ledger = createDecisionLedger({
     store: decisionLedgerStore || createJsonIntentStore({ file: INTENTS_FILE, readJson, writeJson, fallback: { intents: {} } }),
     now: nowIso,
     retryableStatuses: RETRYABLE_STATUSES,
     intentIdFor: sha256IntentId,
   });
-  // packageLedger is the DEFAULT; `legacy` is a rollback shim — deprecate/prune in 3B after soak.
-  const ledgerApi = process.env.DECISION_LEDGER_BACKEND === 'legacy' ? legacyLedger : packageLedger;
-  const { intentIdFor, claimIntent, setIntent, getIntent, listIntents, pendingIntents: pendingIntentsImpl } = ledgerApi;
+  const { intentIdFor, claimIntent, setIntent, getIntent, listIntents, pendingIntents: pendingIntentsImpl } = ledger;
 
   // ---------- helpers ----------
   function safeAudit(record) {
