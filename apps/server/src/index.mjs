@@ -15,7 +15,7 @@ import { createHistory } from './engine/history.mjs';
 import { createRpcClient } from './engine/rpc-client.mjs';
 import { createJupiterClient } from './engine/jupiter-client.mjs';
 import { createProviderHealth } from './engine/provider-health.mjs';
-import { createPaperEngine } from './engine/paper-engine.mjs';
+import { createTradingEngine } from './engine/trading-engine.mjs';
 import { createLiveExecutor } from './engine/live-executor.mjs';
 import { createHotExecutorClient } from './engine/hot-executor-client.mjs';
 import { analyzeWallet } from './engine/wallet-analyzer.mjs';
@@ -128,7 +128,9 @@ const liveExecutor = createLiveExecutor({
 const ordersStore = createOrdersStore();
 const history = createHistory();
 
-const paperEngine = createPaperEngine({
+// The runtime trading orchestrator (live path + simulated book). Owned by trading-engine.mjs (Phase 5F);
+// paper-engine.mjs is the simulation/implementation substrate behind it. No behavior change.
+const tradingEngine = createTradingEngine({
   config, walletsRegistry: wallets, killSwitch, operatingState, vault, portfolio,
   livePortfolio, liveExecutor, signer,
   rpc, jupiter, audit: appendAudit, broadcast: (p) => broadcastRef(p), notifier, ordersStore,
@@ -207,7 +209,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes, analytics,
+  tradingEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes, analytics,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),
@@ -226,7 +228,7 @@ const boot = operatingState.get();
 if (boot.operating_state !== 'KILLED' && boot.operating_state !== 'PAUSED') {
   operatingState.transition('WARMING_UP', 'server boot');
 }
-paperEngine.start(); // supervised: idles honestly until vault+RPC+followed wallets exist
+tradingEngine.start(); // supervised: idles honestly until vault+RPC+followed wallets exist
 appendAudit({ audit_scope: 'config', audit_reason: 'server_started', detail: { url, boot_state: operatingState.get().operating_state } });
 
 console.log('');
@@ -238,7 +240,7 @@ console.log('');
 
 // graceful shutdown: lock the signer, persist nothing half-written (writes are atomic)
 function shutdown() {
-  try { paperEngine.stop(); } catch { /* already stopped */ }
+  try { tradingEngine.stop(); } catch { /* already stopped */ }
   try { signer.lockSession('shutdown'); } catch { /* already locked */ }
   appendAudit({ audit_scope: 'config', audit_reason: 'server_shutdown', detail: {} });
   process.exit(0);

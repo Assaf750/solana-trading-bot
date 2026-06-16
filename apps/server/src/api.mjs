@@ -22,7 +22,7 @@ function diagSummary(readiness) {
 // DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
 const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null, analytics = null }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, tradingEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null, analytics = null }) {
   // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
   // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
   // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
@@ -80,7 +80,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       signer: signer.publicState(),
       kill_switch: killSwitch.status(),
       engine: {
-        ...(paperEngine ? paperEngine.status() : { paper_engine: 'not_started' }),
+        ...(tradingEngine ? tradingEngine.status() : { paper_engine: 'not_started' }),
         live_engine: !liveExecutor ? 'not_built'
           : cfg.mode === 'real_live' ? 'armed_real_money'
           : 'ready_gated_by_owner_activation',
@@ -167,10 +167,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
     },
     close_position(p) {
       // operator-initiated full exit of one position (manual liquidation / clear a stuck position)
-      if (!paperEngine || typeof paperEngine.closePosition !== 'function') {
+      if (!tradingEngine || typeof tradingEngine.closePosition !== 'function') {
         return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
       }
-      return paperEngine.closePosition(p?.position_id).then((res) => {
+      return tradingEngine.closePosition(p?.position_id).then((res) => {
         if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_close', command_type: 'close_position', detail: { position_id: p?.position_id } });
         return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
       });
@@ -179,44 +179,44 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
       // operator books the REAL proceeds (read off an explorer) of a position whose on-chain exit
       // confirmed but whose proceeds couldn't be auto-read (needs_reconciliation): closes it,
       // clears the flag, records realized P&L. This is the only path that retires a flagged position.
-      if (!paperEngine || typeof paperEngine.resolvePosition !== 'function') {
+      if (!tradingEngine || typeof tradingEngine.resolvePosition !== 'function') {
         return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
       }
       const proceeds = Number(p?.proceeds_usd);
       if (!Number.isFinite(proceeds) || proceeds < 0) {
         return { status: 400, body: { ok: false, error: 'invalid_proceeds_usd' } };
       }
-      const res = paperEngine.resolvePosition(p?.position_id, proceeds);
+      const res = tradingEngine.resolvePosition(p?.position_id, proceeds);
       const notFound = res.error === 'position_not_found' || res.error === 'position_not_open';
       return { status: res.ok ? 200 : notFound ? 404 : 400, body: res };
     },
     manual_buy(p) {
       // operator buys an arbitrary mint directly (not a copy). Same gates as a copy entry.
-      if (!paperEngine || typeof paperEngine.manualBuy !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
-      return paperEngine.manualBuy({ mint: p?.mint, sizeUsd: Number(p?.size_usd) }).then((res) => {
+      if (!tradingEngine || typeof tradingEngine.manualBuy !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return tradingEngine.manualBuy({ mint: p?.mint, sizeUsd: Number(p?.size_usd) }).then((res) => {
         if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_buy', command_type: 'manual_buy', detail: { mint: p?.mint, size_usd: p?.size_usd } });
         return { status: res.ok ? 200 : 400, body: res };
       });
     },
     manual_sell(p) {
       // operator sells a fraction (default full) of an open position, independent of TP/SL/leader.
-      if (!paperEngine || typeof paperEngine.manualSell !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
-      return paperEngine.manualSell({ position_id: p?.position_id, fraction: p?.fraction }).then((res) => {
+      if (!tradingEngine || typeof tradingEngine.manualSell !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return tradingEngine.manualSell({ position_id: p?.position_id, fraction: p?.fraction }).then((res) => {
         if (res.ok) audit({ audit_scope: 'position', audit_reason: 'manual_sell', command_type: 'manual_sell', detail: { position_id: p?.position_id, fraction: p?.fraction } });
         return { status: res.ok ? 200 : res.error === 'position_not_found' ? 404 : 400, body: res };
       });
     },
     add_order(p) {
       // create a limit-buy or DCA order (fired later by the engine through the gated buy path)
-      if (!paperEngine || typeof paperEngine.addOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
-      return paperEngine.addOrder(p || {}).then((res) => {
+      if (!tradingEngine || typeof tradingEngine.addOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      return tradingEngine.addOrder(p || {}).then((res) => {
         if (res.ok) audit({ audit_scope: 'position', audit_reason: 'order_created', command_type: 'add_order', detail: { type: p?.type, mint: p?.mint } });
         return { status: res.ok ? 200 : 400, body: res };
       });
     },
     cancel_order(p) {
-      if (!paperEngine || typeof paperEngine.cancelOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
-      const res = paperEngine.cancelOrder(p?.order_id);
+      if (!tradingEngine || typeof tradingEngine.cancelOrder !== 'function') return { status: 503, body: { ok: false, error: 'engine_unavailable' } };
+      const res = tradingEngine.cancelOrder(p?.order_id);
       if (res.ok) audit({ audit_scope: 'position', audit_reason: 'order_cancelled', command_type: 'cancel_order', detail: { order_id: p?.order_id } });
       return { status: res.ok ? 200 : res.error === 'order_not_found' ? 404 : 400, body: res };
     },
@@ -398,7 +398,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           return { status: 200, body: { simulated: true, trades: (s.trades || []).slice(-200) } };
         }
         if (path === '/api/engine-events') {
-          return { status: 200, body: { events: paperEngine ? paperEngine.events(80) : [] } };
+          return { status: 200, body: { events: tradingEngine ? tradingEngine.events(80) : [] } };
         }
         if (path === '/api/live-positions') {
           const s = livePortfolio ? livePortfolio.state() : { positions: [], trades: [] };
@@ -409,11 +409,11 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         }
         if (path === '/api/latency') {
           // Phase 0 gate: pipeline-lag percentiles (decides the gRPC/Rust investment)
-          return { status: 200, body: paperEngine && typeof paperEngine.latencyReport === 'function' ? paperEngine.latencyReport() : { count: 0, metrics: {} } };
+          return { status: 200, body: tradingEngine && typeof tradingEngine.latencyReport === 'function' ? tradingEngine.latencyReport() : { count: 0, metrics: {} } };
         }
         if (path === '/api/leader-insights') {
           // per-leader realized performance (this bot's book) + follow/drop/watch recommendation
-          return { status: 200, body: paperEngine && typeof paperEngine.leaderInsights === 'function' ? paperEngine.leaderInsights() : { leaders: [], recommendation: { follow: [], drop: [], watch: [] } } };
+          return { status: 200, body: tradingEngine && typeof tradingEngine.leaderInsights === 'function' ? tradingEngine.leaderInsights() : { leaders: [], recommendation: { follow: [], drop: [], watch: [] } } };
         }
         if (path.startsWith('/api/export/')) {
           // PnL/tax CSV export. Returns {filename, csv} (server only emits JSON); the UI downloads it.
@@ -429,7 +429,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
         }
         if (path === '/api/orders') {
-          return { status: 200, body: { orders: paperEngine && typeof paperEngine.listOrders === 'function' ? paperEngine.listOrders() : [] } };
+          return { status: 200, body: { orders: tradingEngine && typeof tradingEngine.listOrders === 'function' ? tradingEngine.listOrders() : [] } };
         }
         if (path.startsWith('/api/tokens/') && path.endsWith('/analysis')) {
           // full on-chain token report (identity, market, liquidity, holders, authorities,

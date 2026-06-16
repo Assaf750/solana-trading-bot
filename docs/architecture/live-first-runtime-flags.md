@@ -16,8 +16,11 @@ configured; there are no artificial gates.
 - **Diagnostics** (`@soltrade/execution`) — the **only** surface for **readiness / provider / execution
   testing** (read-only pre-flight; never trades). On by default since Phase 5E; the connectivity check
   (`/api/diagnostics/connectivity`) replaced the legacy `/api/providers/test-connection` probe.
-- **Paper** — **simulation** sandbox portfolio model only (the paper-engine drives the simulated book);
-  never a readiness or execution-test tool. All checking goes through Diagnostics.
+- **Trading engine** (`engine/trading-engine.mjs` → ADR-0001 `packages/trading-engine`) — the runtime
+  orchestrator that owns the live path (leader stream → copy pipeline → liveExecutor) and the simulated
+  book. paper-engine is its implementation substrate (Phase 5F name/ownership split).
+- **Paper** — **simulation** sandbox portfolio model only (the trading engine runs the simulated book in
+  paper mode); never a readiness or execution-test tool. All checking goes through Diagnostics.
 
 ## Flag table
 | Flag | Values | Default | Role |

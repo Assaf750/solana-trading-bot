@@ -52,6 +52,8 @@ smoke) → 11A (this review + flags reference + merge note).
    Phases 3B.1–3B.4 + the hard legacy purge (3B-X); all `*_BACKEND=legacy` rollback paths are removed.
    The Paper→Diagnostic checking-path migration is **DONE** (Phase 5E — Diagnostics is the only
    preflight/provider/execution/connectivity test path, on by default; `/api/providers/test-connection`
-   retired). Remaining restructure work: the Rust signing/execution boundary, a production/CI/deploy
-   checklist, dead-export pruning, and a dedicated `trading-engine` extraction (paper-engine still doubles
-   as the live orchestrator).
+   retired). The `trading-engine` name/ownership split is **DONE** (Phase 5F — the runtime consumes
+   `createTradingEngine`; paper-engine is the simulation/implementation substrate behind it; zero behavior
+   change). Remaining restructure work: the Rust signing/execution boundary, a production/CI/deploy
+   checklist, dead-export pruning, and the full physical extraction of the live orchestration into a pure
+   `packages/trading-engine` (paper-engine still holds the implementation).
