@@ -42,6 +42,11 @@ RUN mkdir -p /data
 VOLUME ["/data"]
 EXPOSE 8787
 
+# Health probe (Phase Deploy-2): the runtime-readiness endpoint must answer 200. Uses node's global fetch
+# (curl/wget are absent in slim); Host 127.0.0.1 satisfies the anti-DNS-rebinding guard. Read-only check.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.SOLTRADE_PORT||8787)+'/api/runtime/readiness').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 # Safe defaults (json / memory / none). Attach external Postgres/Redis/ClickHouse by setting the
 # *_BACKEND flags + their URLs. Open-by-design: the server starts and idles honestly until configured.
 CMD ["node", "apps/server/src/index.mjs"]

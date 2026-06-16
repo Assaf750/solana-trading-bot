@@ -67,10 +67,11 @@ smoke) → 11A (this review + flags reference + merge note).
    authoritative list lives in `legacy-audit.md` §16): (1) the engine physical extraction is **in
    progress** — `packages/trading-engine` now owns the lifecycle state machine (Engine-2) and the
    leader-insights logic (Engine-3); remaining slices: supervisor loop / command lifecycle / fills /
-   status() assembly (mechanism-bound — need rpc/jupiter/stores/liveExecutor injected); (2) deploy — the image
-   build is **DONE** (Phase Deploy-1: Dockerfile + CI `docker` job + deploy runbook); registry push +
-   cloud deploy remain; (3) Rust submit/bundle deepening — **DECIDED not now** (Phase Rust-2: the boundary
+   status() assembly (mechanism-bound — need rpc/jupiter/stores/liveExecutor injected); (2) deploy — image
+   build (Deploy-1) + **registry push (Deploy-2)** are **DONE** (GHCR publish workflow + production deploy
+   plan + `deploy/compose.prod.example.yml`); only cloud-specific orchestration (k8s/managed-platform +
+   its secret store) remains, left to the operator; (3) Rust submit/bundle deepening — **DECIDED not now** (Phase Rust-2: the boundary
    stays at signing; the network POST stays in JS by design; the signer is kept network-free, guarded);
    (4) the `services/*` unused-scaffold audit is **DONE** (Phase Services-Audit: 13 empty placeholder dirs
    removed; `services/` = `hot-executor` + `ingestor` + `analytics`). Net open items: engine extraction
-   slices, and deploy registry-push / cloud-deploy.
+   slices, and cloud-specific deploy orchestration (image build + registry push are done).

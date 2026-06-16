@@ -412,9 +412,10 @@ Everything below is OPEN; everything in §1–§15 is DONE.
    (`superviseTick` / `startSubscription` transitions), the command lifecycle (`closePosition` /
    `resolvePosition` / `manualBuy` / `manualSell` / `addOrder` / `cancelOrder`), and the fills/exits
    pipeline. Requires dependency-inversion (inject rpc / jupiter / stores / liveExecutor into pure logic).
-2. **Deploy / image pipeline.** Image build is **DONE** (Phase Deploy-1 — `Dockerfile` + `.dockerignore`,
-   the CI `docker` job builds it, `docs/runbooks/deploy.md`). REMAINING: registry push + a real cloud
-   deploy (no target environment / orchestrator manifest / secrets-management integration yet).
+2. **Deploy / image pipeline.** Image build (Deploy-1) + **registry push (Deploy-2, §21)** are **DONE**
+   (GHCR publish workflow + `deploy/compose.prod.example.yml` + the production deployment plan). REMAINING:
+   cloud-specific orchestration (a Kubernetes/Nomad manifest or managed-platform deploy step + its secret
+   store) — left to the operator; the Compose-based path is provided.
 3. **Rust submit/bundle deepening — DECIDED: not now (Phase Rust-2, §20).** The boundary stays at
    signing; the network POST (submit / Jito bundle) remains in the JS control plane by design. Revisit
    only if a measured latency need justifies adding a network stack to the signer.
@@ -527,3 +528,27 @@ hot-executor client surface is `sign`/`ping`/`close` only (it never POSTs). Docs
 
 **Revisit criterion:** only a *measured* latency win from a single sign+submit round-trip would justify
 adding a network stack to the signer; until then, signing-only is the intended, guarded boundary.
+
+## 21. Phase Deploy-2 — registry push + production deployment plan (no app/runtime change)
+
+Upgraded Deploy-1 (build-only) to a real publish + deploy path. No application behavior change; the only
+image change is an additive `HEALTHCHECK`.
+
+- **`.github/workflows/publish.yml`** — builds + pushes the image to **GHCR** on a version tag (`v*`) or a
+  manual `workflow_dispatch` (deliberate publish; CI's `docker` job already validates the build on push/PR).
+  Auth uses the built-in `GITHUB_TOKEN` (`permissions: packages: write`) — **no repo secret added**; no app
+  secret is baked into the image. Tags via `docker/metadata-action`: `:sha-<commit>` (immutable rollback
+  target), `:vX.Y.Z` (tag pushes), `:latest` (default branch).
+- **`Dockerfile`** gained a `HEALTHCHECK` (node `fetch` of `/api/runtime/readiness`; curl/wget are absent in
+  slim; Host 127.0.0.1 satisfies the rebinding guard). Verified: the container reports `healthy`.
+- **`deploy/compose.prod.example.yml`** — the app service on the published image, loopback-published, env
+  placeholders + a `.env` (not committed), external-datastore notes, optional `HOT_EXECUTOR_BIN` mount. No
+  real secrets.
+- **`docs/runbooks/deploy.md`** — added "Publishing the image (GHCR)" + "Production deployment plan" (env
+  matrix, external datastores, reverse proxy/Host, health/readiness gating, and **image-tag-based
+  rollback** — redeploy a prior `:sha-…`, never a legacy code path). Out-of-scope updated (registry push
+  done; cloud-specific orchestration remains).
+
+**Verified:** node --test green; cargo `--locked` + test 8/8; vite build OK; **docker build OK + the
+container reports `healthy`** (HEALTHCHECK); smokes skip; both workflow YAMLs parse. The publish push to
+GHCR runs on a tag / manual dispatch (owner-triggered) — CI (the 4 build/test jobs) stays green on push.

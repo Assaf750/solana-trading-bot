@@ -1,4 +1,4 @@
-# Deploy runbook (Phase Deploy-1)
+# Deploy runbook (Phases Deploy-1 + Deploy-2)
 
 A production-runnable Docker image: it builds the operator UI and runs `apps/server` (which also serves
 the built UI). Postgres / Redis / ClickHouse stay **external** and are wired via env. Open-by-design: the
@@ -15,6 +15,22 @@ Multi-stage (`Dockerfile`): stage 1 runs `npm ci` + `npm run build` for `apps/op
 `apps/server` + `packages` + `services/ingestor` + the built UI dist, and runs `node apps/server/src/index.mjs`.
 
 CI validates this on every push/PR (`.github/workflows/ci.yml` → the `docker` job: `docker build`, no push).
+
+## Publishing the image (GHCR)
+
+`.github/workflows/publish.yml` builds + pushes to **GitHub Container Registry** on a version tag (`v*`) or
+a **manual run** (Actions → "Publish image" → Run workflow). Auth is the built-in `GITHUB_TOKEN`
+(`permissions: packages: write`) — **no repo secret is added**, and no app secret is baked into the image.
+
+Tags pushed: `:sha-<commit>` (immutable — the rollback target), `:vX.Y.Z` (on a tag push), `:latest`
+(default branch). Pull with:
+
+```bash
+docker pull ghcr.io/assaf750/solana-trading-bot:latest      # or :sha-<commit> to pin a deploy
+```
+
+(CI's `docker` job already proves the build; publish only adds the push. Trigger the first publish via the
+Run-workflow button or a `v0.1.0` tag.)
 
 ## Run
 
@@ -37,6 +53,36 @@ docker run -d --name soltrade -p 127.0.0.1:8787:8787 -v soltrade-data:/data \
 
 All flags are documented in `docs/architecture/live-first-runtime-flags.md`. `POSTGRES_URL` etc. carry
 credentials — pass them at **run** time (env / env-file / orchestrator secret), never baked into the image.
+
+## Production deployment plan
+
+Deploy the **published image** with external datastores; never bake secrets in. A ready-to-edit example is
+`deploy/compose.prod.example.yml` (copy → `compose.prod.yml`, fill a local `.env`, then
+`docker compose -f compose.prod.yml up -d`).
+
+**Env matrix** (full reference: `live-first-runtime-flags.md`):
+
+| Concern | Env | Notes |
+|---|---|---|
+| Bind / port | `SOLTRADE_HOST` (image `0.0.0.0`) · `SOLTRADE_PORT` (8787) | publish to `127.0.0.1` + reverse proxy |
+| JSON store | `SOLTRADE_DATA_DIR` (`/data`) | mount a volume to persist |
+| Operational SoT | `STORAGE_BACKEND=postgres` + `POSTGRES_URL` | run `db:postgres:migrate` first |
+| Hot-state cache | `HOT_STATE_BACKEND=redis` + `REDIS_URL` | never SoT; fail-open |
+| Analytics sink | `EVENT_SINK_BACKEND=clickhouse` + `CLICKHOUSE_URL` | run `db:clickhouse:migrate` first |
+| Diagnostics | `DIAGNOSTIC_BACKEND` | on by default |
+| Signer | `HOT_EXECUTOR_BIN` | optional Rust signer (mount a linux binary); else in-process fallback |
+
+- **External datastores:** Postgres (operational SoT) / Redis (hot-state) / ClickHouse (analytics) are
+  external — managed services or your own. Point the app at them via the `*_URL` env; run migrations before
+  switching a backend on.
+- **Reverse proxy / Host header:** see "Networking & the Host-header guard" below — publish to loopback and
+  front with a proxy that sets `Host: localhost`.
+- **Health / readiness:** the image ships a `HEALTHCHECK` (GET `/api/runtime/readiness` → 200). Externally,
+  gate traffic on `GET /api/runtime/readiness` returning `200` with `read_only: true` and the expected
+  `capability_status` (e.g. `storage: available`) — it is monitoring-only and never trades.
+- **Rollback is image-tag based** (never a legacy code path): redeploy a previous immutable tag —
+  `docker pull ghcr.io/assaf750/solana-trading-bot:sha-<previousCommit>` and restart. The data layer
+  (Postgres / JSON / …) is unaffected by an app-image rollback; the image tag is the only rollback lever.
 
 ## Networking & the Host-header guard
 
@@ -80,13 +126,14 @@ set `HOT_EXECUTOR_BIN`:
 Either way the live-executor prefers it when present and falls back to in-process on any failure
 (Phase Rust-1) — so signing is never blocked.
 
-## What Deploy-1 does NOT do (out of scope, by design)
+## Still out of scope (after Deploy-2)
 
-- **No secrets** are baked into the image (creds/keys are run-time env / mounted secrets only).
-- **No registry push** — the image is built locally / in CI but not published.
-- **No cloud deploy** — there is no target environment, orchestrator manifest, or deploy step yet.
-- **No real Docker full-stack smoke in CI** — CI only proves the image *builds*; run the live smoke per
-  `local-full-stack.md` against real services before production.
+- **No app secrets** are ever baked into the image — creds/keys are run-time env / mounted secrets only.
+- **No cloud-specific orchestration** — no Kubernetes/Nomad manifests or a managed-platform deploy step.
+  The image + the GHCR publish workflow + `deploy/compose.prod.example.yml` give a Compose-based deploy
+  path; a specific cloud target (and its secret store) is left to the operator.
+- **No real Docker full-stack smoke in CI** — CI proves the image *builds* (and publish pushes it); run the
+  live smoke per `local-full-stack.md` against real services before production.
 
 ## Reproduce CI locally
 
