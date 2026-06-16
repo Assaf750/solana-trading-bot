@@ -1,6 +1,16 @@
-# CI — runs the Node test suite. No external dependencies, no network calls, no build step.
-# (The former SSOT-drift / mechanism-guard standalone steps were removed with the SSOT
-#  governance system; the mechanism-guard code-hygiene scan still runs via the package tests.)
+# CI — production pipeline (Phase CI-1). Protects the Live-First refactor before the Rust boundary lands.
+# Three parallel jobs:
+#   - tests:    `node --test` (unit/integration + the architecture / package-boundary / mechanism-guard
+#               code-hygiene checks, which run inside the suite) + the opt-in smoke scripts in skip-clean
+#               mode (they must load and SKIP cleanly with no env).
+#   - ui-build: `npm ci` (the operator-ui lockfile is tracked) + the Vite production build of the UI.
+#   - rust:     `cargo build --locked` + `cargo test` for services/hot-executor (the signing/exec boundary).
+#
+# package-lock policy: apps/operator-ui/package-lock.json IS tracked -> `npm ci` for the UI. The ROOT has
+# NO tracked lockfile by design — the server + packages have ZERO runtime deps for tests (pg / redis are
+# dynamically imported only in postgres / redis runtime mode, never in CI), so the test job installs
+# nothing. See docs/runbooks/ci.md. The real Docker full-stack smoke stays MANUAL (it needs live
+# Postgres / Redis / ClickHouse) — CI only proves the smokes skip-clean.
 name: CI
 
 on:
@@ -9,17 +19,57 @@ on:
 
 jobs:
   test:
-    name: Tests
+    name: Tests + architecture guards
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      # No `npm install`: server + packages have zero runtime dependencies; tests run on plain Node.
-      - name: Unit + integration tests
+      # No install: the server + packages have zero runtime deps for tests; the architecture /
+      # package-boundary / mechanism guards run as part of the suite.
+      - name: Unit + integration tests + architecture guards
         run: node --test
+      # The opt-in smokes must load cleanly and SKIP (exit 0) with no env — this guards the smoke
+      # scripts themselves (a broken import would fail here even though they don't touch live services).
+      - name: Smoke scripts skip-clean (no env)
+        run: |
+          npm run smoke:postgres
+          npm run smoke:redis
+          npm run smoke:clickhouse
+          npm run smoke:full-stack
+
+  ui-build:
+    name: Operator UI build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/operator-ui/package-lock.json
+      - name: Install (operator-ui, from the tracked lockfile)
+        run: npm ci
+        working-directory: apps/operator-ui
+      - name: Build operator UI (Vite production build)
+        run: npm run build
+        working-directory: apps/operator-ui
+
+  rust:
+    name: Rust hot-executor (signing/exec boundary)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      # ubuntu-latest ships a stable Rust toolchain (cargo / rustc) pre-installed — no setup action needed.
+      - name: cargo build (locked)
+        run: cargo build --locked
+        working-directory: services/hot-executor
+      - name: cargo test
+        run: cargo test
+        working-directory: services/hot-executor
