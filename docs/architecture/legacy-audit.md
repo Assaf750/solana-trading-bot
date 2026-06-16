@@ -416,9 +416,13 @@ Everything below is OPEN; everything in §1–§15 is DONE.
    (GHCR publish workflow + `deploy/compose.prod.example.yml` + the production deployment plan). REMAINING:
    cloud-specific orchestration (a Kubernetes/Nomad manifest or managed-platform deploy step + its secret
    store) — left to the operator; the Compose-based path is provided.
-3. **Rust submit/bundle deepening — DECIDED: not now (Phase Rust-2, §20).** The boundary stays at
-   signing; the network POST (submit / Jito bundle) remains in the JS control plane by design. Revisit
-   only if a measured latency need justifies adding a network stack to the signer.
+3. **Rust as hot-path execution owner — REOPENED + EXPANDING (Phase Rust-3, §22; supersedes the Rust-2
+   §20 "signing-only" close).** Rust's direction is now the hot-path execution owner, expanding from signing
+   one safe step at a time. **DONE:** the whole executed Jito bundle is Rust-signed (the new `sign_bundle`
+   op now also signs the tip leg, which was JS-signed before). **STILL JS by design (this phase):** the
+   network POST (submit / Jito bundle) + decision-ledger idempotency. **NEXT:** wire `build_submit` /
+   `build_bundle` so request-body assembly is Rust-owned end-to-end; revisit moving the POST itself only on
+   a *measured* latency win (the §20 criterion still governs adding a socket to the signer).
 4. **`services/*` unused-scaffold audit — DONE** (Phase Services-Audit, §18): 13 empty placeholder dirs
    removed; `services/` now holds only the real, used dirs (`hot-executor`, `ingestor`, `analytics`).
 
@@ -529,6 +533,11 @@ hot-executor client surface is `sign`/`ping`/`close` only (it never POSTs). Docs
 **Revisit criterion:** only a *measured* latency win from a single sign+submit round-trip would justify
 adding a network stack to the signer; until then, signing-only is the intended, guarded boundary.
 
+> **Superseded in part by Phase Rust-3 (§22).** The *network-free* half of this decision still holds (the
+> POST stays in JS), but the "signing-only" framing was reopened: Rust is now the hot-path **execution
+> owner**, expanding from signing one safe step at a time. The first expansion (the Jito tip leg is now
+> Rust-signed via the new `sign_bundle` op) shipped in §22; the signer remains network-free.
+
 ## 21. Phase Deploy-2 — registry push + production deployment plan (no app/runtime change)
 
 Upgraded Deploy-1 (build-only) to a real publish + deploy path. No application behavior change; the only
@@ -552,3 +561,51 @@ image change is an additive `HEALTHCHECK`.
 **Verified:** node --test green; cargo `--locked` + test 8/8; vite build OK; **docker build OK + the
 container reports `healthy`** (HEALTHCHECK); smokes skip; both workflow YAMLs parse. The publish push to
 GHCR runs on a tag / manual dispatch (owner-triggered) — CI (the 4 build/test jobs) stays green on push.
+
+## 22. Phase Rust-3 — Rust reframed from signer to hot-path EXECUTION OWNER (first safe expansion)
+
+Rust-2 (§20) formally *closed* the boundary at signing. Rust-3 **reopens it deliberately**: Rust's stated
+direction is now the **hot-path execution owner**, expanding outward from signing one safe, tested step at a
+time — NOT a big-bang move of the network POST. This phase establishes the new boundary + ships the first
+expansion. **The signer stays network-free this phase** (the actual POST + idempotency remain in JS); the
+revisit criterion from §20 (a *measured* latency need) still governs whether a socket is ever added.
+
+**New boundary (as of Rust-3):**
+- **Rust = hot-path execution owner** — signs *every* leg of the executed bundle (`sign` for the swap +
+  the new **`sign_bundle`** op for the whole bundle) and provides the pure execution-assembly primitives
+  (`build_submit` / `build_bundle` / `select_tip`). Still **network-free** — no HTTP/async crate.
+- **JS = control plane** — builds the unsigned legs, performs the network POST (`rpc.sendTransaction` /
+  `jitoSendBundle`), and owns the decision-ledger **idempotency** (`claimIntent`). Unchanged.
+
+**First safe expansion shipped — the Jito bundle's TIP leg is now Rust-signed.** Before Rust-3, even in
+`signer_backend='rust'` the swap leg was Rust-signed but the bundle's *tip* leg was always signed
+in-process (JS) — a silent gap where part of the executed bundle bypassed the official signer. Now:
+- **Rust** `services/hot-executor/src/main.rs` gained the `sign_bundle` op (`unsigned_txs[]` → `signed_txs[]`,
+  fee-payer-locked per leg, reusing `sign_serialized_transaction` byte-for-byte; any bad/empty leg → error
+  so the caller falls back). + cargo tests (`sign_bundle_signs_every_leg`, `…rejects_empty_and_bad_leg`).
+- **JS client** `hot-executor-client.mjs` gained `signBundle({ txsBase64, seed })` → `{ ok, signed:[…] }`;
+  the surface is now `sign` / `signBundle` / `ping` / `close` (still **never POSTs**).
+- **`live-executor.submitSigned()`** jito path: when `signer_backend='rust'` + `hotSigner.signBundle`, the
+  tip leg is signed via Rust, so the **whole** bundle `[swap, tip]` is Rust-signed; **fail-safe** — any
+  hot-executor failure falls back to in-process tip signing, so a dead/missing helper can never block the
+  bundle. No other execution path changed; the `'node'` backend and non-jito sends are untouched.
+
+**Guard (reframed, prevents undeliberate growth + a network signer):**
+`apps/server/test/rust-boundary-guard.test.mjs` now asserts the *execution-owner* boundary — (a)
+`Cargo.toml` carries **no HTTP/async crate** (the signer stays network-free; a socket needs a documented
+decision); (b) the network POST + idempotency stay in JS (`rpc.sendTransaction` + `jitoSendBundle` +
+`claimIntent` in live-executor); (c) the client surface is `sign`/`signBundle`/`ping`/`close` and **never**
+references `sendTransaction`/`sendBundle`. Together these let Rust grow as the execution owner while keeping
+each step deliberate and the signer off the network.
+
+**Tests:** cargo `sign_bundle` cases (10/10); `hot-executor-client.test.mjs` `signBundle` FIFO case;
+`live-executor.test.mjs` two jito+rust integration cases (the tip leg is Rust-signed → bundle =
+`[rust swap, rust tip]`; and the fallback path signs the tip in-process when `signBundle` fails).
+
+**Verified:** node --test green; cargo `--locked` + test **10/10**; docker build OK; smokes skip; UI
+unchanged (no vite build needed). Docs: this §22; §16.3 reframed (below); §20 references this reopening;
+`merge-readiness.md` + `deploy.md` updated to say Rust is the execution owner (not signing-only).
+
+**Next safe expansions (open, same deliberate cadence):** wire `build_submit`/`build_bundle` so the *request
+body* assembly is Rust-owned end-to-end (still JS POST); only then — and only on a measured latency win —
+revisit moving the POST itself (§20 criterion).

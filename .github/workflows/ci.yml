@@ -4,7 +4,7 @@
 #               code-hygiene checks, which run inside the suite) + the opt-in smoke scripts in skip-clean
 #               mode (they must load and SKIP cleanly with no env).
 #   - ui-build: `npm ci` (the operator-ui lockfile is tracked) + the Vite production build of the UI.
-#   - rust:     `cargo build --locked` + `cargo test` for services/hot-executor (the signing/exec boundary).
+#   - rust:     `cargo build --locked` + `cargo test` for services/hot-executor (the hot-path execution owner).
 #
 # package-lock policy: apps/operator-ui/package-lock.json IS tracked -> `npm ci` for the UI. The ROOT has
 # NO tracked lockfile by design — the server + packages have ZERO runtime deps for tests (pg / redis are
@@ -61,7 +61,7 @@ jobs:
         working-directory: apps/operator-ui
 
   rust:
-    name: Rust hot-executor (signing/exec boundary)
+    name: Rust hot-executor (hot-path execution owner)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

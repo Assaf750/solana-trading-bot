@@ -70,7 +70,7 @@ Deploy the **published image** with external datastores; never bake secrets in. 
 | Hot-state cache | `HOT_STATE_BACKEND=redis` + `REDIS_URL` | never SoT; fail-open |
 | Analytics sink | `EVENT_SINK_BACKEND=clickhouse` + `CLICKHOUSE_URL` | run `db:clickhouse:migrate` first |
 | Diagnostics | `DIAGNOSTIC_BACKEND` | on by default |
-| Signer | `HOT_EXECUTOR_BIN` | optional Rust signer (mount a linux binary); else in-process fallback |
+| Signer / executor | `HOT_EXECUTOR_BIN` | Rust hot-path execution owner (mount a linux binary; signs the whole executed bundle); else in-process fallback |
 
 - **External datastores:** Postgres (operational SoT) / Redis (hot-state) / ClickHouse (analytics) are
   external — managed services or your own. Point the app at them via the `*_URL` env; run migrations before
@@ -94,12 +94,15 @@ Deploy the **published image** with external datastores; never bake secrets in. 
   - To expose it on a LAN / domain, front it with a reverse proxy that sets `Host: localhost`
     (e.g. nginx `proxy_set_header Host localhost;`). The guard is a security feature and is **unchanged**.
 
-## Rust hot-executor (official signer) — build or pass `HOT_EXECUTOR_BIN`
+## Rust hot-executor (hot-path execution owner) — build or pass `HOT_EXECUTOR_BIN`
 
-The Rust hot-executor is the official **signing** boundary and is **network-free by design** (Phase
-Rust-2): it signs and builds pure payloads, but the actual network POST (sendTransaction / Jito bundle),
-retries, and intent-ledger idempotency stay in the JS control plane. So the container needs **no extra
-network egress for the signer** — it only signs over stdin/stdout.
+The Rust hot-executor is the **hot-path execution owner** (Phase Rust-3, expanding from the Phase Rust-1
+official signer) and is **network-free by design**: it signs **every leg of the executed bundle** (the swap
+*and*, as of Rust-3, the Jito tip leg via `sign_bundle`) and builds the pure execution payloads, but the
+actual network POST (sendTransaction / Jito bundle), retries, and intent-ledger idempotency stay in the JS
+control plane. So the container needs **no extra network egress for the signer** — it only signs over
+stdin/stdout. Rust expands as the execution owner one safe, tested step at a time; the POST stays in JS
+until a measured latency win justifies moving it (see `docs/architecture/legacy-audit.md` §22).
 
 The base image runs the in-process signer (fail-safe fallback); readiness shows
 `signing_backend = not_configured`. To activate the official Rust signer, provide a **Linux** binary and
