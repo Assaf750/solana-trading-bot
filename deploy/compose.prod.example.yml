@@ -1,0 +1,38 @@
+# deploy/compose.prod.example.yml — production-style example for the Soltrade app service (Phase Deploy-2).
+# COPY to compose.prod.yml and fill a local .env; DO NOT commit real secrets. The datastores (Postgres /
+# Redis / ClickHouse) are EXTERNAL (managed services or your own) — point the app at them via env. The app
+# image is published to GHCR by .github/workflows/publish.yml (on a version tag or a manual dispatch).
+name: soltrade-prod
+
+services:
+  soltrade:
+    # Pin to an immutable :sha-<commit> in real deploys (rollback = redeploy a prior tag). :latest tracks main.
+    image: ghcr.io/assaf750/solana-trading-bot:latest
+    restart: unless-stopped
+    # Publish to LOOPBACK only — the API keeps its anti-DNS-rebinding Host guard; front it with a reverse
+    # proxy that sets `Host: localhost` to expose it on a domain. Do NOT bind 0.0.0.0 on a public host.
+    ports:
+      - "127.0.0.1:8787:8787"
+    # Credentials (POSTGRES_URL / REDIS_URL / CLICKHOUSE_URL, …) come from a local .env — NOT committed.
+    env_file:
+      - .env
+    environment:
+      # Safe defaults are json / memory / none; switch on only the external datastores you actually run.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-json}          # json | postgres   (+ POSTGRES_URL in .env)
+      HOT_STATE_BACKEND: ${HOT_STATE_BACKEND:-memory}    # memory | redis    (+ REDIS_URL in .env)
+      EVENT_SINK_BACKEND: ${EVENT_SINK_BACKEND:-none}    # none | clickhouse (+ CLICKHOUSE_URL in .env)
+      # Official Rust signer (optional): mount a LINUX binary (below) and set its path. Leave unset for the
+      # in-process fallback signer. See docs/runbooks/deploy.md.
+      # HOT_EXECUTOR_BIN: /opt/hot-executor
+    volumes:
+      - soltrade-data:/data            # default JSON store / snapshots (persist across restarts)
+      # - /abs/host/hot-executor:/opt/hot-executor:ro   # optional Rust signer binary (must be linux)
+    # The image ships a HEALTHCHECK (GET /api/runtime/readiness) — compose surfaces it as service health.
+
+volumes:
+  soltrade-data:
+
+# External datastores: use managed services, OR for a single self-hosted box reuse the dev `compose.yaml`
+# (Postgres / Redis / ClickHouse) on a shared docker network and point the *_URL env at those service
+# names. Run migrations BEFORE switching a backend on: `npm run db:postgres:migrate` /
+# `npm run db:clickhouse:migrate` (see docs/runbooks/local-full-stack.md). No real secrets belong in git.

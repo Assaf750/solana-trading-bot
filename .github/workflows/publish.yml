@@ -1,0 +1,48 @@
+# publish.yml — build + push the production image to GHCR (ADR-0001 Phase Deploy-2). DELIBERATE publish:
+# runs on a version tag (v*) or a manual dispatch — NOT on every push (CI's `docker` job already validates
+# the build on push/PR). Auth uses the built-in GITHUB_TOKEN (no repo secret is added), and NO application
+# secrets are baked into the image (creds are run-time env only). Tags: an immutable :sha-<commit> for
+# rollback, the release :vX.Y.Z on tag pushes, and :latest on the default branch.
+name: Publish image
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    name: Build + push to GHCR
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha,format=long
+            type=ref,event=tag
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build + push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
