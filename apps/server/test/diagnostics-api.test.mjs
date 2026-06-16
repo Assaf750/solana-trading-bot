@@ -37,11 +37,21 @@ function mkApi(over = {}, withAdapter = true) {
 // ---------- disabled backend (DIAGNOSTIC_BACKEND off) ----------
 test('disabled backend: every diagnostics route returns 404 RESOURCE_NOT_FOUND', async () => {
   const { api } = mkApi({}, false);
-  for (const [method, path] of [['POST', '/api/diagnostics/run'], ['POST', '/api/diagnostics/execution-test'], ['POST', '/api/diagnostics/provider-test'], ['GET', '/api/diagnostics/status']]) {
+  for (const [method, path] of [['POST', '/api/diagnostics/run'], ['POST', '/api/diagnostics/execution-test'], ['POST', '/api/diagnostics/provider-test'], ['POST', '/api/diagnostics/connectivity'], ['GET', '/api/diagnostics/status']]) {
     const r = await api.handle({ method, path, body: {} });
     assert.equal(r.status, 404, `${method} ${path}`);
     assert.equal(r.body.api_error_code, 'RESOURCE_NOT_FOUND');
   }
+});
+
+// ---------- enabled backend: connectivity (Phase 5E — the single checking path) ----------
+test('enabled backend: POST /connectivity returns a live connectivity check (replaces test-connection)', async () => {
+  const { api } = mkApi();
+  const r = await api.handle({ method: 'POST', path: '/api/diagnostics/connectivity', body: {} });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.check.name, 'connectivity');
+  assert.equal(r.body.ok, r.body.check.ok);
+  assert.ok(r.body.safety.no_transaction_sent, 'connectivity carries the diagnostic safety block');
 });
 
 // ---------- enabled backend: structured DiagnosticRun ----------

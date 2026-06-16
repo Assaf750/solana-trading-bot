@@ -50,5 +50,8 @@ smoke) → 11A (this review + flags reference + merge note).
    ClickHouse), using `docs/runbooks/local-full-stack.md` to validate locally first.
 3. ~~Schedule **Phase 3B** (legacy-shim pruning)~~ **DONE** — the legacy-shim purge completed across
    Phases 3B.1–3B.4 + the hard legacy purge (3B-X); all `*_BACKEND=legacy` rollback paths are removed.
-   Remaining restructure work: full Paper→Diagnostic migration, the Rust signing/execution boundary, a
-   production/CI/deploy checklist, and dead-export pruning.
+   The Paper→Diagnostic checking-path migration is **DONE** (Phase 5E — Diagnostics is the only
+   preflight/provider/execution/connectivity test path, on by default; `/api/providers/test-connection`
+   retired). Remaining restructure work: the Rust signing/execution boundary, a production/CI/deploy
+   checklist, dead-export pruning, and a dedicated `trading-engine` extraction (paper-engine still doubles
+   as the live orchestrator).

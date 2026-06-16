@@ -17,8 +17,10 @@ const { parseStorageBackendConfig } = await import('../src/storage/postgres-clie
 const { parseRedisConfig } = await import('../src/storage/redis-client.mjs');
 const { parseClickHouseConfig } = await import('../src/storage/clickhouse-client.mjs');
 
-test('DIAGNOSTIC_BACKEND is opt-in (constructs the adapter only on explicit "package"; default = off)', () => {
-  assert.ok(/process\.env\.DIAGNOSTIC_BACKEND\s*===\s*'package'/.test(code(read('apps/server/src/index.mjs'))));
+test('DIAGNOSTIC_BACKEND defaults ON (Phase 5E): the adapter is wired unless explicitly set to "legacy"', () => {
+  const src = code(read('apps/server/src/index.mjs'));
+  assert.ok(/process\.env\.DIAGNOSTIC_BACKEND\s*===\s*'legacy'\s*\?\s*null/.test(src), 'diagnostics off ONLY on explicit legacy');
+  assert.ok(/createDiagnosticExecutionAdapter/.test(src), 'adapter is constructed by default (Diagnostics is the only checking path)');
 });
 
 test('storage trio defaults are safe with empty env: json / memory / none', () => {

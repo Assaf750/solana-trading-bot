@@ -13,10 +13,11 @@ configured; there are no artificial gates.
 - **ClickHouse** — **analytics-only**, append-only event sink. Never the source of truth; writes are
   fail-open and never affect trading.
 - **JSON** — the **default** local store + fallback / snapshot / recovery; unchanged and always kept.
-- **Diagnostics** (`@soltrade/execution`) — the official surface for **readiness / provider / execution
-  testing** (read-only pre-flight; never trades).
-- **Paper** — **simulation / legacy** sandbox portfolio model only; never a readiness or execution-test
-  tool.
+- **Diagnostics** (`@soltrade/execution`) — the **only** surface for **readiness / provider / execution
+  testing** (read-only pre-flight; never trades). On by default since Phase 5E; the connectivity check
+  (`/api/diagnostics/connectivity`) replaced the legacy `/api/providers/test-connection` probe.
+- **Paper** — **simulation** sandbox portfolio model only (the paper-engine drives the simulated book);
+  never a readiness or execution-test tool. All checking goes through Diagnostics.
 
 ## Flag table
 | Flag | Values | Default | Role |
@@ -27,7 +28,7 @@ configured; there are no artificial gates.
 | `REDIS_URL` (or `REDIS_HOST`/`REDIS_PORT`) | URL / parts | — | Redis connection (used only when `HOT_STATE_BACKEND=redis`). |
 | `EVENT_SINK_BACKEND` | `none` \| `clickhouse` | `none` | Analytics-only event sink (never SoT). |
 | `CLICKHOUSE_URL` (or `CLICKHOUSE_HOST`/`CLICKHOUSE_HTTP_PORT` + `CLICKHOUSE_DB`/`USER`/`PASSWORD`) | URL / parts | — | ClickHouse connection (used only when `EVENT_SINK_BACKEND=clickhouse`). |
-| `DIAGNOSTIC_BACKEND` | `legacy` \| `package` | `legacy` | `package` wires the DiagnosticExecutionAdapter (+ `/api/diagnostics/*`); `legacy` = off (opt-in). |
+| `DIAGNOSTIC_BACKEND` | on (default) \| `legacy` | on | The DiagnosticExecutionAdapter — the **only** checking path (`/api/diagnostics/*`: status / run / provider-test / connectivity) — is wired by default (Phase 5E). Read-only (never trades). Set `legacy` only to disable it. |
 | `SOLTRADE_PORT` | number | `8787` | server HTTP port. |
 | `SOLTRADE_DATA_DIR` | path | `data/` | JSON store directory. |
 | `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE` / `RUN_FULL_STACK_SMOKE` | `1` | unset | opt-in gates for the smoke scripts (never part of `node --test`). |
