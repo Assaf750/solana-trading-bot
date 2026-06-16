@@ -61,7 +61,8 @@ if (base) {
 try { await pgClient?.end?.(); } catch { /* ignore */ }
 try { await redisBackend?.client?.quit?.(); } catch { /* ignore */ }
 
+// Set the exit code and let the loop drain — forcing process.exit() while the global fetch (undici)
+// keep-alive socket is still open triggers a libuv assertion on Windows.
 const failed = results.filter((r) => r.status === 'fail');
-if (failed.length) { console.error(`smoke:full-stack — FAIL: ${failed.map((r) => r.name).join(', ')}`); process.exit(1); }
-console.log('smoke:full-stack — OK (all configured backends reachable; no transaction sent).');
-process.exit(0);
+if (failed.length) { console.error(`smoke:full-stack — FAIL: ${failed.map((r) => r.name).join(', ')}`); process.exitCode = 1; }
+else { console.log('smoke:full-stack — OK (all configured backends reachable; no transaction sent).'); process.exitCode = 0; }

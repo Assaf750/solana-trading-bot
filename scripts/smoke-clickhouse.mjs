@@ -35,4 +35,6 @@ try {
 if (!(count >= 1)) fail(`read-back found ${count} rows (expected >= 1)`);
 
 console.log(`smoke:clickhouse — OK: ping + write + read-back verified against ClickHouse (analytics_events, ${count} smoke row).`);
-process.exit(0);
+// Don't force process.exit() here: the global fetch (undici) keep-alive socket is still open, and a
+// forced exit while it closes triggers a libuv assertion on Windows. Set the code and let the loop drain.
+process.exitCode = 0;

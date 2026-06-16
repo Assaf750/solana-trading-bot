@@ -21,10 +21,11 @@ if (!cfg.ok) {
 const files = readdirSync(MIG_DIR).filter((f) => f.endsWith('.sql')).sort();
 if (!files.length) { console.error('db:clickhouse:migrate — no .sql files in migrations/clickhouse'); process.exit(1); }
 
-// split a file into individual statements; drop empty / comment-only chunks
-const statements = (sql) => sql.split(';')
-  .map((s) => s.trim())
-  .filter((s) => s && s.split('\n').some((l) => l.trim() && !l.trim().startsWith('--')));
+// Strip `--` line comments BEFORE splitting on ';' — a ';' inside a comment (e.g. "SSOT names;
+// storage-only ...") must NOT break statement splitting. ClickHouse DDL here has no '--' inside string
+// literals, so trimming each line at its first '--' is safe.
+const stripLineComments = (sql) => sql.split('\n').map((l) => { const i = l.indexOf('--'); return i >= 0 ? l.slice(0, i) : l; }).join('\n');
+const statements = (sql) => stripLineComments(sql).split(';').map((s) => s.trim()).filter(Boolean);
 
 const client = createClickHouseClient(cfg.clickhouse);
 let applied = 0;
