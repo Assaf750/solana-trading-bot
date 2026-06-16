@@ -293,6 +293,14 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const sg = status.signer || {};
           const signer = { status: sg.key_imported ? 'available' : 'not_configured', can_sign: !!(sg.key_imported && sg.vault_unlocked && sg.session_active) };
 
+          // signing-backend capability (Phase Rust-1) — the OFFICIAL signing/execution boundary is the
+          // Rust hot-executor; the in-process signer is the documented dev/local fallback. Informational
+          // only (the fallback always works, so this NEVER blocks): available = hot-executor configured +
+          // responding; not_configured = no HOT_EXECUTOR_BIN (in-process fallback active); unavailable =
+          // configured but the helper is down (still falls back to in-process). No gate, no hard stop.
+          const sbp = await safeProbe(runtimeProbes && runtimeProbes.signerBackend, { backend: 'in_process', status: 'not_configured' });
+          const signing_backend = { backend: sbp.backend, status: CAP(sbp.status), official: 'rust', fallback: 'in_process' };
+
           const degradedAny = [storage.status, hot_state.status, event_sink.status].includes('degraded') || Object.values(providers).includes('degraded');
           const unavailableCore = storage.status === 'unavailable' || live_execution.status === 'unavailable';
           const overall = unavailableCore ? 'unavailable' : degradedAny ? 'degraded' : live_execution.status === 'not_configured' ? 'not_configured' : 'ready';
@@ -308,8 +316,8 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             mode: status.mode || null,
             run_mode: status.run_mode || null,
             operating_state: status.operating_state?.operating_state || null,
-            capability_status: { storage: storage.status, hot_state: hot_state.status, event_sink: event_sink.status, signer: signer.status, live_execution: live_execution.status },
-            storage, hot_state, event_sink, providers, signer,
+            capability_status: { storage: storage.status, hot_state: hot_state.status, event_sink: event_sink.status, signer: signer.status, signing_backend: signing_backend.status, live_execution: live_execution.status },
+            storage, hot_state, event_sink, providers, signer, signing_backend,
             diagnostics: { backend: diagnostics ? 'package' : 'legacy', status: diagnostics ? 'available' : 'not_configured' },
             live_execution,
             unavailable_dependencies,

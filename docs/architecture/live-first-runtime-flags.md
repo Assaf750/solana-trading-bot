@@ -21,6 +21,11 @@ configured; there are no artificial gates.
   book. paper-engine is its implementation substrate (Phase 5F name/ownership split).
 - **Paper** — **simulation** sandbox portfolio model only (the trading engine runs the simulated book in
   paper mode); never a readiness or execution-test tool. All checking goes through Diagnostics.
+- **Signing / execution boundary** (`services/hot-executor`, Rust) — the **official** signer (ADR-0001
+  Phase Rust-1). Preferred whenever configured (`HOT_EXECUTOR_BIN` set; `execution.signer_backend`
+  defaults to `rust`); the in-process `tx-signer.mjs` is the documented dev/local + **fail-safe fallback**
+  (any hot-executor failure falls back to it, so signing is never blocked). Runtime readiness reports
+  `signing_backend` as `available` / `not_configured` / `unavailable` — **informational only**, not a gate.
 
 ## Flag table
 | Flag | Values | Default | Role |
@@ -32,6 +37,7 @@ configured; there are no artificial gates.
 | `EVENT_SINK_BACKEND` | `none` \| `clickhouse` | `none` | Analytics-only event sink (never SoT). |
 | `CLICKHOUSE_URL` (or `CLICKHOUSE_HOST`/`CLICKHOUSE_HTTP_PORT` + `CLICKHOUSE_DB`/`USER`/`PASSWORD`) | URL / parts | — | ClickHouse connection (used only when `EVENT_SINK_BACKEND=clickhouse`). |
 | `DIAGNOSTIC_BACKEND` | on (default) \| `legacy` | on | The DiagnosticExecutionAdapter — the **only** checking path (`/api/diagnostics/*`: status / run / provider-test / connectivity) — is wired by default (Phase 5E). Read-only (never trades). Set `legacy` only to disable it. |
+| `HOT_EXECUTOR_BIN` | path | — | Path to the Rust `services/hot-executor` binary. When set, it becomes the official signer (the live-executor prefers it; falls back to in-process on any failure). Unset = in-process dev/local signer. Not a gate — surfaced as the `signing_backend` readiness capability. |
 | `SOLTRADE_PORT` | number | `8787` | server HTTP port. |
 | `SOLTRADE_DATA_DIR` | path | `data/` | JSON store directory. |
 | `RUN_POSTGRES_SMOKE` / `RUN_REDIS_SMOKE` / `RUN_CLICKHOUSE_SMOKE` / `RUN_FULL_STACK_SMOKE` | `1` | unset | opt-in gates for the smoke scripts (never part of `node --test`). |

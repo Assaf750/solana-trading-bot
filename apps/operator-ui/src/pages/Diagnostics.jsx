@@ -145,6 +145,8 @@ export default function Diagnostics() {
               <span className="muted fs-xs" style={{ marginInlineStart: 'var(--s-2)' }}>signer:</span>
               <Badge tone={BACKEND_TONE[runtime.signer?.status] || 'neutral'}>{runtime.signer?.status || '—'}</Badge>
               <span className="muted fs-xs">{ar ? 'يمكنه التوقيع' : 'can sign'}: {runtime.signer?.can_sign ? (ar ? 'نعم' : 'yes') : (ar ? 'لا' : 'no')}</span>
+              <span className="muted fs-xs" style={{ marginInlineStart: 'var(--s-2)' }}>{ar ? 'حدود التوقيع' : 'signing'}:</span>
+              <Badge tone={BACKEND_TONE[runtime.signing_backend?.status] || 'neutral'}>{runtime.signing_backend?.backend || '—'}: {runtime.signing_backend?.status || '—'}</Badge>
             </div>
             {runtime.live_execution?.missing_config?.length > 0 && (
               <p className="fs-xs muted" style={{ marginBlockStart: 6 }}>
