@@ -72,9 +72,22 @@ export function createMemoryHotStateStore({ now = defaultNow, genToken = default
   const getJson = async (key) => { const v = await get(key); try { return v == null ? null : JSON.parse(v); } catch { return null; } };
   const setJson = (key, obj, ttlMs) => set(key, JSON.stringify(obj ?? null), ttlMs);
 
+  // idempotency: first claim wins (built on the set-if-absent primitive); a duplicate returns the
+  // stored result so a retry/double-submit replays rather than repeats. Rebuildable cache — never SoT.
+  async function claimIdempotencyKey(key, ttlMs, value = null) {
+    const k = `idem:${key}`;
+    const e = live(k);
+    if (e) { try { return { claimed: false, existing: JSON.parse(e.value) }; } catch { return { claimed: false, existing: null }; } }
+    map.set(k, { value: JSON.stringify(value ?? null), expiresAt: expiry(ttlMs) });
+    return { claimed: true, existing: null };
+  }
+  const readIdempotencyKey = (key) => getJson(`idem:${key}`);
+  const releaseIdempotencyKey = (key) => del(`idem:${key}`);
+
   return {
     backend: 'memory',
     get, set, del, lock, unlock, incrRateLimit, getCursor, setCursor,
+    claimIdempotencyKey, readIdempotencyKey, releaseIdempotencyKey,
     getProviderHealth: () => getJson('provider_health'),
     setProviderHealth: (snap, ttlMs) => setJson('provider_health', snap, ttlMs),
     getReadiness: () => getJson('readiness'),

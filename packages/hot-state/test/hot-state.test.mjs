@@ -87,6 +87,27 @@ test('cursor: set/get is namespaced and independent of generic keys', async () =
   assert.equal(await store.getCursor('leader-stream'), 'sig_123');
 });
 
+// ---------- idempotency keys ----------
+test('idempotency: first claim wins; a duplicate returns the stored result (replay)', async () => {
+  const { store } = harness();
+  const first = await store.claimIdempotencyKey('req-1', 10_000, { result: 42 });
+  assert.deepEqual(first, { claimed: true, existing: null });
+  const dup = await store.claimIdempotencyKey('req-1', 10_000, { result: 999 });
+  assert.equal(dup.claimed, false);
+  assert.deepEqual(dup.existing, { result: 42 }, 'duplicate returns the ORIGINAL stored value');
+  assert.deepEqual(await store.readIdempotencyKey('req-1'), { result: 42 });
+});
+
+test('idempotency: release frees the key; a window expiry frees it too', async () => {
+  const { store, advance } = harness();
+  await store.claimIdempotencyKey('req-2', 5000, { v: 1 });
+  await store.releaseIdempotencyKey('req-2');
+  assert.equal(await store.readIdempotencyKey('req-2'), null);
+  assert.equal((await store.claimIdempotencyKey('req-2', 5000, { v: 2 })).claimed, true, 're-claim after release');
+  advance(5000);
+  assert.equal(await store.readIdempotencyKey('req-2'), null, 'expired after ttl');
+});
+
 // ---------- provider-health / readiness JSON caches ----------
 test('provider-health + readiness: JSON roundtrip; ttl honored', async () => {
   const { store, advance } = harness();

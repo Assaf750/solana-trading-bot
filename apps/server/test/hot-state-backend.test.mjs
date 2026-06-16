@@ -100,6 +100,19 @@ test('redis store: cursor + provider-health/readiness JSON roundtrip', async () 
   assert.deepEqual(await store.getProviderHealth(), { rpc: { status: 'down' } });
 });
 
+test('redis store: idempotency claim uses SET NX; duplicate returns the stored value; release frees it', async () => {
+  const { client, calls } = mockRedis();
+  const store = createRedisHotStateStore({ client });
+  const first = await store.claimIdempotencyKey('req-1', 5000, { result: 7 });
+  assert.deepEqual(first, { claimed: true, existing: null });
+  const setCall = calls.find((c) => c[0] === 'set' && c[1] === 'idem:req-1');
+  assert.deepEqual(setCall[3], { NX: true, PX: 5000 });
+  const dup = await store.claimIdempotencyKey('req-1', 5000, { result: 999 });
+  assert.deepEqual(dup, { claimed: false, existing: { result: 7 } });
+  assert.deepEqual(await store.readIdempotencyKey('req-1'), { result: 7 });
+  assert.deepEqual(await store.releaseIdempotencyKey('req-1'), { ok: true });
+});
+
 test('redis store: a client error is normalized to redis_op_failed (no silent swallow)', async () => {
   const failing = { get: async () => { const e = new Error('conn'); e.code = 'ECONNREFUSED'; throw e; } };
   const store = createRedisHotStateStore({ client: failing });

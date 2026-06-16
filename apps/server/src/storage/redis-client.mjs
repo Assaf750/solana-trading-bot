@@ -81,9 +81,24 @@ export function createRedisHotStateStore({ client, genToken = defaultGenToken } 
   const getJson = async (key) => { const v = await get(key); try { return v == null ? null : JSON.parse(v); } catch { return null; } };
   const setJson = (key, obj, ttlMs) => set(key, JSON.stringify(obj ?? null), ttlMs);
 
+  // idempotency: first claim wins via SET NX (internal primitive); a duplicate returns the stored
+  // result. Public surface is idempotency/cursor — never exposed as a "lock".
+  const claimIdempotencyKey = (key, ttlMs, value = null) => wrap('idem_claim', async () => {
+    const k = `idem:${key}`;
+    const opts = { NX: true };
+    if (Number.isFinite(ttlMs) && ttlMs > 0) opts.PX = ttlMs;
+    const r = await client.set(k, JSON.stringify(value ?? null), opts);
+    if (r) return { claimed: true, existing: null };
+    const cur = await client.get(k);
+    try { return { claimed: false, existing: cur == null ? null : JSON.parse(cur) }; } catch { return { claimed: false, existing: null }; }
+  });
+  const readIdempotencyKey = (key) => getJson(`idem:${key}`);
+  const releaseIdempotencyKey = (key) => wrap('idem_release', async () => ({ ok: (await client.del(`idem:${key}`)) > 0 }));
+
   return {
     backend: 'redis',
     get, set, del, lock, unlock, incrRateLimit, getCursor, setCursor,
+    claimIdempotencyKey, readIdempotencyKey, releaseIdempotencyKey,
     getProviderHealth: () => getJson('provider_health'),
     setProviderHealth: (snap, ttlMs) => setJson('provider_health', snap, ttlMs),
     getReadiness: () => getJson('readiness'),

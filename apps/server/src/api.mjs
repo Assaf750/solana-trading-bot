@@ -26,7 +26,7 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
   // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
   // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
   // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
-  const HOT_CACHE_TTL = { providerHealth: 10_000, readiness: 15_000 };
+  const HOT_CACHE_TTL = { providerHealth: 10_000, readiness: 15_000, idempotency: 120_000 };
   const cacheOp = async (fn) => { try { return { ok: true, value: await fn() }; } catch { return { ok: false, value: null }; } };
 
   // ADR-0001 Phase 7B: optional append-only analytics events for NON-CRITICAL surfaces only
@@ -586,6 +586,14 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         // intent, or broadcasts). Present only when DIAGNOSTIC_BACKEND=package wired the adapter;
         // otherwise these fall through to 404. `/execution-test` is an explicit alias of `/run`.
         if (diagnostics && (path === '/api/diagnostics/run' || path === '/api/diagnostics/execution-test')) {
+          // OPTIONAL idempotency (Phase 6C): a repeated request carrying the same idempotency_key replays
+          // the prior result instead of re-running. Best-effort + FAIL-OPEN — if hot-state is down it is a
+          // cache miss and the diagnostic simply runs again; never a gate, never a behavior change.
+          const idemKey = (body && typeof body.idempotency_key === 'string' && body.idempotency_key) ? body.idempotency_key : null;
+          if (hotState && idemKey) {
+            const prior = await cacheOp(() => hotState.readIdempotencyKey(`diag_run:${idemKey}`));
+            if (prior.ok && prior.value) return { status: 200, body: { ...prior.value, idempotent: true } };
+          }
           const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
           const summary = diagSummary(run.readiness);
           const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
@@ -603,7 +611,9 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
               }
             }
           }
-          return { status: 200, body: { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written } } };
+          const respBody = { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written }, idempotency_key: idemKey, idempotent: false };
+          if (hotState && idemKey) await cacheOp(() => hotState.claimIdempotencyKey(`diag_run:${idemKey}`, HOT_CACHE_TTL.idempotency, respBody));
+          return { status: 200, body: respBody };
         }
         if (diagnostics && path === '/api/diagnostics/provider-test') {
           const check = await diagnostics.runProviderHealthCheck();

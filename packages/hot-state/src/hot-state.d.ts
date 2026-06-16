@@ -14,6 +14,10 @@ export interface HotStateStore {
   incrRateLimit(key: string, ttlMs: number): Promise<number>;
   getCursor(name: string): Promise<string | null>;
   setCursor(name: string, value: string | number): Promise<{ ok: boolean }>;
+  /** First claim wins; a duplicate returns the previously-stored result (idempotent replay). */
+  claimIdempotencyKey(key: string, ttlMs: number, value?: unknown): Promise<{ claimed: boolean; existing: unknown | null }>;
+  readIdempotencyKey(key: string): Promise<unknown | null>;
+  releaseIdempotencyKey(key: string): Promise<{ ok: boolean }>;
   getProviderHealth(): Promise<unknown | null>;
   setProviderHealth(snapshot: unknown, ttlMs?: number): Promise<{ ok: boolean }>;
   getReadiness(): Promise<unknown | null>;

@@ -21,7 +21,15 @@ const failingHotState = () => ({
   getProviderHealth: async () => { throw new Error('redis_op_failed:get:ECONNREFUSED'); },
   setReadiness: async () => { throw new Error('redis down'); },
   getReadiness: async () => { throw new Error('redis down'); },
+  readIdempotencyKey: async () => { throw new Error('redis down'); },
+  claimIdempotencyKey: async () => { throw new Error('redis down'); },
 });
+
+// minimal counting diagnostics double (lets a test assert a replay did NOT re-run)
+function countingDiagnostics() {
+  const state = { ran: 0 };
+  return { state, adapter: { runDiagnosticExecutionTest: async () => { state.ran += 1; return { run_id: 'r1', kind: 'preflight', readiness: 'valid', checks: [], created_at: '2026-06-15T00:00:00.000Z' }; } } };
+}
 
 const stubAdapter = (conn) => createDiagnosticExecutionAdapter({
   rpc: { rpc: async () => ({ ok: true, result: null }), testConnection: async () => conn ?? { ok: true, provider: 'helius', solana_core: '1', current_slot: 1, latency_ms: 5, enhanced_stream: true } },
@@ -113,4 +121,41 @@ test('diagnostics run: writes readiness cache (memory); Redis error is fail-open
   assert.equal(bad.status, 200, 'run still succeeds when cache write fails');
   assert.equal(bad.body.hot_state_cache.degraded, true);
   assert.equal(bad.body.run.kind, 'preflight');
+});
+
+// ---------- diagnostic idempotency (Phase 6C) ----------
+test('idempotency: a repeated run with the same idempotency_key replays the cached result (no re-run)', async () => {
+  const { state, adapter } = countingDiagnostics();
+  const api = createApi({ diagnostics: adapter, hotState: createMemoryHotStateStore() });
+  const r1 = await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'k1' } });
+  assert.equal(r1.body.idempotent, false);
+  assert.equal(state.ran, 1);
+  const r2 = await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'k1' } });
+  assert.equal(r2.body.idempotent, true, 'second identical request replays');
+  assert.equal(state.ran, 1, 'replay did NOT re-run the diagnostic');
+  assert.equal(r2.body.run.run_id, 'r1');
+});
+
+test('idempotency: no key => always runs (idempotent:false); distinct keys run independently', async () => {
+  const { state, adapter } = countingDiagnostics();
+  const api = createApi({ diagnostics: adapter, hotState: createMemoryHotStateStore() });
+  await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: {} });
+  await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: {} });
+  assert.equal(state.ran, 2, 'no key => no replay');
+  await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'a' } });
+  await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'b' } });
+  assert.equal(state.ran, 4, 'distinct keys run independently');
+});
+
+test('idempotency: hot-state failure is FAIL-OPEN — cache miss re-runs, never a gate', async () => {
+  const { state, adapter } = countingDiagnostics();
+  const api = createApi({ diagnostics: adapter, hotState: failingHotState() });
+  const r1 = await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'k2' } });
+  assert.equal(r1.status, 200);
+  assert.equal(r1.body.idempotent, false);
+  const r2 = await api.handle({ method: 'POST', path: '/api/diagnostics/run', body: { idempotency_key: 'k2' } });
+  assert.equal(r2.status, 200);
+  assert.equal(state.ran, 2, 'fail-open: Redis down => cache miss => re-runs (no gate, no behavior change)');
+  // no lock/gate vocabulary leaks into the response
+  assert.ok(!/locked|blocked|activation_required|hard_stop|live_send_enabled/i.test(JSON.stringify(r2.body)));
 });
