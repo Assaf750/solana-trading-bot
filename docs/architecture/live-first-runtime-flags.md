@@ -30,7 +30,6 @@ configured; there are no artificial gates.
 | `DIAGNOSTIC_BACKEND` | `legacy` \| `package` | `legacy` | `package` wires the DiagnosticExecutionAdapter (+ `/api/diagnostics/*`); `legacy` = off (opt-in). |
 | `DECISION_LEDGER_BACKEND` | `package` \| `legacy` | `package` | decision-ledger owner = `@soltrade/decision-ledger`; `legacy` = in-process rollback shim. |
 | `POSITIONS_BACKEND` | `package` \| `legacy` | `package` | positions book owner = `@soltrade/positions`; `legacy` = rollback shim. |
-| `RISK_BACKEND` | `package` \| `legacy` | `package` | risk gates owner = `@soltrade/risk`; `legacy` = rollback shim. |
 | `PROVIDER_BACKEND` | `package` \| `legacy` | `package` | providers owner = `@soltrade/provider-adapters`; `legacy` = rollback shim. |
 | `SOLTRADE_PORT` | number | `8787` | server HTTP port. |
 | `SOLTRADE_DATA_DIR` | path | `data/` | JSON store directory. |
@@ -38,9 +37,14 @@ configured; there are no artificial gates.
 | `SOLTRADE_BASE_URL` | URL | — | optional API target for `smoke:full-stack`. |
 
 ## Defaults are locked
-The rollback flags select `legacy` ONLY on the literal `'legacy'` (so the default is the package
-backend); `STORAGE`/`HOT_STATE`/`EVENT_SINK` default to `json`/`memory`/`none`; `DIAGNOSTIC` is opt-in.
+The remaining rollback flags (`PROVIDER_BACKEND` / `DECISION_LEDGER_BACKEND` / `POSITIONS_BACKEND`)
+select `legacy` ONLY on the literal `'legacy'` (so the default is the package backend);
+`STORAGE`/`HOT_STATE`/`EVENT_SINK` default to `json`/`memory`/`none`; `DIAGNOSTIC` is opt-in.
 This is enforced by `apps/server/test/backend-defaults.test.mjs` — defaults cannot silently flip.
+
+## Removed flags
+- `RISK_BACKEND` — **removed in Phase 3B.2** (after 3B.1 proved legacy↔package parity). The hard-risk
+  gate now delegates straight to `@soltrade/risk`; setting `RISK_BACKEND` has no effect.
 
 See `docs/runbooks/local-full-stack.md` to run the whole stack and `docs/architecture/legacy-audit.md`
 for the legacy/shim inventory.
