@@ -80,3 +80,15 @@ test('Diagnostics is wired as the readiness/execution-test entry (nav + route + 
   assert.ok(/path="\/diagnostics"/.test(app), 'Diagnostics route present');
   assert.ok(existsSync(join(PAGES, 'Diagnostics.jsx')), 'Diagnostics page present');
 });
+
+// ---------- local full-stack runbook (Phase 10A) ----------
+test('local full-stack runbook exists, is open-by-design, and states the data-layer roles', () => {
+  const p = join(ROOT, 'docs', 'runbooks', 'local-full-stack.md');
+  assert.ok(existsSync(p), 'runbook present');
+  const md = readFileSync(p, 'utf8');
+  assert.ok(!BANNED_READINESS.test(md), 'runbook carries no lock/gate/hard-stop wording');
+  assert.ok(/monitoring only/i.test(md), 'readiness stated as monitoring only');
+  assert.ok(/analytics[- ]only/i.test(md), 'ClickHouse stated as analytics-only');
+  assert.ok(/hot[- ]state/i.test(md) && /never the source of truth/i.test(md), 'Redis hot-state, never SoT');
+  assert.ok(/operational source of truth/i.test(md), 'Postgres operational SoT when chosen');
+});
