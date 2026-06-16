@@ -308,6 +308,97 @@ test('live-executor (jito + rust): the TIP leg falls back to in-process signing 
   assert.ok(typeof bundleSent[1] === 'string' && bundleSent[1].length > 0, 'tip leg is the in-process-signed tx');
 });
 
+// ---- Phase Rust-4: the request BODY POSTed to the network is assembled by Rust when available (JS still POSTs) ----
+function rustRpcCapture(onSubmit) {
+  return {
+    rpc: async (method, params, opts) => {
+      if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+      if (method === 'sendTransaction') { onSubmit(opts); return { ok: true, result: 'SiG'.repeat(20) }; }
+      if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } };
+      return { ok: true, result: null };
+    },
+    getTransaction: async () => ({ ok: true, result: null }),
+  };
+}
+const rustCfg = () => ({ get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, signer_backend: 'rust' } }) });
+
+test('live-executor (rust): the sendTransaction request body is assembled by the hot-executor when available (Phase Rust-4)', async () => {
+  const RUST_BODY = { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: ['SWAP_SIGNED', { encoding: 'base64', skipPreflight: false, maxRetries: 3 }] };
+  let submitOpts = 'UNSET';
+  const m = buildExecutor({
+    config: rustCfg(),
+    deps: {
+      rpc: rustRpcCapture((opts) => { submitOpts = opts; }),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        buildSubmit: async () => ({ ok: true, body: RUST_BODY }),
+      },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintZ', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'r4s', 'MintZ', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.ok(submitOpts && submitOpts.body, 'the POST received a pre-built body');
+  assert.deepEqual(submitOpts.body, RUST_BODY, 'the sendTransaction body came from the Rust hot-executor');
+});
+
+test('live-executor (rust): the sendTransaction body falls back to JS assembly when buildSubmit fails (Phase Rust-4)', async () => {
+  let submitOpts = 'UNSET';
+  const m = buildExecutor({
+    config: rustCfg(),
+    deps: {
+      rpc: rustRpcCapture((opts) => { submitOpts = opts; }),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        buildSubmit: async () => ({ ok: false, error: 'executor_exited' }),
+      },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintW', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'r4f', 'MintW', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(submitOpts, undefined, 'no pre-built body -> rpc.rpc() assembles the body itself (JS fallback)');
+});
+
+test('live-executor (jito + rust): the bundle request body is assembled by the hot-executor when available (Phase Rust-4)', async () => {
+  const RUST_BUNDLE_BODY = { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [['SWAP_SIGNED', 'TIP_SIGNED'], { encoding: 'base64' }] };
+  let bundleOpts = 'UNSET';
+  const m = buildExecutor({
+    config: jitoRustCfg(),
+    deps: {
+      rpc: jitoRpc(),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        signBundle: async ({ txsBase64 }) => ({ ok: true, signed: txsBase64.map(() => 'TIP_SIGNED') }),
+        buildBundle: async () => ({ ok: true, body: RUST_BUNDLE_BODY }),
+      },
+      jitoSendBundle: async (_txs, opts) => { bundleOpts = opts; return { ok: true, result: 'BUNDLE_OK' }; },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintB', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'r4b', 'MintB', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.ok(bundleOpts && bundleOpts.body, 'the bundle POST received a pre-built body');
+  assert.deepEqual(bundleOpts.body, RUST_BUNDLE_BODY, 'the bundle body came from the Rust hot-executor');
+});
+
+test('live-executor (jito + rust): the bundle body falls back to JS assembly when buildBundle fails (Phase Rust-4)', async () => {
+  let bundleArgs = { txs: 'UNSET', opts: 'UNSET' };
+  const m = buildExecutor({
+    config: jitoRustCfg(),
+    deps: {
+      rpc: jitoRpc(),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        signBundle: async ({ txsBase64 }) => ({ ok: true, signed: txsBase64.map(() => 'TIP_SIGNED') }),
+        buildBundle: async () => ({ ok: false, error: 'executor_exited' }),
+      },
+      jitoSendBundle: async (txs, opts) => { bundleArgs = { txs, opts }; return { ok: true, result: 'BUNDLE_OK' }; },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintN', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'r4bf', 'MintN', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(bundleArgs.opts, undefined, 'no pre-built body -> jitoSendBundle assembles the body itself (JS fallback)');
+  assert.deepEqual(bundleArgs.txs, ['SWAP_SIGNED', 'TIP_SIGNED'], 'the txs are still passed for JS assembly');
+});
+
 test('live-executor: submits via Jito bundle when submit_backend=jito and configured', async () => {
   const tipAccount = b58encode(Buffer.alloc(32, 5));
   const blockhash = b58encode(Buffer.alloc(32, 6));

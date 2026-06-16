@@ -13,11 +13,12 @@ function mockSpawn() {
       writable: true,
       write(line) {
         const req = JSON.parse(line);
-        const resp = req.op === 'ping'
-          ? { ok: true, op: 'pong' }
-          : req.op === 'sign_bundle'
-            ? { ok: true, intent_id: req.intent_id, signed_txs: req.unsigned_txs.map((t) => `SIGNED_${t}`) }
-            : { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
+        let resp;
+        if (req.op === 'ping') resp = { ok: true, op: 'pong' };
+        else if (req.op === 'sign_bundle') resp = { ok: true, intent_id: req.intent_id, signed_txs: req.unsigned_txs.map((t) => `SIGNED_${t}`) };
+        else if (req.op === 'build_submit') resp = { ok: true, intent_id: req.intent_id, request: { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: [req.signed_tx_base64, { encoding: 'base64', skipPreflight: req.skip_preflight, maxRetries: req.max_retries }] } };
+        else if (req.op === 'build_bundle') resp = { ok: true, intent_id: req.intent_id, request: { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [req.signed_txs, { encoding: 'base64' }] } };
+        else resp = { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
         stdout.write(`${JSON.stringify(resp)}\n`);
         return true;
       },
@@ -42,6 +43,24 @@ test('hot-executor-client: signBundle signs every leg in order (Phase Rust-3)', 
   const client = createHotExecutorClient({ binPath: 'mock', spawnFn: mockSpawn });
   const r = await client.signBundle({ txsBase64: ['SWAP', 'TIP'], seed: Buffer.from([1, 2]) });
   assert.deepEqual(r, { ok: true, signed: ['SIGNED_SWAP', 'SIGNED_TIP'] });
+  client.close();
+});
+
+test('hot-executor-client: buildSubmit returns the Rust-assembled sendTransaction body (Phase Rust-4)', async () => {
+  const client = createHotExecutorClient({ binPath: 'mock', spawnFn: mockSpawn });
+  const r = await client.buildSubmit({ signedTxBase64: 'TX', skipPreflight: false, maxRetries: 3 });
+  assert.equal(r.ok, true);
+  assert.equal(r.body.method, 'sendTransaction');
+  assert.deepEqual(r.body.params, ['TX', { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
+  client.close();
+});
+
+test('hot-executor-client: buildBundle returns the Rust-assembled sendBundle body (Phase Rust-4)', async () => {
+  const client = createHotExecutorClient({ binPath: 'mock', spawnFn: mockSpawn });
+  const r = await client.buildBundle({ signedTxs: ['SWAP', 'TIP'] });
+  assert.equal(r.ok, true);
+  assert.equal(r.body.method, 'sendBundle');
+  assert.deepEqual(r.body.params, [['SWAP', 'TIP'], { encoding: 'base64' }]);
   client.close();
 });
 

@@ -25,7 +25,7 @@ export function isHeliusHost(url: string): boolean;
 export function buildWalletSubscriptions(args: { addresses: string[]; enhanced?: boolean }): any[];
 export function parseStreamNotification(msg: any): { signature: string; tx: any } | null;
 export interface RpcProvider {
-  rpc(method: string, params?: any): Promise<Result>;
+  rpc(method: string, params?: any, opts?: { body?: any }): Promise<Result>;
   getHealth(): Promise<Result>;
   getSlot(): Promise<Result>;
   getTransaction(signature: string): Promise<Result>;
@@ -45,7 +45,7 @@ export function createRpcProvider(opts: {
 export function makeTipTransferBuilder(b58decode: (s: string) => Uint8Array | Buffer): (args: { owner: string; tipAccount: string; lamports: number; recentBlockhash: string }) => string;
 export function selectTipLamports(args: { floor?: any; percentile?: number; fixedLamports?: number; maxLamports?: number | null }): number;
 export interface JitoProvider {
-  sendBundle(txsBase64: string[]): Promise<Result>;
+  sendBundle(txsBase64: string[], opts?: { body?: any }): Promise<Result>;
   getTipFloor(): Promise<any | null>;
   buildTipTransferTx?: (args: { owner: string; tipAccount: string; lamports: number; recentBlockhash: string }) => string;
   selectTipLamports: typeof selectTipLamports;

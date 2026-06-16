@@ -416,13 +416,14 @@ Everything below is OPEN; everything in §1–§15 is DONE.
    (GHCR publish workflow + `deploy/compose.prod.example.yml` + the production deployment plan). REMAINING:
    cloud-specific orchestration (a Kubernetes/Nomad manifest or managed-platform deploy step + its secret
    store) — left to the operator; the Compose-based path is provided.
-3. **Rust as hot-path execution owner — REOPENED + EXPANDING (Phase Rust-3, §22; supersedes the Rust-2
-   §20 "signing-only" close).** Rust's direction is now the hot-path execution owner, expanding from signing
-   one safe step at a time. **DONE:** the whole executed Jito bundle is Rust-signed (the new `sign_bundle`
-   op now also signs the tip leg, which was JS-signed before). **STILL JS by design (this phase):** the
-   network POST (submit / Jito bundle) + decision-ledger idempotency. **NEXT:** wire `build_submit` /
-   `build_bundle` so request-body assembly is Rust-owned end-to-end; revisit moving the POST itself only on
-   a *measured* latency win (the §20 criterion still governs adding a socket to the signer).
+3. **Rust as hot-path execution owner — REOPENED + EXPANDING (Phases Rust-3 §22, Rust-4 §23; supersedes the
+   Rust-2 §20 "signing-only" close).** Rust's direction is the hot-path execution owner, expanding from
+   signing one safe step at a time. **DONE:** the whole executed Jito bundle is Rust-signed (Rust-3
+   `sign_bundle`); **the submit + bundle request BODIES are now Rust-assembled (Rust-4 `build_submit` /
+   `build_bundle`), with JS fallback.** **STILL JS by design:** the network POST (submit / Jito bundle) +
+   decision-ledger idempotency. **NEXT (the only remaining step):** move the POST itself into the signer —
+   gated on a *measured* latency win (§20 criterion; needs an HTTP/async stack, so it stays out until
+   justified). `select_tip` stays a Rust primitive but is deliberately unwired (tip-math/reserve parity — §23).
 4. **`services/*` unused-scaffold audit — DONE** (Phase Services-Audit, §18): 13 empty placeholder dirs
    removed; `services/` now holds only the real, used dirs (`hot-executor`, `ingestor`, `analytics`).
 
@@ -609,3 +610,54 @@ unchanged (no vite build needed). Docs: this §22; §16.3 reframed (below); §20
 **Next safe expansions (open, same deliberate cadence):** wire `build_submit`/`build_bundle` so the *request
 body* assembly is Rust-owned end-to-end (still JS POST); only then — and only on a measured latency win —
 revisit moving the POST itself (§20 criterion).
+
+## 23. Phase Rust-4 — Rust owns the submit/bundle request-BODY assembly (POST stays in JS)
+
+The next deliberate step flagged in §22: the Rust hot-executor now assembles the **request bodies** for both
+send paths, while the JS control plane still performs the POST (with its retries / health / error-mapping)
+and owns decision-ledger idempotency. **Still network-free** — no socket added to the signer; §20's revisit
+criterion (a measured latency need) continues to govern ever moving the POST itself.
+
+Before Rust-4, the `build_submit` / `build_bundle` / `select_tip` ops existed in Rust + were unit-tested, but
+were **unwired** — the JS layer assembled its own bodies (`rpc(method, params)` and Jito `sendBundle(txs)`
+each built `{jsonrpc,id,method,params}` internally). Now the bodies are sourced from Rust when configured.
+
+- **Rust** `services/hot-executor`: ops unchanged (already present); added **op-dispatch (handle-level)
+  cargo tests** for `build_submit` / `build_bundle` / `select_tip` (the `Response.request` body + the
+  `>5`-leg / missing-field error paths — the exact contract the JS client consumes). Cargo: **13 tests**.
+- **JS client** `hot-executor-client.mjs`: new `buildSubmit({ signedTxBase64, skipPreflight, maxRetries })`
+  and `buildBundle({ signedTxs })` → `{ ok, body }` (the full JSON-RPC body) or `{ ok:false }` for fallback.
+  Surface is now `sign / signBundle / buildSubmit / buildBundle / ping / close` — still **never POSTs**.
+- **Transports accept an optional pre-built body** (backward-compatible): `@soltrade/provider-adapters`
+  `rpc(method, params, { body })` and Jito `sendBundle(txsBase64, { body })` POST the given body verbatim
+  when supplied, else assemble it as before. `method` stays the health-record label. `.d.ts` updated;
+  `index.mjs` `jitoSendBundle` forwards the opts.
+- **`live-executor.submitSigned()`**: both paths now build the body via Rust when `signer_backend='rust'` +
+  the client method is present, then pass it to the JS POST; **fail-safe** — any failure leaves the body
+  null and the JS transport assembles it (byte-for-byte the same params). The RPC error codes (`rpc_*`) the
+  caller keys idempotency off are produced by the JS POST, unchanged. **No behavior change**: the Rust body
+  is semantically identical to the JS one (same method/params; JSON key order is irrelevant to JSON-RPC).
+
+**`select_tip` deliberately NOT wired (documented).** The Rust `select_tip` op uses different semantics
+(level→percentile, 1000-lamport protocol floor, no fixed/cap) than the JS `selectTipLamports` (bucket-snap +
+configurable `fixedLamports` floor + `maxLamports` cap). The balance-reserve check (`maxTipReserveLamports`)
+mirrors the **JS** cap, so routing the live tip through Rust would change the tip amount AND break the
+reserve invariant. The JS selector stays authoritative; `select_tip` remains a tested Rust primitive only.
+
+**Guard** `rust-boundary-guard.test.mjs` (reframed for Rust-4): (a) `Cargo.toml` still carries **no
+HTTP/async crate**; (b) the POST + idempotency stay in JS (`rpc.rpc('sendTransaction'`, `jitoSendBundle(`,
+`claimIntent(`); (c) the client surface includes `buildSubmit`/`buildBundle` and holds **no network
+primitive** (the old method-name-string proxy was replaced with a real `fetch`/`http`/`WebSocket` check,
+since the JSDoc now legitimately names the methods); (d) **new:** the live-executor sources the body from
+Rust when available (`hotSigner.buildSubmit` / `hotSigner.buildBundle`) and carries it to the JS POST
+(`{ body: submitBody }` / `{ body: bundleBody }`).
+
+**Tests:** cargo **13/13**; `provider-adapters` — each transport POSTs a pre-built body verbatim; client —
+`buildSubmit`/`buildBundle` return the assembled body; live-executor — 4 cases (submit body from Rust +
+fallback; bundle body from Rust + fallback). **Verified:** node `--test` full suite green; cargo
+`--locked` + test 13/13; docker build OK; UI unchanged (no vite build); smokes skip.
+
+**Next (open, same cadence):** the only remaining Rust execution-ownership step is moving the **POST itself**
+into the signer — gated on §20's *measured* latency criterion (would require adding an HTTP/async stack, so
+it stays out until justified). Until then the split is: **Rust = sign + assemble (network-free); JS = POST +
+idempotency.**
