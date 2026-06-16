@@ -1,9 +1,10 @@
-// rust-boundary-guard.test.mjs — ADR-0001 Phase Rust-2 (boundary closed at signing) → Phase Rust-3 (boundary
-// REOPENED: Rust is the hot-path EXECUTION OWNER, expanding from signing) → Phase Rust-4 (Rust now also OWNS
-// the submit/bundle request-BODY assembly: sign / sign_bundle / build_submit / build_bundle). The guard's job
-// is to keep the expansion DELIBERATE + the signer NETWORK-FREE: Rust signs + assembles execution payloads,
-// but the actual network POST and the decision-ledger idempotency stay in the JS control plane. The signer
-// must not gain a socket without a documented decision (Rust-2's revisit criterion: a measured latency need).
+// rust-boundary-guard.test.mjs — ADR-0001 Phase Rust-2 (boundary closed at signing) → Rust-3 (REOPENED: Rust
+// is the hot-path EXECUTION OWNER) → Rust-4 (Rust owns the submit/bundle request-BODY assembly) → Rust-5
+// (Rust understands a whole buy/sell command via `build_execution_plan`: sign all legs + assemble the body in
+// one op). The guard's job is to keep the expansion DELIBERATE + the signer NETWORK-FREE: Rust signs +
+// assembles execution payloads (sign / sign_bundle / build_submit / build_bundle / build_execution_plan), but
+// the actual network POST and the decision-ledger idempotency stay in the JS control plane. The signer must
+// not gain a socket without a documented decision (Rust-2's revisit criterion: a measured latency need).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -31,12 +32,21 @@ test('the network POST + idempotency stay in the JS control plane (live-executor
   assert.match(le, /claimIntent\(/, 'idempotency (intent claim) stays in JS');
 });
 
-test('the hot-executor client signs + assembles (sign/signBundle/buildSubmit/buildBundle) but never POSTs to the network', () => {
+test('the hot-executor client signs + assembles (sign/signBundle/buildSubmit/buildBundle/buildExecutionPlan) but never POSTs', () => {
   const client = read('apps/server/src/engine/hot-executor-client.mjs');
-  assert.match(client, /return \{ sign, signBundle, buildSubmit, buildBundle, ping, close \}/, 'client surface = sign / signBundle / buildSubmit / buildBundle / ping / close');
+  assert.match(client, /return \{ sign, signBundle, buildSubmit, buildBundle, buildExecutionPlan, ping, close \}/, 'client surface includes buildExecutionPlan (Phase Rust-5)');
   // it must hold NO network primitive — it speaks to the signer over stdin/stdout (spawn + readline) ONLY.
   // (Checking for a real socket beats the old method-name-string proxy, which now false-matches the JSDoc.)
   assert.ok(!/\bfetch\s*\(|https?:\/\/|new WebSocket|require\(['"]node:https?['"]\)/.test(client), 'the hot-executor client must not POST to the network (stdin/stdout transport only)');
+});
+
+test('Phase Rust-5: the live-executor uses the Rust execution envelope (build_execution_plan); JS persists + posts', () => {
+  const le = read('apps/server/src/engine/live-executor.mjs');
+  assert.match(le, /hotSigner\.buildExecutionPlan/, 'the buy/sell path builds the execution envelope via Rust when available');
+  assert.match(le, /buildEnvelopePlan/, 'the envelope helper exists and is the preferred path (with fallback)');
+  // the deterministic signature (signatures[0]) is persisted in JS BEFORE the POST -> reconcilable + idempotent
+  assert.match(le, /env\.signatures\[0\]/, 'JS reads the envelope deterministic signature (signatures[0])');
+  assert.match(le, /setIntent\(intent_id, 'SENT_PENDING'/, 'JS persists SENT_PENDING before broadcasting');
 });
 
 test('Phase Rust-4: the live-executor sources the request body from Rust when available (build_submit/build_bundle), still POSTs in JS', () => {

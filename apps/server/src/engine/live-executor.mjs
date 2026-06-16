@@ -152,6 +152,43 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     return rpc.rpc('sendTransaction', [signedTxBase64, { encoding: 'base64', skipPreflight, maxRetries }], submitBody ? { body: submitBody } : undefined);
   }
 
+  // Phase Rust-5: prefer the Rust EXECUTION ENVELOPE — sign every leg AND assemble the submit/bundle body
+  // in ONE call (Rust "understands" the buy/sell command as a unit). Returns { signed, doPost } or NULL to
+  // fall back to the current sign + submitSigned path. PURE boundary: Rust never POSTs and never touches the
+  // ledger — this JS plane persists signatures[0] (BEFORE the POST) and performs the POST + idempotency.
+  async function buildEnvelopePlan({ swapTxBase64, owner, seed, side }) {
+    const cfg = config.get();
+    if (cfg.execution?.signer_backend !== 'rust' || !hotSigner || typeof hotSigner.buildExecutionPlan !== 'function') return null;
+    let legs = [swapTxBase64];
+    let mode = 'rpc';
+    if (cfg.execution?.submit_backend === 'jito' && jitoSendBundle && cfg.execution?.jito_tip_account) {
+      const bh = await rpc.rpc('getLatestBlockhash', [{ commitment: 'confirmed' }]);
+      const blockhash = bh.ok ? bh.result?.value?.blockhash : null;
+      if (!blockhash) return null; // cannot build the tip leg -> fall back to the current path
+      const tipLamports = await resolveTipLamports(cfg.execution);
+      const tipTx = buildTipTransferTx({ owner, tipAccount: cfg.execution.jito_tip_account, lamports: tipLamports, recentBlockhash: blockhash });
+      legs = [swapTxBase64, tipTx];
+      mode = 'jito';
+    }
+    let ep;
+    try { ep = await hotSigner.buildExecutionPlan({ unsignedTxs: legs, seed, mode, side, skipPreflight: false, maxRetries: 3 }); }
+    catch { return null; }
+    const env = ep?.ok ? ep.envelope : null;
+    if (!env || !Array.isArray(env.signed_txs) || !env.signed_txs.length || !Array.isArray(env.signatures) || !env.signatures.length) return null;
+    const signed = { signatureB58: env.signatures[0], signedTxBase64: env.signed_txs[0] };
+    const doPost = async () => {
+      if (mode === 'jito') {
+        const res = await jitoSendBundle(env.signed_txs, env.bundle_body ? { body: env.bundle_body } : undefined);
+        if (res?.ok) return { ok: true, result: signed.signatureB58, via: 'jito' };
+        // Jito failed -> fall back to a plain RPC send of the (already-signed) swap leg, so a Jito outage
+        // can never block the send (JS assembles the fallback body).
+        return rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }]);
+      }
+      return rpc.rpc('sendTransaction', [signed.signedTxBase64, { encoding: 'base64', skipPreflight: false, maxRetries: 3 }], env.submit_body ? { body: env.submit_body } : undefined);
+    };
+    return { signed, doPost };
+  }
+
   async function confirmSignature(signatureB58) {
     for (let i = 0; i < 24; i += 1) {
       await new Promise((r) => setTimeout(r, 2500));
@@ -253,21 +290,25 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
       return { ok: false, error: 'audit_unavailable_before_sign' };
     }
 
-    // Sign. The OFFICIAL boundary is the Rust hot-executor (signer_backend defaults to 'rust'; verified
-    // byte-identical to the in-process signer). It is used whenever configured (hotSigner present); ANY
-    // hot-executor failure falls back to the in-process signer (the dev/local fallback) so a dead/missing
-    // helper can NEVER block a live signature (fail-safe, ready-when-configured). 'node' forces in-process.
-    let signed = null;
-    if (config.get().execution?.signer_backend === 'rust' && hotSigner) {
-      const r = await hotSigner.sign({ txBase64: swap.txBase64, seed: kpRes.seed });
-      if (r?.ok) signed = r;
-    }
+    // Sign + submit. PREFERRED: the Rust EXECUTION ENVELOPE (Phase Rust-5) — one call signs every leg and
+    // assembles the submit/bundle body. On ANY failure (or an older binary without the op) fall back to the
+    // current path: sign the swap via the Rust hot-executor (signer_backend=rust; byte-identical to the
+    // in-process signer) or the in-process signer, then submitSigned (its own Rust-3/Rust-4 sign-tip / body
+    // assembly + fail-safe fallbacks). Either way a dead/missing helper can NEVER block a live signature.
+    const plan = await buildEnvelopePlan({ swapTxBase64: swap.txBase64, owner, seed: kpRes.seed, side });
+    let signed = plan ? plan.signed : null;
     if (!signed) {
-      try {
-        signed = signSerializedTransaction({ txBase64: swap.txBase64, seed: kpRes.seed });
-      } catch (e) {
-        setIntent(intent_id, 'FAILED_PRE_SEND', { error: String(e?.message || 'sign_failed') });
-        return { ok: false, error: String(e?.message || 'sign_failed') };
+      if (config.get().execution?.signer_backend === 'rust' && hotSigner) {
+        const r = await hotSigner.sign({ txBase64: swap.txBase64, seed: kpRes.seed });
+        if (r?.ok) signed = r;
+      }
+      if (!signed) {
+        try {
+          signed = signSerializedTransaction({ txBase64: swap.txBase64, seed: kpRes.seed });
+        } catch (e) {
+          setIntent(intent_id, 'FAILED_PRE_SEND', { error: String(e?.message || 'sign_failed') });
+          return { ok: false, error: String(e?.message || 'sign_failed') };
+        }
       }
     }
 
@@ -277,7 +318,7 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
     // still resolve against the chain by signature — instead of a dead intent that is neither
     // retryable nor reconcilable (which would strand the position forever).
     setIntent(intent_id, 'SENT_PENDING', { signature: signed.signatureB58, sol_price_usd: price });
-    const sent = await submitSigned({ signedTxBase64: signed.signedTxBase64, signatureB58: signed.signatureB58, owner, seed: kpRes.seed });
+    const sent = plan ? await plan.doPost() : await submitSigned({ signedTxBase64: signed.signedTxBase64, signatureB58: signed.signatureB58, owner, seed: kpRes.seed });
     if (!sent.ok) {
       // Distinguish PROVABLY-unsent from ambiguous failures. A JSON-RPC error response
       // (`rpc_<code>`, e.g. preflight/simulation rejection) means the node refused the tx

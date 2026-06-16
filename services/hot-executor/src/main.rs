@@ -1,8 +1,10 @@
 //! hot-executor — latency-critical hot-path EXECUTION service (Phase Rust-3: the execution owner,
 //! expanding outward from signing). It signs EVERY leg of the executed bundle (the swap via `sign`
-//! and the whole bundle — e.g. swap + Jito tip — via `sign_bundle`) and assembles the pure execution
-//! payloads (`build_submit`/`build_bundle`/`select_tip`). It is **network-free by design**: the actual
-//! network POST + retries + the intent ledger (idempotency) stay in the JS control plane.
+//! and the whole bundle — e.g. swap + Jito tip — via `sign_bundle`), assembles the pure execution
+//! payloads (`build_submit`/`build_bundle`/`select_tip`), and — as of Phase Rust-5 — understands a
+//! whole buy/sell execution command as one unit via `build_execution_plan` (sign all legs + assemble
+//! the submit/bundle body in ONE call, returning a self-describing envelope). It is **network-free by
+//! design**: the actual network POST + retries + the intent ledger (idempotency) stay in the JS plane.
 //!
 //! Contract: JSON-lines over stdin/stdout (one request per line, one response per line). The TS
 //! control plane builds the unsigned Jupiter swap tx (and any bundle legs), then calls this service
@@ -15,10 +17,12 @@
 //!   {"op":"ping"}
 //!   {"op":"sign","intent_id":"...","unsigned_tx_base64":"...","seed":"<base58>" | [u8,...]}
 //!   {"op":"sign_bundle","intent_id":"...","unsigned_txs":["...","..."],"seed":"<base58>" | [u8,...]}
+//!   {"op":"build_execution_plan","intent_id":"...","unsigned_txs":[...],"execution_mode":"rpc"|"jito","side":"buy"|"sell","seed":...}
 //! Responses:
 //!   {"ok":true,"op":"pong"}
 //!   {"ok":true,"intent_id":"...","signature":"<b58>","signed_tx_base64":"...","signer_address":"<b58>"}
 //!   {"ok":true,"intent_id":"...","signed_txs":["<base64>","<base64>"]}
+//!   {"ok":true,"intent_id":"...","envelope":{"mode","leg_count","side","signatures":[...],"signed_txs":[...],"submit_body"|"bundle_body"}}
 //!   {"ok":false,"error":"<code>", ...}
 
 mod signer;
@@ -41,6 +45,9 @@ struct Request {
     max_retries: Option<u32>,
     tip_floor: Option<serde_json::Value>,
     level: Option<String>,
+    // execution-envelope op (Phase Rust-5)
+    execution_mode: Option<String>, // "rpc" | "jito"
+    side: Option<String>,           // "buy" | "sell" (metadata, echoed)
 }
 
 #[derive(Serialize, Default)]
@@ -62,6 +69,9 @@ struct Response {
     request: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     tip_lamports: Option<u64>,
+    // execution-envelope op (Phase Rust-5): signed_txs + signatures + submit_body|bundle_body + metadata
+    #[serde(skip_serializing_if = "Option::is_none")]
+    envelope: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
 }
@@ -150,6 +160,64 @@ fn handle(req: Request) -> Response {
                 }
             }
             Response { ok: true, intent_id: req.intent_id, signed_txs: Some(signed), ..Default::default() }
+        }
+        // build_execution_plan (Phase Rust-5): understand a buy/sell execution command as one unit. Sign
+        // EVERY unsigned leg (fee-payer-locked) AND assemble the submit/bundle request body in ONE call,
+        // returning a self-describing envelope { mode, leg_count, side?, signatures[], signed_txs[],
+        // submit_body|bundle_body }. PURE: no network, no idempotency, no db — the JS control plane persists
+        // the deterministic signature (signatures[0]), performs the POST, and owns the intent ledger. Any
+        // bad leg / bad mode -> error so the caller falls back to the existing sign+submit path.
+        "build_execution_plan" => {
+            let txs = match req.unsigned_txs {
+                Some(t) if !t.is_empty() => t,
+                _ => return err("missing_unsigned_txs"),
+            };
+            let seed = match req.seed.as_ref().map(seed_from_value) {
+                Some(Ok(s)) => s,
+                Some(Err(e)) => return err(e),
+                None => return err("missing_seed"),
+            };
+            let mode = req.execution_mode.as_deref().unwrap_or("rpc");
+            let mut signed_txs: Vec<String> = Vec::with_capacity(txs.len());
+            let mut signatures: Vec<String> = Vec::with_capacity(txs.len());
+            for t in &txs {
+                match signer::sign_serialized_transaction(t, &seed) {
+                    Ok(s) => {
+                        signed_txs.push(s.signed_tx_base64);
+                        signatures.push(s.signature_b58);
+                    }
+                    Err(e) => return err(e.code()),
+                }
+            }
+            let mut env = serde_json::Map::new();
+            env.insert("mode".to_string(), serde_json::Value::String(mode.to_string()));
+            env.insert("leg_count".to_string(), serde_json::Value::from(signed_txs.len() as u64));
+            if let Some(side) = req.side.as_ref() {
+                env.insert("side".to_string(), serde_json::Value::String(side.clone()));
+            }
+            match mode {
+                "jito" => match submit::build_jito_bundle_request(&signed_txs) {
+                    Ok(body) => {
+                        env.insert("bundle_body".to_string(), body);
+                    }
+                    Err(e) => return err(e),
+                },
+                "rpc" => {
+                    if signed_txs.len() != 1 {
+                        return err("rpc_mode_requires_single_leg");
+                    }
+                    let body = submit::build_send_transaction_request(
+                        &signed_txs[0],
+                        req.skip_preflight.unwrap_or(false),
+                        req.max_retries.unwrap_or(3),
+                    );
+                    env.insert("submit_body".to_string(), body);
+                }
+                _ => return err("invalid_execution_mode"),
+            }
+            env.insert("signatures".to_string(), serde_json::Value::from(signatures));
+            env.insert("signed_txs".to_string(), serde_json::Value::from(signed_txs));
+            Response { ok: true, intent_id: req.intent_id, envelope: Some(serde_json::Value::Object(env)), ..Default::default() }
         }
         "build_submit" => match req.signed_tx_base64 {
             Some(tx) => Response {
@@ -309,5 +377,74 @@ mod tests {
         assert_eq!(resp.tip_lamports, Some(10000));
         let bad: Request = serde_json::from_value(serde_json::json!({ "op": "select_tip" })).unwrap();
         assert!(!handle(bad).ok, "missing tip_floor -> error");
+    }
+
+    // ---- Phase Rust-5: the buy/sell execution envelope (sign all legs + assemble the body in one op) ----
+    #[test]
+    fn execution_plan_rpc_mode_signs_one_leg_and_builds_submit_body() {
+        let seed = [7u8; 32];
+        let pk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let tx = unsigned_tx(&pk);
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "intent_id": "p1", "seed": seed.to_vec(),
+            "unsigned_txs": [tx.clone()], "execution_mode": "rpc", "side": "buy"
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        assert_eq!(resp.intent_id.as_deref(), Some("p1"), "correlation id echoed");
+        let env = resp.envelope.expect("envelope present");
+        assert_eq!(env["mode"], "rpc");
+        assert_eq!(env["side"], "buy");
+        assert_eq!(env["leg_count"], 1);
+        assert_eq!(env["signed_txs"].as_array().unwrap().len(), 1);
+        assert_eq!(env["signatures"].as_array().unwrap().len(), 1);
+        assert_ne!(env["signed_txs"][0], serde_json::Value::String(tx), "the leg is signed (slot 0 filled)");
+        assert_eq!(env["submit_body"]["method"], "sendTransaction");
+        assert_eq!(env["submit_body"]["params"][0], env["signed_txs"][0], "the body carries the signed leg");
+        assert!(env.get("bundle_body").is_none(), "rpc mode has no bundle body");
+    }
+
+    #[test]
+    fn execution_plan_jito_mode_signs_all_legs_and_builds_bundle_body() {
+        let seed = [7u8; 32];
+        let pk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let tx = unsigned_tx(&pk);
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "seed": seed.to_vec(),
+            "unsigned_txs": [tx.clone(), tx.clone()], "execution_mode": "jito", "side": "sell"
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        let env = resp.envelope.expect("envelope present");
+        assert_eq!(env["mode"], "jito");
+        assert_eq!(env["leg_count"], 2);
+        assert_eq!(env["signed_txs"].as_array().unwrap().len(), 2);
+        assert_eq!(env["signatures"].as_array().unwrap().len(), 2);
+        assert_eq!(env["bundle_body"]["method"], "sendBundle");
+        assert_eq!(env["bundle_body"]["params"][0].as_array().unwrap().len(), 2, "both signed legs bundled");
+        assert!(env.get("submit_body").is_none(), "jito mode has no submit body");
+    }
+
+    #[test]
+    fn execution_plan_rejects_bad_inputs() {
+        let seed = [7u8; 32];
+        let pk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let tx = unsigned_tx(&pk);
+        let empty: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "seed": seed.to_vec(), "unsigned_txs": [], "execution_mode": "rpc"
+        })).unwrap();
+        assert!(!handle(empty).ok, "empty legs rejected");
+        let multi: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "seed": seed.to_vec(), "unsigned_txs": [tx.clone(), tx.clone()], "execution_mode": "rpc"
+        })).unwrap();
+        assert_eq!(handle(multi).error.as_deref(), Some("rpc_mode_requires_single_leg"));
+        let badmode: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "seed": seed.to_vec(), "unsigned_txs": [tx.clone()], "execution_mode": "carrier_pigeon"
+        })).unwrap();
+        assert_eq!(handle(badmode).error.as_deref(), Some("invalid_execution_mode"));
+        let badleg: Request = serde_json::from_value(serde_json::json!({
+            "op": "build_execution_plan", "seed": seed.to_vec(), "unsigned_txs": ["!!notbase64!!"], "execution_mode": "rpc"
+        })).unwrap();
+        assert!(!handle(badleg).ok, "a bad leg fails the whole plan (caller falls back)");
     }
 }

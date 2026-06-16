@@ -399,6 +399,82 @@ test('live-executor (jito + rust): the bundle body falls back to JS assembly whe
   assert.deepEqual(bundleArgs.txs, ['SWAP_SIGNED', 'TIP_SIGNED'], 'the txs are still passed for JS assembly');
 });
 
+// ---- Phase Rust-5: the buy/sell path uses the Rust EXECUTION ENVELOPE (sign all legs + assemble body in one op) ----
+test('live-executor (rust envelope, jito): the buy path uses the Rust execution envelope; JS posts it (Phase Rust-5)', async () => {
+  const ENV = {
+    mode: 'jito', leg_count: 2, side: 'buy',
+    signatures: ['SWAP_SIG', 'TIP_SIG'],
+    signed_txs: ['SWAP_S', 'TIP_S'],
+    bundle_body: { jsonrpc: '2.0', id: 1, method: 'sendBundle', params: [['SWAP_S', 'TIP_S'], { encoding: 'base64' }] },
+  };
+  let planCalls = 0; let bundleArgs = null;
+  const m = buildExecutor({
+    config: jitoRustCfg(),
+    deps: {
+      rpc: jitoRpc(),
+      hotSigner: { buildExecutionPlan: async ({ mode, side }) => { planCalls += 1; assert.equal(mode, 'jito'); assert.equal(side, 'buy'); return { ok: true, envelope: ENV }; } },
+      jitoSendBundle: async (txs, opts) => { bundleArgs = { txs, opts }; return { ok: true, result: 'BUNDLE_OK' }; },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintE', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'env', 'MintE', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(planCalls, 1, 'the execution envelope was built by Rust (one call, sign + assemble)');
+  assert.deepEqual(bundleArgs.txs, ['SWAP_S', 'TIP_S'], 'the JS POST sends the envelope signed legs');
+  assert.deepEqual(bundleArgs.opts, { body: ENV.bundle_body }, 'the JS POST carries the envelope bundle body');
+  assert.equal(r.signature, 'SWAP_SIG', 'the deterministic swap signature (signatures[0]) is tracked/confirmed');
+});
+
+test('live-executor (rust envelope, rpc): the buy path uses the Rust execution envelope; JS posts it (Phase Rust-5)', async () => {
+  const ENV = {
+    mode: 'rpc', leg_count: 1, side: 'buy',
+    signatures: ['SWAP_SIG'],
+    signed_txs: ['SWAP_S'],
+    submit_body: { jsonrpc: '2.0', id: 1, method: 'sendTransaction', params: ['SWAP_S', { encoding: 'base64', skipPreflight: false, maxRetries: 3 }] },
+  };
+  let planCalls = 0; let submitParams = null; let submitOpts = 'UNSET';
+  const m = buildExecutor({
+    config: rustCfg(),
+    deps: {
+      rpc: {
+        rpc: async (method, params, opts) => {
+          if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+          // a real node echoes the tx's deterministic signature (== signatures[0]); mirror that
+          if (method === 'sendTransaction') { submitParams = params; submitOpts = opts; return { ok: true, result: 'SWAP_SIG' }; }
+          if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } };
+          return { ok: true, result: null };
+        },
+        getTransaction: async () => ({ ok: true, result: null }),
+      },
+      hotSigner: { buildExecutionPlan: async ({ mode }) => { planCalls += 1; assert.equal(mode, 'rpc'); return { ok: true, envelope: ENV }; } },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintR', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'envr', 'MintR', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(planCalls, 1, 'the execution envelope was built by Rust');
+  assert.equal(submitParams[0], 'SWAP_S', 'the JS POST sends the envelope signed swap');
+  assert.deepEqual(submitOpts, { body: ENV.submit_body }, 'the JS POST carries the envelope submit body');
+  assert.equal(r.signature, 'SWAP_SIG');
+});
+
+test('live-executor (rust envelope): falls back to the current sign+submit path when buildExecutionPlan fails (Phase Rust-5)', async () => {
+  let planCalls = 0; let signCalls = 0; let sent = 0;
+  const m = buildExecutor({
+    config: rustCfg(),
+    deps: {
+      rpc: rustRpcCapture(() => { sent += 1; }),
+      hotSigner: {
+        buildExecutionPlan: async () => { planCalls += 1; return { ok: false, error: 'executor_exited' }; },
+        sign: async () => { signCalls += 1; return { ok: true, signedTxBase64: 'SWAP_S', signatureB58: 'SWAP_SIG', signerAddress: 'x' }; },
+      },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintF', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'envf', 'MintF', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(planCalls, 1, 'the envelope was attempted');
+  assert.equal(signCalls, 1, 'fell back to the hot-executor sign path');
+  assert.equal(sent, 1, 'transaction still broadcast (JS POST)');
+});
+
 test('live-executor: submits via Jito bundle when submit_backend=jito and configured', async () => {
   const tipAccount = b58encode(Buffer.alloc(32, 5));
   const blockhash = b58encode(Buffer.alloc(32, 6));

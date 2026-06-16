@@ -29,15 +29,17 @@ smoke) → 11A (this review + flags reference + merge note).
   canonical and only (guarded by `apps/server/test/no-legacy-flags-guard.test.mjs`).
 - **paper-engine kept** as the simulation / sandbox portfolio substrate (never a readiness tool).
 - **JSON fallback kept** as the default operational store (snapshot / recovery).
-- **Rust is the hot-path EXECUTION OWNER** (Phase Rust-1 official signer → Rust-3 whole-bundle signing →
-  Rust-4 request-body assembly) — `services/hot-executor` is preferred whenever configured
-  (`HOT_EXECUTOR_BIN` set; `signer_backend` defaults to `rust`), with the in-process signer as the
-  documented fail-safe fallback. It signs the **whole** executed bundle (Rust-3 `sign_bundle` — the Jito tip
-  leg too) and, as of Rust-4, **assembles the submit + bundle request bodies** (`build_submit` /
-  `build_bundle`), with JS fallback. It stays **network-free** — the network POST + decision-ledger
-  idempotency remain in the JS control plane by design. The only remaining execution-ownership step is
-  moving the POST itself, gated on a measured latency win (§20). `select_tip` stays a Rust primitive but is
-  deliberately unwired (tip-math/reserve parity). Remaining: the operator builds + deploys the binary.
+- **Rust is the hot-path EXECUTION OWNER** (Rust-1 official signer → Rust-3 whole-bundle signing → Rust-4
+  request-body assembly → Rust-5 execution envelope) — `services/hot-executor` is preferred whenever
+  configured (`HOT_EXECUTOR_BIN` set; `signer_backend` defaults to `rust`), with the in-process signer as the
+  documented fail-safe fallback. It signs the **whole** executed bundle (Rust-3), assembles the submit +
+  bundle request bodies (Rust-4), and — as of Rust-5 — understands a whole **buy/sell execution command** via
+  `build_execution_plan` (sign all legs + assemble the body in ONE call, returning a self-describing
+  envelope), with JS fallback at every step. It stays **network-free** — the network POST + decision-ledger
+  idempotency remain in the JS control plane by design (JS persists the deterministic `signatures[0]` before
+  the POST). The only remaining execution-ownership step is moving the POST itself, gated on a measured
+  latency win (§20). `select_tip` stays a Rust primitive but is deliberately unwired (tip-math/reserve
+  parity). Remaining: the operator builds + deploys the binary.
 - **Stream-cursor wiring deferred** — the ingestor is push-based gRPC with no durable polling cursor;
   the `getCursor`/`setCursor` capability is ready but unwired (would change ingestion behavior).
 - **Unused-export pruning deferred** — needs a dead-code proof per export (Phase 3B).
@@ -76,11 +78,13 @@ smoke) → 11A (this review + flags reference + merge note).
    build (Deploy-1) + **registry push (Deploy-2)** are **DONE** (GHCR publish workflow + production deploy
    plan + `deploy/compose.prod.example.yml`); only cloud-specific orchestration (k8s/managed-platform +
    its secret store) remains, left to the operator; (3) Rust as hot-path execution owner — **REOPENED +
-   EXPANDING** (Phases Rust-3/Rust-4, supersede the Rust-2 "signing-only" close): the whole executed Jito
-   bundle is Rust-signed (`sign_bundle`) and the submit + bundle request **bodies are Rust-assembled**
-   (`build_submit`/`build_bundle`, with JS fallback); the network POST + idempotency stay in JS by design and
-   the signer stays network-free (guarded); the only remaining step is the POST itself — only on a measured
-   latency win; (4) the `services/*` unused-scaffold audit is **DONE** (Phase Services-Audit: 13 empty
-   placeholder dirs removed; `services/` = `hot-executor` + `ingestor` + `analytics`). Net open items: engine
-   extraction slices, the final Rust step (POST, latency-gated), and
+   EXPANDING** (Phases Rust-3/Rust-4/Rust-5, supersede the Rust-2 "signing-only" close): the whole executed
+   Jito bundle is Rust-signed (`sign_bundle`), the submit + bundle request **bodies are Rust-assembled**
+   (`build_submit`/`build_bundle`), and a whole **buy/sell command** is a Rust execution envelope
+   (`build_execution_plan` — sign all legs + assemble the body in one call), all with JS fallback; the network
+   POST + idempotency stay in JS by design and the signer stays network-free (guarded); the only remaining
+   step is the POST itself — only on a measured latency win; (4) the `services/*` unused-scaffold audit is
+   **DONE** (Phase Services-Audit: 13 empty placeholder dirs removed; `services/` = `hot-executor` +
+   `ingestor` + `analytics`). Net open items: engine extraction slices, the final Rust step (POST,
+   latency-gated), and
    cloud-specific deploy orchestration (image build + registry push are done).
