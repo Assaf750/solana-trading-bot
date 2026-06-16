@@ -1,18 +1,24 @@
-//! hot-executor — latency-critical signing service (Phase 2 of the restructuring).
+//! hot-executor — latency-critical hot-path EXECUTION service (Phase Rust-3: the execution owner,
+//! expanding outward from signing). It signs EVERY leg of the executed bundle (the swap via `sign`
+//! and the whole bundle — e.g. swap + Jito tip — via `sign_bundle`) and assembles the pure execution
+//! payloads (`build_submit`/`build_bundle`/`select_tip`). It is **network-free by design**: the actual
+//! network POST + retries + the intent ledger (idempotency) stay in the JS control plane.
 //!
 //! Contract: JSON-lines over stdin/stdout (one request per line, one response per line). The TS
-//! control plane builds the unsigned Jupiter swap tx, then calls this service to sign it (and,
-//! later, submit + Jito-bundle). Risk gates, sizing, kill-switch, operating-state, and the intent
-//! ledger of record stay in the TS control plane — this service only performs mechanical signing
-//! and REFUSES anything whose fee payer is not the owner. The 32-byte seed is supplied per-request
+//! control plane builds the unsigned Jupiter swap tx (and any bundle legs), then calls this service
+//! to sign them. Risk gates, sizing, kill-switch, operating-state, and the intent ledger of record
+//! stay in the TS control plane — this service only performs mechanical signing + payload assembly
+//! and REFUSES any leg whose fee payer is not the owner. The 32-byte seed is supplied per-request
 //! (owner-held, never persisted), and is NEVER written to logs or echoed in any response.
 //!
 //! Requests:
 //!   {"op":"ping"}
 //!   {"op":"sign","intent_id":"...","unsigned_tx_base64":"...","seed":"<base58>" | [u8,...]}
+//!   {"op":"sign_bundle","intent_id":"...","unsigned_txs":["...","..."],"seed":"<base58>" | [u8,...]}
 //! Responses:
 //!   {"ok":true,"op":"pong"}
 //!   {"ok":true,"intent_id":"...","signature":"<b58>","signed_tx_base64":"...","signer_address":"<b58>"}
+//!   {"ok":true,"intent_id":"...","signed_txs":["<base64>","<base64>"]}
 //!   {"ok":false,"error":"<code>", ...}
 
 mod signer;
@@ -30,6 +36,7 @@ struct Request {
     // submit / bundle / tip ops
     signed_tx_base64: Option<String>,
     signed_txs: Option<Vec<String>>,
+    unsigned_txs: Option<Vec<String>>,
     skip_preflight: Option<bool>,
     max_retries: Option<u32>,
     tip_floor: Option<serde_json::Value>,
@@ -47,6 +54,8 @@ struct Response {
     signature: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     signed_tx_base64: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signed_txs: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     signer_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,6 +128,29 @@ fn handle(req: Request) -> Response {
                 }
             }
         }
+        // sign_bundle (Phase Rust-3): sign EVERY unsigned leg of an execution bundle (e.g. swap + Jito
+        // tip) in one hot-path call, fee-payer-locked per leg. Network-free: the JS control plane builds
+        // the unsigned legs and POSTs the resulting bundle (idempotency stays in JS). Any bad leg -> error
+        // so the caller can fall back to in-process signing.
+        "sign_bundle" => {
+            let txs = match req.unsigned_txs {
+                Some(t) if !t.is_empty() => t,
+                _ => return err("missing_unsigned_txs"),
+            };
+            let seed = match req.seed.as_ref().map(seed_from_value) {
+                Some(Ok(s)) => s,
+                Some(Err(e)) => return err(e),
+                None => return err("missing_seed"),
+            };
+            let mut signed = Vec::with_capacity(txs.len());
+            for t in &txs {
+                match signer::sign_serialized_transaction(t, &seed) {
+                    Ok(s) => signed.push(s.signed_tx_base64),
+                    Err(e) => return err(e.code()),
+                }
+            }
+            Response { ok: true, intent_id: req.intent_id, signed_txs: Some(signed), ..Default::default() }
+        }
         "build_submit" => match req.signed_tx_base64 {
             Some(tx) => Response {
                 ok: true,
@@ -178,5 +210,54 @@ fn main() {
             break;
         }
         let _ = out.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    use ed25519_dalek::SigningKey;
+
+    // a minimal valid unsigned legacy tx (1 sig slot, 2 keys, no instructions) — fee payer is key 0
+    fn unsigned_tx(fee_payer: &[u8; 32]) -> String {
+        let mut tx = vec![1u8];
+        tx.extend_from_slice(&[0u8; 64]);
+        tx.extend_from_slice(&[1, 0, 1]);
+        tx.push(2u8);
+        tx.extend_from_slice(fee_payer);
+        tx.extend_from_slice(&[9u8; 32]);
+        tx.push(0u8);
+        B64.encode(tx)
+    }
+
+    #[test]
+    fn sign_bundle_signs_every_leg() {
+        let seed = [7u8; 32];
+        let pk = SigningKey::from_bytes(&seed).verifying_key().to_bytes();
+        let tx = unsigned_tx(&pk);
+        let req: Request = serde_json::from_value(serde_json::json!({
+            "op": "sign_bundle", "seed": seed.to_vec(), "unsigned_txs": [tx.clone(), tx.clone()]
+        })).unwrap();
+        let resp = handle(req);
+        assert!(resp.ok);
+        let signed = resp.signed_txs.expect("signed_txs present");
+        assert_eq!(signed.len(), 2);
+        for s in &signed {
+            assert_ne!(s, &tx, "each leg is signed (slot 0 filled, not the zeroed unsigned tx)");
+        }
+    }
+
+    #[test]
+    fn sign_bundle_rejects_empty_and_bad_leg() {
+        let seed = [7u8; 32];
+        let empty: Request = serde_json::from_value(serde_json::json!({
+            "op": "sign_bundle", "seed": seed.to_vec(), "unsigned_txs": []
+        })).unwrap();
+        assert!(!handle(empty).ok, "empty bundle rejected");
+        let bad: Request = serde_json::from_value(serde_json::json!({
+            "op": "sign_bundle", "seed": seed.to_vec(), "unsigned_txs": ["!!not base64!!"]
+        })).unwrap();
+        assert!(!handle(bad).ok, "a bad leg fails the whole bundle (caller falls back)");
     }
 }

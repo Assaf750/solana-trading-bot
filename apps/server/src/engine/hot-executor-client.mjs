@@ -63,6 +63,17 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     return { ok: false, error: r.error || 'sign_failed' };
   }
 
+  /** Sign EVERY unsigned leg of an execution bundle (Phase Rust-3). Returns { ok, signed:[base64,…] } in
+   *  input order, or { ok:false } so the caller can fall back to in-process signing. The JS control plane
+   *  builds the legs and POSTs the bundle (idempotency stays in JS); the signer never touches the network. */
+  async function signBundle({ txsBase64, seed }) {
+    const seedArr = Buffer.isBuffer(seed) ? [...seed] : seed;
+    const id = `c${seq += 1}`;
+    const r = await request({ op: 'sign_bundle', intent_id: id, unsigned_txs: txsBase64, seed: seedArr }, id);
+    if (r.ok && Array.isArray(r.signed_txs)) return { ok: true, signed: r.signed_txs };
+    return { ok: false, error: r.error || 'sign_bundle_failed' };
+  }
+
   function ping() { return request({ op: 'ping' }); }
 
   function close() {
@@ -73,5 +84,5 @@ export function createHotExecutorClient({ binPath, args = [], spawnFn = spawn } 
     failAll('client_closed');
   }
 
-  return { sign, ping, close };
+  return { sign, signBundle, ping, close };
 }

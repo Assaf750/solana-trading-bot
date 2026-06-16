@@ -29,10 +29,14 @@ smoke) → 11A (this review + flags reference + merge note).
   canonical and only (guarded by `apps/server/test/no-legacy-flags-guard.test.mjs`).
 - **paper-engine kept** as the simulation / sandbox portfolio substrate (never a readiness tool).
 - **JSON fallback kept** as the default operational store (snapshot / recovery).
-- **Rust signing/exec boundary is the OFFICIAL signer** (Phase Rust-1) — `services/hot-executor` is
-  preferred whenever configured (`HOT_EXECUTOR_BIN` set; `signer_backend` defaults to `rust`), with the
-  in-process signer as the documented fail-safe fallback. Remaining: the operator builds + deploys the
-  binary, and a future phase may extract more of the execution path into the crate.
+- **Rust is the hot-path EXECUTION OWNER** (Phase Rust-1 official signer → Phase Rust-3 reframe) —
+  `services/hot-executor` is preferred whenever configured (`HOT_EXECUTOR_BIN` set; `signer_backend`
+  defaults to `rust`), with the in-process signer as the documented fail-safe fallback. As of Rust-3 it
+  signs the **whole** executed bundle (the new `sign_bundle` op now signs the Jito tip leg too, which was
+  JS-signed before) and owns the pure execution-assembly primitives; it stays **network-free** — the
+  network POST + decision-ledger idempotency remain in the JS control plane by design. Rust expands as the
+  execution owner one safe, tested step at a time (next: `build_submit`/`build_bundle` body assembly).
+  Remaining: the operator builds + deploys the binary.
 - **Stream-cursor wiring deferred** — the ingestor is push-based gRPC with no durable polling cursor;
   the `getCursor`/`setCursor` capability is ready but unwired (would change ingestion behavior).
 - **Unused-export pruning deferred** — needs a dead-code proof per export (Phase 3B).
@@ -70,8 +74,11 @@ smoke) → 11A (this review + flags reference + merge note).
    status() assembly (mechanism-bound — need rpc/jupiter/stores/liveExecutor injected); (2) deploy — image
    build (Deploy-1) + **registry push (Deploy-2)** are **DONE** (GHCR publish workflow + production deploy
    plan + `deploy/compose.prod.example.yml`); only cloud-specific orchestration (k8s/managed-platform +
-   its secret store) remains, left to the operator; (3) Rust submit/bundle deepening — **DECIDED not now** (Phase Rust-2: the boundary
-   stays at signing; the network POST stays in JS by design; the signer is kept network-free, guarded);
-   (4) the `services/*` unused-scaffold audit is **DONE** (Phase Services-Audit: 13 empty placeholder dirs
-   removed; `services/` = `hot-executor` + `ingestor` + `analytics`). Net open items: engine extraction
-   slices, and cloud-specific deploy orchestration (image build + registry push are done).
+   its secret store) remains, left to the operator; (3) Rust as hot-path execution owner — **REOPENED +
+   EXPANDING** (Phase Rust-3, supersedes the Rust-2 "signing-only" close): the whole executed Jito bundle is
+   now Rust-signed (`sign_bundle`); the network POST + idempotency stay in JS by design and the signer stays
+   network-free (guarded); next safe step is `build_submit`/`build_bundle` body assembly, then — only on a
+   measured latency win — the POST itself; (4) the `services/*` unused-scaffold audit is **DONE** (Phase
+   Services-Audit: 13 empty placeholder dirs removed; `services/` = `hot-executor` + `ingestor` +
+   `analytics`). Net open items: engine extraction slices, the next Rust execution-owner expansions, and
+   cloud-specific deploy orchestration (image build + registry push are done).

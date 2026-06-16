@@ -15,7 +15,9 @@ function mockSpawn() {
         const req = JSON.parse(line);
         const resp = req.op === 'ping'
           ? { ok: true, op: 'pong' }
-          : { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
+          : req.op === 'sign_bundle'
+            ? { ok: true, intent_id: req.intent_id, signed_txs: req.unsigned_txs.map((t) => `SIGNED_${t}`) }
+            : { ok: true, intent_id: req.intent_id, signature: `SIG_${req.unsigned_tx_base64}`, signed_tx_base64: 'SIGNED', signer_address: 'ADDR' };
         stdout.write(`${JSON.stringify(resp)}\n`);
         return true;
       },
@@ -33,6 +35,13 @@ test('hot-executor-client: sign maps the Rust response to the tx-signer shape', 
   assert.deepEqual(r, { ok: true, signedTxBase64: 'SIGNED', signatureB58: 'SIG_ABC', signerAddress: 'ADDR' });
   const p = await client.ping();
   assert.equal(p.op, 'pong');
+  client.close();
+});
+
+test('hot-executor-client: signBundle signs every leg in order (Phase Rust-3)', async () => {
+  const client = createHotExecutorClient({ binPath: 'mock', spawnFn: mockSpawn });
+  const r = await client.signBundle({ txsBase64: ['SWAP', 'TIP'], seed: Buffer.from([1, 2]) });
+  assert.deepEqual(r, { ok: true, signed: ['SIGNED_SWAP', 'SIGNED_TIP'] });
   client.close();
 });
 

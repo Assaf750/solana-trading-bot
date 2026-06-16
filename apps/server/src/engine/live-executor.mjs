@@ -114,8 +114,16 @@ export function createLiveExecutor({ config, vault, signer, killSwitch, operatin
         if (blockhash) {
           const tipLamports = await resolveTipLamports(cfg.execution);
           const tipTx = buildTipTransferTx({ owner, tipAccount: cfg.execution.jito_tip_account, lamports: tipLamports, recentBlockhash: blockhash });
-          const tipSigned = signSerializedTransaction({ txBase64: tipTx, seed });
-          const res = await jitoSendBundle([signedTxBase64, tipSigned.signedTxBase64]);
+          // Phase Rust-3: sign the bundle's TIP leg via the Rust hot-executor when configured (the swap leg
+          // is already Rust-signed in rust mode) — so the WHOLE executed bundle is Rust-signed. Fail-safe:
+          // any hot-executor failure falls back to in-process signing, so it can never block the bundle.
+          let tipSignedTx = null;
+          if (cfg.execution?.signer_backend === 'rust' && hotSigner && typeof hotSigner.signBundle === 'function') {
+            const rb = await hotSigner.signBundle({ txsBase64: [tipTx], seed });
+            if (rb?.ok && rb.signed?.[0]) tipSignedTx = rb.signed[0];
+          }
+          if (!tipSignedTx) tipSignedTx = signSerializedTransaction({ txBase64: tipTx, seed }).signedTxBase64;
+          const res = await jitoSendBundle([signedTxBase64, tipSignedTx]);
           // on accept, the swap tx still lands under its deterministic signature
           if (res?.ok) return { ok: true, result: signatureB58, via: 'jito' };
         }

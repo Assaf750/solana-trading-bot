@@ -251,6 +251,63 @@ test('live-executor: falls back to in-process signing when the hot-executor fail
   assert.equal(m.calls.sent, 1, 'transaction still broadcast');
 });
 
+// ---- Phase Rust-3: Rust as hot-path EXECUTION OWNER — the WHOLE executed Jito bundle is Rust-signed ----
+const VALID_B58 = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // a real 32-byte base58 (tip account / blockhash)
+function jitoRpc() {
+  return {
+    rpc: async (method) => {
+      if (method === 'getBalance') return { ok: true, result: { value: 10e9 } };
+      if (method === 'getLatestBlockhash') return { ok: true, result: { value: { blockhash: VALID_B58 } } };
+      if (method === 'sendTransaction') return { ok: true, result: 'SiG'.repeat(20) };
+      if (method === 'getSignatureStatuses') return { ok: true, result: { value: [{ confirmationStatus: 'confirmed', err: null }] } };
+      return { ok: true, result: null };
+    },
+    getTransaction: async () => ({ ok: true, result: null }),
+  };
+}
+const jitoRustCfg = () => ({ get: () => ({ mode: 'real_live', execution: { capital_limit: 1000, signer_backend: 'rust', submit_backend: 'jito', jito_tip_account: VALID_B58, jito_tip_lamports: 10000 } }) });
+
+test('live-executor (jito + rust): the bundle TIP leg is signed by the hot-executor; bundle = [rust swap, rust tip]', async () => {
+  let signBundleCalls = 0; let bundleSent = null;
+  const m = buildExecutor({
+    config: jitoRustCfg(),
+    deps: {
+      rpc: jitoRpc(),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        signBundle: async ({ txsBase64 }) => { signBundleCalls += 1; return { ok: true, signed: txsBase64.map(() => 'TIP_SIGNED') }; },
+      },
+      jitoSendBundle: async (txs) => { bundleSent = txs; return { ok: true, result: 'BUNDLE_OK' }; },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintZ', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'jr', 'MintZ', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(signBundleCalls, 1, 'tip leg signed via the Rust hot-executor (execution owner)');
+  // bundleSent being populated (not null) proves the jito bundle path ran — an RPC fall-through never calls jitoSendBundle
+  assert.deepEqual(bundleSent, ['SWAP_SIGNED', 'TIP_SIGNED'], 'bundle = [rust-signed swap, rust-signed tip]');
+});
+
+test('live-executor (jito + rust): the TIP leg falls back to in-process signing when signBundle fails (bundle still sent)', async () => {
+  let bundleSent = null;
+  const m = buildExecutor({
+    config: jitoRustCfg(),
+    deps: {
+      rpc: jitoRpc(),
+      hotSigner: {
+        sign: async () => ({ ok: true, signedTxBase64: 'SWAP_SIGNED', signatureB58: 'SWSIG', signerAddress: 'x' }),
+        signBundle: async () => ({ ok: false, error: 'executor_exited' }),
+      },
+      jitoSendBundle: async (txs) => { bundleSent = txs; return { ok: true, result: 'BUNDLE_OK' }; },
+    },
+  });
+  const r = await m.exec.executeSwap({ side: 'buy', mint: 'MintQ', sizeUsd: 10, decimals: 6, intentParts: ['buy', 'jrf', 'MintQ', '1'] });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(bundleSent.length, 2, 'bundle still = [swap, tip]');
+  assert.equal(bundleSent[0], 'SWAP_SIGNED', 'swap leg still rust-signed');
+  assert.notEqual(bundleSent[1], 'TIP_SIGNED', 'tip leg signed in-process (fallback), not by the failed hot-executor');
+  assert.ok(typeof bundleSent[1] === 'string' && bundleSent[1].length > 0, 'tip leg is the in-process-signed tx');
+});
+
 test('live-executor: submits via Jito bundle when submit_backend=jito and configured', async () => {
   const tipAccount = b58encode(Buffer.alloc(32, 5));
   const blockhash = b58encode(Buffer.alloc(32, 6));
