@@ -28,7 +28,7 @@ import { createDiagnosticExecutionAdapter } from '../../../packages/execution/sr
 import { createMemoryHotStateStore } from '../../../packages/hot-state/src/index.mjs';
 import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
 import { createHotStateBackend } from './storage/redis-client.mjs';
-import { createEventSinkBackend } from './storage/clickhouse-client.mjs';
+import { createEventSinkBackend, createAnalyticsReader } from './storage/clickhouse-client.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -205,6 +205,17 @@ try {
   eventSink = null;
 }
 
+// ADR-0001 Phase 7C: OPTIONAL analytics reader (read-only operator insights over ClickHouse). Reuses
+// the event-sink client when present; not_configured when EVENT_SINK_BACKEND != clickhouse. Never SoT,
+// never required, never affects readiness/trading.
+let analytics = null;
+try {
+  analytics = createAnalyticsReader({ env: process.env, clickHouseClient: eventSink?.client });
+} catch (e) {
+  console.warn(`analytics-reader: ${e?.message || e} — analytics insights disabled`);
+  analytics = null;
+}
+
 // ADR-0001 Phase 8A: read-only runtime-readiness probes. Each is best-effort + fail-open and reports
 // per-backend status WITHOUT mutating anything or opening live. Postgres is the only hard blocker (it's
 // the operational SoT when configured); Redis (cache) and ClickHouse (analytics) only ever degrade.
@@ -232,7 +243,7 @@ const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes, analytics,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

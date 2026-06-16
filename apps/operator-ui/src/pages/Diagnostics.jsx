@@ -59,13 +59,18 @@ export default function Diagnostics() {
   const [msg, setMsg] = useState(null);
   const [disabled, setDisabled] = useState(false);
   const [runtime, setRuntime] = useState(null); // GET /api/runtime/readiness (Phase 8A)
+  const [analytics, setAnalytics] = useState(null); // GET /api/analytics/summary (Phase 7C, optional)
 
   async function loadRuntime() {
     const r = await api.runtimeReadiness();
     if (r.ok && r.data) setRuntime(r.data);
   }
-  // load the runtime-readiness summary once connected (read-only; never opens live)
-  useEffect(() => { if (connected) loadRuntime(); /* eslint-disable-next-line */ }, [connected]);
+  async function loadAnalytics() {
+    const r = await api.analyticsSummary();
+    if (r.ok && r.data) setAnalytics(r.data);
+  }
+  // load the runtime-readiness + (optional) analytics summaries once connected (read-only)
+  useEffect(() => { if (connected) { loadRuntime(); loadAnalytics(); } /* eslint-disable-next-line */ }, [connected]);
 
   async function runTest() {
     setBusy(true); setMsg(null);
@@ -160,6 +165,43 @@ export default function Diagnostics() {
             </div>
           </>
         )}
+      </Card>
+
+      {/* Analytics insights (Phase 7C) — optional, read-only; reads ClickHouse analytics_events */}
+      <Card title={ar ? 'رؤى تحليلية' : 'Analytics insights'}
+        right={analytics && <Badge tone={BACKEND_TONE[analytics.status] || 'neutral'}>{(analytics.status || '').replace('_', ' ')}</Badge>}>
+        {!analytics || analytics.status === 'not_configured' ? (
+          <p className="muted fs-xs">{ar ? 'التحليلات اختيارية. اضبط EVENT_SINK_BACKEND=clickhouse لتفعيلها.' : 'Analytics are optional. Configure EVENT_SINK_BACKEND=clickhouse to enable analytics.'}</p>
+        ) : analytics.status !== 'available' ? (
+          <p className="muted fs-xs">{ar ? 'التحليلات غير متوفرة مؤقتًا (لا تأثير على التشغيل).' : 'Analytics temporarily unavailable (no effect on operation).'}</p>
+        ) : (
+          <>
+            <div className="kpi-strip" style={{ margin: 0, gridTemplateColumns: 'repeat(4, 1fr)' }}>
+              {[['diagnostic runs', analytics.counts?.diagnostic_runs], ['provider events', analytics.counts?.provider_health_events], ['quote checks', analytics.counts?.quote_checks], ['route checks', analytics.counts?.route_checks]].map(([lbl, v]) => (
+                <div className="stattile" key={lbl}>
+                  <span className="lbl">{lbl}</span>
+                  <span className="val" style={{ fontSize: 'var(--fs-lg)' }}>{v ?? 0}</span>
+                </div>
+              ))}
+            </div>
+            <p className="muted fs-xs" style={{ marginBlockStart: 6 }}>{ar ? 'نافذة' : 'window'}: {analytics.window_hours}h</p>
+            {analytics.last_events?.length > 0 && (
+              <table className="data" style={{ marginBlockStart: 6 }}><tbody>
+                {analytics.last_events.slice(0, 10).map((e, i) => (
+                  <tr key={`${e.event_type}-${i}`}>
+                    <td className="fs-xs mono" dir="ltr">{e.event_type}</td>
+                    <td className="fs-xs muted">{e.overall || e.readiness || e.status || ''}</td>
+                    <td className="num mono faint fs-xs" dir="ltr">{String(e.event_timestamp || '').slice(0, 19)}</td>
+                  </tr>
+                ))}
+              </tbody></table>
+            )}
+          </>
+        )}
+        <div className="row" style={{ gap: 'var(--s-2)', alignItems: 'center', marginBlockStart: 8 }}>
+          <button className="btn" onClick={loadAnalytics}>{ar ? 'تحديث' : 'Refresh'}</button>
+          <span className="muted fs-xs">{ar ? 'التحليلات اختيارية وللعرض فقط.' : 'Analytics are optional and informational.'}</span>
+        </div>
       </Card>
 
       <Card title={ar ? 'اختبار التنفيذ (Pre-flight)' : 'Execution test (pre-flight)'}

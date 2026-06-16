@@ -111,3 +111,57 @@ export async function createEventSinkBackend({ env = {}, clickHouseClient = null
   const chWriter = createClickHouseEventWriter({ client });
   return { backend: 'clickhouse', writer: createInjectedEventWriter({ writeEvent: chWriter.writeEvent }), client };
 }
+
+// ADR-0001 Phase 7C: OPTIONAL analytics reader over analytics_events. READ-ONLY insights for the
+// operator — never SoT, never required, never affects readiness/trading. Payloads are projected to a
+// scalar whitelist (defense-in-depth: no secrets / raw tx / nested blobs ever leave ClickHouse).
+const ANALYTICS_SAFE_KEYS = ['overall', 'readiness', 'status', 'degraded', 'available', 'run_kind', 'source', 'tip_lamports'];
+function safeSummaryFromPayload(payloadStr) {
+  let p; try { p = JSON.parse(payloadStr); } catch { return {}; }
+  const out = {};
+  for (const k of ANALYTICS_SAFE_KEYS) { const v = p && p[k]; if (v !== undefined && v !== null && typeof v !== 'object') out[k] = v; }
+  return out;
+}
+
+/**
+ * Analytics reader. EVENT_SINK_BACKEND != clickhouse (or unconfigured) => summary() returns
+ * { status: 'not_configured' } (no client, no error). A ClickHouse error => { status: 'unavailable' }
+ * (never throws). Reuse the event-sink's client when available to avoid a second connection.
+ */
+export function createAnalyticsReader({ env = {}, clickHouseClient = null, request } = {}) {
+  const cfg = parseClickHouseConfig(env);
+  if (!cfg.ok || cfg.backend !== 'clickhouse') {
+    return { backend: cfg.backend === 'clickhouse' ? 'clickhouse' : (cfg.backend || 'none'), async summary() { return { status: 'not_configured', window_hours: null }; } };
+  }
+  const client = clickHouseClient || createClickHouseClient(cfg.clickhouse, request ? { request } : undefined);
+  const parseData = (text) => { try { const j = JSON.parse(text); return Array.isArray(j) ? j : (j.data || []); } catch { return []; } };
+
+  async function summary({ windowHours = 24 } = {}) {
+    const h = Math.min(168, Math.max(1, Number(windowHours) || 24));
+    const W = `event_timestamp >= now() - INTERVAL ${h} HOUR`;
+    try {
+      const byType = parseData(await client.query(`SELECT event_type, count() AS c FROM analytics_events WHERE ${W} GROUP BY event_type FORMAT JSON`));
+      const overallRows = parseData(await client.query(`SELECT JSONExtractString(payload, 'overall') AS overall, count() AS c FROM analytics_events WHERE event_type = 'diagnostic.run' AND ${W} GROUP BY overall FORMAT JSON`));
+      const recent = parseData(await client.query(`SELECT event_type, event_timestamp, payload FROM analytics_events WHERE ${W} ORDER BY event_timestamp DESC LIMIT 10 FORMAT JSON`));
+
+      const typeCount = (t) => Number((byType.find((r) => r.event_type === t) || {}).c || 0);
+      const counts = {
+        diagnostic_runs: typeCount('diagnostic.run'),
+        provider_health_events: typeCount('provider.health') + typeCount('provider.health_check'),
+        quote_checks: typeCount('diagnostic.quote_check'),
+        route_checks: typeCount('diagnostic.route_check'),
+      };
+      const diagnostic_overall_counts = {};
+      for (const r of overallRows) diagnostic_overall_counts[r.overall || 'unknown'] = Number(r.c || 0);
+      const last_events = recent.map((r) => ({ event_type: r.event_type, event_timestamp: r.event_timestamp, ...safeSummaryFromPayload(r.payload) }));
+      let provider_status_counts = null;
+      const latestPH = recent.find((r) => r.event_type === 'provider.health' || r.event_type === 'provider.health_check');
+      if (latestPH) { try { const pv = JSON.parse(latestPH.payload).providers || {}; provider_status_counts = {}; for (const s of Object.values(pv)) provider_status_counts[s] = (provider_status_counts[s] || 0) + 1; } catch { provider_status_counts = null; } }
+
+      return { status: 'available', window_hours: h, counts, diagnostic_overall_counts, provider_status_counts, last_events };
+    } catch (e) {
+      return { status: 'unavailable', window_hours: h, error: `analytics_read_failed:${e?.message || 'error'}` };
+    }
+  }
+  return { backend: 'clickhouse', summary };
+}

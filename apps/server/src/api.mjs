@@ -22,7 +22,7 @@ function diagSummary(readiness) {
 // DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
 const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null }) {
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null, analytics = null }) {
   // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
   // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
   // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
@@ -362,6 +362,15 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             event_written = await recordEvent('diagnostic.status', { at: r.checked_at, readiness: r.readiness, overall: summary.overall, blockers: r.blockers });
           }
           return { status: 200, body: { ok: true, ...summary, readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY, hot_state_cache, cached_readiness, event_sink: { enabled: eventEnabled, written: event_written } } };
+        }
+        if (path.startsWith('/api/analytics/summary')) {
+          // ADR-0001 Phase 7C: OPTIONAL read-only operator insights from ClickHouse analytics_events.
+          // Always 200 — status carries available|not_configured|unavailable|degraded; never affects
+          // readiness/trading; never SoT. not_configured when EVENT_SINK_BACKEND != clickhouse.
+          if (!analytics || typeof analytics.summary !== 'function') return { status: 200, body: { status: 'not_configured' } };
+          const qs = new URLSearchParams(path.split('?')[1] || '');
+          const windowHours = Number(qs.get('hours')) || 24;
+          return { status: 200, body: await analytics.summary({ windowHours }) };
         }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
