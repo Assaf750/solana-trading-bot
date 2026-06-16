@@ -8,7 +8,14 @@ const WINDOW = 120;       // outcomes kept per provider
 const DEGRADED_PCT = 10;  // error rate >= 10% over the window -> degraded
 const DOWN_PCT = 50;      // error rate >= 50% -> down
 
-export function createProviderHealth({ window = WINDOW, now = () => Date.now() } = {}) {
+import { createProviderHealthMonitor } from '../../../../packages/provider-adapters/src/index.mjs';
+
+// ADR-0001 Phase 2D: delegated to @soltrade/provider-adapters behind PROVIDER_BACKEND (legacy retained).
+export function createProviderHealth(args = {}) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyCreateProviderHealth(args) : createProviderHealthMonitor(args);
+}
+
+function legacyCreateProviderHealth({ window = WINDOW, now = () => Date.now() } = {}) {
   const providers = new Map(); // name -> { outcomes: [{ok, ms, error, ts}], lastError, lastErrorTs }
 
   function record(provider, ok, ms, error) {

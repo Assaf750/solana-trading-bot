@@ -2,11 +2,20 @@
 // budgets respected). Uses the owner's api.jup.ag key when configured; otherwise the
 // free lite endpoint. Quotes only in M3 (no swap execution here).
 import { USDC_MINT } from './swap-detector.mjs';
+import { createJupiterProvider } from '../../../../packages/provider-adapters/src/index.mjs';
 
 const LITE_BASE = 'https://lite-api.jup.ag/swap/v1';
 const PRO_BASE = 'https://api.jup.ag/swap/v1';
 
-export function createJupiterClient({ getApiKey, health }) {
+// ADR-0001 Phase 2D: Jupiter calls are OWNED by @soltrade/provider-adapters. The server delegates
+// behind PROVIDER_BACKEND (default=package); the legacy in-process client is retained for rollback.
+export function createJupiterClient(args) {
+  return process.env.PROVIDER_BACKEND === 'legacy'
+    ? legacyCreateJupiterClient(args)
+    : createJupiterProvider({ ...args, usdcMint: USDC_MINT, request: (u, o) => fetch(u, o) });
+}
+
+function legacyCreateJupiterClient({ getApiKey, health }) {
   let last = 0;
   let chain = Promise.resolve();
 

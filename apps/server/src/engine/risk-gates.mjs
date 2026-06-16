@@ -1,6 +1,16 @@
 // risk-gates.mjs — PURE entry gate: every paper/live entry passes here first.
 // Hard-Risk limits are binding; missing limits => fail-safe REJECT (no implicit infinity).
-export function checkEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState, entriesBlocked = false, leaderAddress = null }) {
+// ADR-0001 Phase 2C: the hard-risk entry gate is OWNED by @soltrade/risk. The server delegates to it;
+// the prior in-process implementation stays as a `legacy` backend behind RISK_BACKEND until parity is
+// proven, then the package is the default. Both are pure and behaviourally identical.
+import { checkEntryGates as packageCheckEntryGates } from '../../../../packages/risk/src/index.mjs';
+
+export function checkEntryGates(args) {
+  // @soltrade/risk is the DEFAULT; the `legacy` branch is a rollback shim — deprecate/prune in 3B after soak.
+  return process.env.RISK_BACKEND === 'legacy' ? legacyCheckEntryGates(args) : packageCheckEntryGates(args);
+}
+
+function legacyCheckEntryGates({ cfg, portfolio, sizeUsd, tokenMint, killBlocked, operatingState, entriesBlocked = false, leaderAddress = null }) {
   const rejections = [];
 
   if (killBlocked) rejections.push('kill_switch_engaged');

@@ -9,6 +9,7 @@
 //  Both paths get a 60s keepalive frame (Helius closes idle sockets after 10 min).
 
 import { createGrpcIngestor } from '../../../../services/ingestor/src/grpc-ingestor.mjs';
+import { createRpcProvider } from '../../../../packages/provider-adapters/src/index.mjs';
 
 /** Pure: is this a Helius endpoint (supports enhanced transactionSubscribe)? */
 export function isHeliusHost(url) {
@@ -58,7 +59,15 @@ export function parseStreamNotification(msg) {
   return null;
 }
 
-export function createRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor, health }) {
+// ADR-0001 Phase 2D: RPC calls are OWNED by @soltrade/provider-adapters. The server delegates behind
+// PROVIDER_BACKEND (default=package), injecting the gRPC ingestor factory; legacy retained for rollback.
+export function createRpcClient(args) {
+  return process.env.PROVIDER_BACKEND === 'legacy'
+    ? legacyCreateRpcClient(args)
+    : createRpcProvider({ grpcIngestorFactory: createGrpcIngestor, request: (u, o) => fetch(u, o), wsFactory: (u) => new WebSocket(u), ...args });
+}
+
+function legacyCreateRpcClient({ getRpcUrl, getGrpcEndpoint, grpcIngestorFactory = createGrpcIngestor, health }) {
   async function rpc(method, params) {
     const url = getRpcUrl();
     if (!url) return { ok: false, error: 'rpc_url_unavailable' }; // config state (no URL), not a provider failure -> not recorded

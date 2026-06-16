@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/execution",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "DiagnosticExecutionAdapter (ADR-0001 Phase 5A): pre-flight / live-readiness diagnostics over INJECTED provider-adapters. Pure — no fetch/RPC/SDK/db; never opens a position, claims an intent, or broadcasts a transaction. The future home of the live ExecutionAdapter; Paper becomes a diagnostic adapter here.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}

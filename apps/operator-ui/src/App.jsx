@@ -19,12 +19,13 @@ import AnalyticsReports from './pages/AnalyticsReports.jsx';
 import MyWalletsFunds from './pages/MyWalletsFunds.jsx';
 import SettingsSafety from './pages/SettingsSafety.jsx';
 import Alerts from './pages/Alerts.jsx';
+import Diagnostics from './pages/Diagnostics.jsx';
 import HelpGlossary from './pages/HelpGlossary.jsx';
 
 // operator-facing run mode (server-derived) -> header chip label + tone
 const RUN_MODE = {
   read_only: { en: 'READ-ONLY', ar: 'قراءة فقط', tone: 'neutral' },
-  paper: { en: 'PAPER', ar: 'ورقي', tone: 'info' },
+  paper: { en: 'PAPER · SIM', ar: 'محاكاة ورقية', tone: 'info' },
   live_armed: { en: 'LIVE · ARMED', ar: 'حقيقي · مُسلّح', tone: 'warn' },
   live_active: { en: 'LIVE · ACTIVE', ar: 'حقيقي · نشط', tone: 'danger' },
 };
@@ -46,6 +47,7 @@ const NAV = [
   { sec: { en: 'Setup & system', ar: 'الإعداد والنظام' } },
   { to: '/setup', key: 'setup', ico: '✦' },
   { to: '/funds', key: 'funds', ico: '◰' },
+  { to: '/diagnostics', key: 'diagnostics', ico: '⚕' },
   { to: '/settings', key: 'settings', ico: '⚙' },
   { to: '/help', key: 'help', ico: '?' }
 ];
@@ -70,7 +72,7 @@ function TopBar({ onOpenCmdk, onOpenTweaks }) {
               <span aria-hidden>{mode === 'real_live' ? '🔴' : '🟠'}</span>
               <span>{mode === 'real_live'
                 ? (ar ? 'وضع حقيقي — أموال حقيقية' : 'REAL-LIVE MODE — real funds')
-                : (ar ? 'وضع ورقي (PAPER) — لا أموال حقيقية' : 'PAPER MODE — no real funds')}</span>
+                : (ar ? 'محاكاة ورقية (PAPER) — لا أموال حقيقية' : 'PAPER simulation — no real funds')}</span>
               <span className="sep">·</span>
               <span style={{ fontWeight: 400 }}>
                 {ar ? 'الخادم المحلي متصل' : 'local server connected'}
@@ -209,6 +211,7 @@ export default function App() {
             <Route path="/analytics" element={<AnalyticsReports />} />
             <Route path="/risk" element={<RiskCenter />} />
             <Route path="/funds" element={<MyWalletsFunds />} />
+            <Route path="/diagnostics" element={<Diagnostics />} />
             <Route path="/settings" element={<SettingsSafety />} />
             <Route path="/alerts" element={<Alerts />} />
             <Route path="/help" element={<HelpGlossary />} />

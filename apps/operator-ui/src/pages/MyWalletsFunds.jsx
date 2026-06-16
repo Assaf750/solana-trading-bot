@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useI18n } from '../i18n/index.jsx';
 import PageHead from '../components/PageHead.jsx';
 import { Card, Badge, DangerNote, EmptyState } from '../components/index.jsx';
@@ -193,10 +194,11 @@ export default function MyWalletsFunds() {
             </div>
           );
         })}
-        <div className="row" style={{ marginBlockStart: 10 }}>
+        <div className="row" style={{ marginBlockStart: 10, alignItems: 'center', gap: 'var(--s-2)', flexWrap: 'wrap' }}>
           <button className="btn" onClick={testConnection} disabled={!vault.vault_unlocked}>
-            {ar ? '🔌 اختبار اتصال RPC' : '🔌 Test RPC connection'}
+            {ar ? '🔌 فحص سريع للـRPC' : '🔌 Quick RPC check'}
           </button>
+          <Link to="/diagnostics" className="mono fs-xs">{ar ? 'فحص تنفيذ كامل ← التشخيص' : 'Full execution test → Diagnostics'}</Link>
           {connTest?.testing && <span className="muted">{ar ? 'جارٍ الاختبار…' : 'testing…'}</span>}
           {connTest && !connTest.testing && (
             connTest.ok

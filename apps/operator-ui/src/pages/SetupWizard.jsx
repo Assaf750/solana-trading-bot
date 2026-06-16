@@ -125,7 +125,7 @@ export default function SetupWizard() {
     <div className="stack">
       <PageHead
         title={ar ? '🚀 معالج الإعداد' : '🚀 Setup Wizard'}
-        sub={ar ? 'أربع خطوات حتى يبدأ التداول الورقي تلقائياً — كل سرّ يُشفَّر على جهازك' : 'Four steps until paper trading starts automatically — every secret encrypted on your machine'}
+        sub={ar ? 'أربع خطوات حتى تبدأ المحاكاة الورقية تلقائياً — كل سرّ يُشفَّر على جهازك' : 'Four steps until paper (simulation) trading starts automatically — every secret encrypted on your machine'}
       />
 
       <Card title={ar ? `التقدّم: ${activeStep > 4 ? 'مكتمل ✓' : `الخطوة ${activeStep} من 4`}` : `Progress: ${activeStep > 4 ? 'complete ✓' : `step ${activeStep} of 4`}`}>
@@ -166,6 +166,7 @@ export default function SetupWizard() {
             disabled={!step1Done} />
           <button className="btn" onClick={doRpc} disabled={!step1Done || !rpc.trim()}>{ar ? 'حفظ مشفّراً' : 'Store encrypted'}</button>
           <button className="btn" onClick={doTest} disabled={!step1Done || !rpcDone}>{ar ? '🔌 اختبار' : '🔌 Test'}</button>
+          <Link to="/diagnostics" className="mono fs-xs" style={{ alignSelf: 'center' }}>{ar ? 'فحص تنفيذ كامل ← التشخيص' : 'Full pre-flight → Diagnostics'}</Link>
         </div>
         {connTest?.testing && <p className="muted">{ar ? 'جارٍ الاختبار…' : 'testing…'}</p>}
         {connTest && !connTest.testing && (connTest.ok
@@ -194,11 +195,11 @@ export default function SetupWizard() {
       </StepShell>
 
       {activeStep > 4 && (
-        <Card title={ar ? '🎉 جاهز — التداول الورقي يعمل الآن' : '🎉 Ready — paper trading is now running'}>
+        <Card title={ar ? '🎉 جاهز — المحاكاة الورقية تعمل الآن' : '🎉 Ready — paper (simulation) trading is now running'}>
           <p>
             {ar
-              ? `محرك الورق: ${engine.paper_engine}. النظام يراقب محافظك ويتداول ورقياً بأسعار حقيقية. راقب النتائج في مساحة التداول لأيام قبل التفكير في المال الحقيقي.`
-              : `Paper engine: ${engine.paper_engine}. The system watches your wallets and trades on paper at real prices. Watch results in Trading Workspace for days before considering real money.`}
+              ? `محرك المحاكاة: ${engine.paper_engine}. النظام يراقب محافظك ويحاكي التداول ورقياً بأسعار حقيقية (لا أموال حقيقية). راقب النتائج في مساحة التداول، وشغّل «التشخيص» لفحص جاهزية التنفيذ قبل التفكير في المال الحقيقي.`
+              : `Paper (simulation) engine: ${engine.paper_engine}. The system watches your wallets and simulates trading at real prices (no real money). Watch results in Trading Workspace, and run Diagnostics for an execution pre-flight before considering real money.`}
           </p>
           <div className="row" style={{ gap: 'var(--s-4)' }}>
             <Link className="btn" to="/workspace">{ar ? 'مساحة التداول ←' : 'Trading Workspace →'}</Link>

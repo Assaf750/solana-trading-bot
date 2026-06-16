@@ -7,7 +7,7 @@ import { createOperatingState } from './operating-state.mjs';
 import { createSignerService } from './signer-service.mjs';
 import { createApi } from './api.mjs';
 import { startServer } from './server.mjs';
-import { appendAudit } from './audit-log.mjs';
+import { appendAudit, configureAuditStore } from './audit-log.mjs';
 import { ensureDataDir } from './util.mjs';
 import { createPaperPortfolio } from './engine/paper-portfolio.mjs';
 import { createOrdersStore } from './engine/orders.mjs';
@@ -23,6 +23,12 @@ import { analyzeToken as analyzeTokenImpl } from './engine/token-analysis.mjs';
 import { discoverTokenTraders, discoverFromLeaders as discoverFromLeadersImpl } from './engine/wallet-discovery.mjs';
 import { createTokenMetadata } from './engine/token-metadata.mjs';
 import { createDas } from './engine/helius-das.mjs';
+import { createJitoProvider } from '../../../packages/provider-adapters/src/index.mjs';
+import { createDiagnosticExecutionAdapter } from '../../../packages/execution/src/index.mjs';
+import { createMemoryHotStateStore } from '../../../packages/hot-state/src/index.mjs';
+import { createStorageBackend, createDecisionLedgerStore, createPositionStore, createAuditStore } from './storage/storage-backend.mjs';
+import { createHotStateBackend } from './storage/redis-client.mjs';
+import { createEventSinkBackend, createAnalyticsReader } from './storage/clickhouse-client.mjs';
 import { createNotifier } from './notifier.mjs';
 
 ensureDataDir();
@@ -34,8 +40,15 @@ const killSwitch = createKillSwitch();
 const operatingState = createOperatingState();
 const signer = createSignerService({ vault, config, killSwitch, audit: appendAudit });
 
+// ADR-0001 Phase 4B: resolve the storage backend once (STORAGE_BACKEND=json|postgres). Fail-clear at
+// boot on bad/missing config; the json default loads no pg.
+const storageBackend = await createStorageBackend({ env: process.env });
+// ADR-0001 Phase 4B.3: route the operational audit trail to the active backend (json JSONL default;
+// postgres append-only). The standalone appendAudit/readAuditTail then delegate to it.
+configureAuditStore(await createAuditStore(storageBackend));
+
 // engine wiring — secrets resolved from the vault AT CALL TIME, never cached/logged
-const portfolio = createPaperPortfolio();
+const portfolio = createPaperPortfolio({ positionStore: await createPositionStore(storageBackend, { file: 'paper-portfolio.json', simulated: true }) });
 // live operational health of the external providers the money path leans on (Jupiter, RPC)
 const providerHealth = createProviderHealth();
 const rpc = createRpcClient({
@@ -79,7 +92,7 @@ const notifier = createNotifier({ config, getSecret: (name) => vault.getSecretFo
 
 // LIVE book + executor — real money path, fully gated (mode + signer session + kill
 // switch + readiness); separate file from the paper book, never mixed
-const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false });
+const livePortfolio = createPaperPortfolio({ file: 'live-portfolio.json', simulated: false, positionStore: await createPositionStore(storageBackend, { file: 'live-portfolio.json', simulated: false }) });
 // Optional Rust hot-executor for signing — active only when the binary path is set AND the owner
 // flips execution.signer_backend='rust'. Any failure falls back to in-process signing (fail-safe).
 const hotSigner = process.env.HOT_EXECUTOR_BIN
@@ -88,7 +101,26 @@ const hotSigner = process.env.HOT_EXECUTOR_BIN
 // Jito bundle sender — POSTs to the configured block-engine URL (vault ref). Only invoked when
 // execution.submit_backend='jito' AND the URL is set; the live-executor falls back to RPC on any
 // failure. The URL is resolved from the vault at call time and never logged.
+// Jito bundle sender + tip floor — OWNED by @soltrade/provider-adapters (ADR-0001 Phase 2D). The
+// server delegates behind PROVIDER_BACKEND (default=package); the URL is resolved from the vault at
+// call time (never logged) and injected via getBundleUrl. The legacy in-process glue is retained.
+const jitoProvider = createJitoProvider({
+  request: (u, o) => fetch(u, o),
+  getBundleUrl: () => {
+    const ref = config.get().providers?.jito_url_ref;
+    if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
+    const r = vault.getSecretForUse(ref.slice(6));
+    if (!r.ok) return { ok: false, error: 'jito_url_unavailable' };
+    return { ok: true, url: r.value };
+  },
+});
 async function jitoSendBundle(txsBase64) {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyJitoSendBundle(txsBase64) : jitoProvider.sendBundle(txsBase64);
+}
+async function getJitoTipFloor() {
+  return process.env.PROVIDER_BACKEND === 'legacy' ? legacyGetJitoTipFloor() : jitoProvider.getTipFloor();
+}
+async function legacyJitoSendBundle(txsBase64) {
   const ref = config.get().providers?.jito_url_ref;
   if (!ref?.startsWith('vault:')) return { ok: false, error: 'jito_url_unset' };
   const r = vault.getSecretForUse(ref.slice(6));
@@ -112,7 +144,7 @@ async function jitoSendBundle(txsBase64) {
 }
 // Live Jito tip floor (dynamic-tip mode). Public endpoint; best-effort with a short timeout —
 // any failure makes resolveTipLamports fall back to the fixed jito_tip_lamports.
-async function getJitoTipFloor() {
+async function legacyGetJitoTipFloor() {
   try {
     const res = await fetch('https://bundles.jito.wtf/api/v1/bundles/tip_floor', { signal: AbortSignal.timeout(5000) });
     if (!res.ok) return null;
@@ -122,9 +154,12 @@ async function getJitoTipFloor() {
     return null;
   }
 }
+// ADR-0001 Phase 4B.1: the decision-ledger store comes from the same storage backend resolved above.
+const decisionLedgerStore = await createDecisionLedgerStore(storageBackend);
 const liveExecutor = createLiveExecutor({
   config, vault, signer, killSwitch, operatingState, rpc, jupiter,
   audit: appendAudit, broadcast: (p) => broadcastRef(p), hotSigner, jitoSendBundle, getJitoTipFloor,
+  decisionLedgerStore,
 });
 
 const ordersStore = createOrdersStore();
@@ -141,11 +176,74 @@ const paperEngine = createPaperEngine({
 const das = createDas({ rpc });
 const tokenMeta = createTokenMetadata({ dasResolve: (mint) => das.getAssetMeta(mint) });
 
+// ADR-0001 Phase 5A: DiagnosticExecutionAdapter — pre-flight diagnostics over the SAME live
+// providers (read-only; never opens a position, claims an intent, or broadcasts). Behind a flag
+// (DIAGNOSTIC_BACKEND=package); default 'legacy' leaves it unconstructed and the engine untouched.
+const diagnostics = process.env.DIAGNOSTIC_BACKEND === 'package'
+  ? createDiagnosticExecutionAdapter({ rpc, jupiter, jito: jitoProvider, providerHealth })
+  : null;
+
+// ADR-0001 Phase 6A/6B: optional hot-state cache (provider-health + readiness only; never SoT).
+// memory by default. FAIL-OPEN even at boot: if HOT_STATE_BACKEND=redis but Redis is unreachable, fall
+// back to the in-process memory cache rather than failing the server — a cache must never block trading.
+let hotState;
+try {
+  hotState = (await createHotStateBackend({ env: process.env })).store;
+} catch (e) {
+  console.warn(`hot-state: ${e?.message || e} — falling back to in-process memory cache`);
+  hotState = createMemoryHotStateStore();
+}
+
+// ADR-0001 Phase 7A/7B: optional append-only analytics sink (ClickHouse). EVENT_SINK_BACKEND=none by
+// default. Wired ONLY to non-critical surfaces (diagnostics + provider-health), best-effort + fail-open.
+// FAIL-OPEN at boot too: a misconfigured sink disables analytics rather than blocking the server.
+let eventSink = null;
+try {
+  eventSink = await createEventSinkBackend({ env: process.env });
+} catch (e) {
+  console.warn(`event-sink: ${e?.message || e} — analytics sink disabled`);
+  eventSink = null;
+}
+
+// ADR-0001 Phase 7C: OPTIONAL analytics reader (read-only operator insights over ClickHouse). Reuses
+// the event-sink client when present; not_configured when EVENT_SINK_BACKEND != clickhouse. Never SoT,
+// never required, never affects readiness/trading.
+let analytics = null;
+try {
+  analytics = createAnalyticsReader({ env: process.env, clickHouseClient: eventSink?.client });
+} catch (e) {
+  console.warn(`analytics-reader: ${e?.message || e} — analytics insights disabled`);
+  analytics = null;
+}
+
+// ADR-0001 Phase 8A: read-only runtime-readiness probes. Each is best-effort + fail-open and reports
+// per-backend status WITHOUT mutating anything or opening live. Postgres is the only hard blocker (it's
+// the operational SoT when configured); Redis (cache) and ClickHouse (analytics) only ever degrade.
+const runtimeProbes = {
+  storage: async () => {
+    if (storageBackend.backend !== 'postgres') return { backend: storageBackend.backend || 'json', status: 'ok' };
+    try { await storageBackend.executor.query('SELECT 1', []); return { backend: 'postgres', status: 'ok' }; }
+    catch { return { backend: 'postgres', status: 'fail' }; } // configured SoT down -> blocker
+  },
+  hotState: async () => {
+    const backend = hotState?.backend || 'memory';
+    if (backend !== 'redis') return { backend, status: 'ok' };
+    try { await hotState.get('__readiness_probe__'); return { backend: 'redis', status: 'ok' }; }
+    catch { return { backend: 'redis', status: 'degraded' }; } // cache down -> degraded, never blocked
+  },
+  eventSink: async () => {
+    const backend = eventSink?.backend || 'none';
+    if (backend !== 'clickhouse') return { backend, status: 'disabled' };
+    try { return { backend: 'clickhouse', status: (await eventSink.client.ping()) ? 'ok' : 'degraded' }; }
+    catch { return { backend: 'clickhouse', status: 'degraded' }; } // analytics down -> degraded
+  },
+};
+
 const api = createApi({
   config, wallets, killSwitch, operatingState, vault, signer,
   audit: appendAudit,
   broadcast: (p) => broadcastRef(p),
-  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth,
+  paperEngine, portfolio, livePortfolio, liveExecutor, rpc, tokenMeta, notifier, history, providerHealth, diagnostics, hotState, eventSink, runtimeProbes, analytics,
   analyzeWallet: ({ address }) => analyzeWallet({ address, rpc, jupiter }),
   analyzeToken: ({ mint }) => analyzeTokenImpl({ mint, rpc, jupiter, das, tokenMeta, discoverTraders: ({ mint: m }) => discoverTokenTraders({ mint: m, rpc }) }),
   discoverTraders: ({ mint }) => discoverTokenTraders({ mint, rpc }),

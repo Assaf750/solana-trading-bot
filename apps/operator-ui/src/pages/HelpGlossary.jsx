@@ -7,8 +7,8 @@ import { GLOSSARY } from '../fixtures/index.js';
 const HOWTO = [
   {
     q_ar: 'كيف أبدأ من الصفر؟', q_en: 'How do I start from zero?',
-    a_ar: 'افتح «معالج الإعداد»: أنشئ الخزنة → الصق مفتاح RPC من Helius → طبّق حدود البداية الآمنة → تابِع محفظة رابحة. عندها يبدأ التداول الورقي تلقائياً بأسعار حقيقية.',
-    a_en: 'Open the Setup Wizard: create the vault → paste your Helius RPC → apply safe starter limits → follow a winning wallet. Paper trading then starts automatically at real prices.',
+    a_ar: 'افتح «معالج الإعداد»: أنشئ الخزنة → الصق مفتاح RPC من Helius → طبّق حدود البداية الآمنة → تابِع محفظة رابحة. عندها تبدأ المحاكاة الورقية تلقائياً بأسعار حقيقية (لا أموال حقيقية).',
+    a_en: 'Open the Setup Wizard: create the vault → paste your Helius RPC → apply safe starter limits → follow a winning wallet. Paper (simulation) trading then starts automatically at real prices (no real money).',
   },
   {
     q_ar: 'كيف أحلّل محفظة قبل نسخها؟', q_en: 'How do I analyze a wallet before copying?',
@@ -22,8 +22,8 @@ const HOWTO = [
   },
   {
     q_ar: 'كيف أنتقل للتداول الحقيقي؟', q_en: 'How do I go to real trading?',
-    a_ar: 'خطوة منفصلة بقرارك (مثل «إيداع» في باينانس): موّل محفظة تنفيذ مخصّصة → استورد مفتاحها في «محافظي والأموال» → افتح جلسة توقيع بحدود آمنة → في «الإعدادات والأمان» اكتب ACTIVATE-REAL-LIVE. لا يُفعَّل قبل اكتمال كل الشروط.',
-    a_en: 'A separate, owner-only step (like a Binance “deposit”): fund a dedicated execution wallet → import its key on My Wallets & Funds → open a signing session with safe bounds → on Settings & Safety type ACTIVATE-REAL-LIVE. It never activates until every condition is met.',
+    a_ar: 'خطوة منفصلة بقرارك (مثل «إيداع» في باينانس): موّل محفظة تنفيذ مخصّصة → استورد مفتاحها في «محافظي والأموال» → افتح جلسة توقيع بحدود آمنة → في «الإعدادات والأمان» اكتب ACTIVATE-REAL-LIVE. يصبح التنفيذ الحقيقي متاحًا بعد ضبط هذه المتطلبات؛ أنت من يقرّر متى تبدأ وتبقى متحكّمًا في أموالك الحقيقية.',
+    a_en: 'A separate step you control (like a Binance “deposit”): fund a dedicated execution wallet → import its key on My Wallets & Funds → open a signing session with safe bounds → on Settings & Safety type ACTIVATE-REAL-LIVE. Real execution becomes available once these are configured; you decide when to start, and you stay in control of real money.',
   },
   {
     q_ar: 'لماذا تُعرض بعض المقاييس «غير متوفّر»؟', q_en: 'Why do some metrics show “unavailable”?',

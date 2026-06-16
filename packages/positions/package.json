@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/positions",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Position lifecycle + portfolio book (ADR-0001 Phase 2B). Source of truth for positions/fills/exits/PnL; storage-pluggable (JSON adapter today, Postgres in Phase 4). apps/server delegates instead of reimplementing the book.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}

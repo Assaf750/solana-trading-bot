@@ -1,0 +1,19 @@
+{
+  "name": "@soltrade/decision-ledger",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Idempotent execution-intent ledger + decision trace (ADR-0001 Phase 2A). Source of truth for the intent lifecycle; storage-pluggable (JSON adapter today, Postgres in Phase 4). Owns idempotency so apps/server delegates instead of reimplementing it.",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.mjs"
+    }
+  },
+  "files": [
+    "src"
+  ],
+  "scripts": {
+    "test": "node --test test"
+  }
+}

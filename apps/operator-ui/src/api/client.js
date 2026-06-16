@@ -50,6 +50,13 @@ export const api = {
   strategyScenarios: () => call('GET', '/api/strategy/scenarios'),
   simulateStrategy: (strategy, scenario) => call('POST', '/api/strategy/simulate', { strategy, scenario }),
 
+  // diagnostics (ADR-0001 Phase 5B) — read-only pre-flight; 404 unless DIAGNOSTIC_BACKEND=package.
+  diagnosticsStatus: () => call('GET', '/api/diagnostics/status'),
+  runDiagnostics: (opts = {}) => call('POST', '/api/diagnostics/run', opts),
+  diagnosticsProviderTest: () => call('POST', '/api/diagnostics/provider-test', {}),
+  runtimeReadiness: () => call('GET', '/api/runtime/readiness'), // ADR-0001 Phase 8A (read-only runtime health)
+  analyticsSummary: (hours = 24) => call('GET', `/api/analytics/summary?hours=${hours}`), // ADR-0001 Phase 7C (optional)
+
   // SSOT commands
   command: (command_type, payload = {}) => call('POST', '/api/commands', { command_type, ...payload }),
   updateConfig: (patch) => call('POST', '/api/commands', { command_type: 'update_config', patch }),

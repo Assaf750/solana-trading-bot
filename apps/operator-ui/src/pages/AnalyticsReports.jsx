@@ -98,7 +98,7 @@ export default function AnalyticsReports() {
 
   return (
     <div className="stack">
-      <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={live ? (ar ? 'أداء حقيقي من بيانات السلسلة' : 'Real-live performance from on-chain data') : (ar ? 'أداء التداول الورقي من بيانات حقيقية — لا أرقام مختلقة' : 'Paper performance from real data — no fabricated numbers')} />
+      <PageHead title={ar ? 'التحليلات والتقارير' : 'Analytics & Reports'} sub={live ? (ar ? 'أداء حقيقي من بيانات السلسلة' : 'Real-live performance from on-chain data') : (ar ? 'أداء المحاكاة الورقية من بيانات حقيقية — لا أرقام مختلقة' : 'Paper (simulation) performance from real data — no fabricated numbers')} />
 
       <div className="row" style={{ gap: 'var(--s-2)', flexWrap: 'wrap' }}>
         <button className="btn" onClick={() => downloadCsv('positions')}>⬇ {ar ? 'تصدير المراكز المغلقة (CSV)' : 'Export closed positions (CSV)'}</button>

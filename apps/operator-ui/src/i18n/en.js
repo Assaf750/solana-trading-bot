@@ -64,6 +64,7 @@ export default {
     analytics: 'Analytics & Reports',
     risk: 'Risk Center',
     funds: 'My Wallets & Funds',
+    diagnostics: 'Diagnostics',
     settings: 'Settings & Safety',
     alerts: 'Alerts',
     help: 'Help / Glossary'

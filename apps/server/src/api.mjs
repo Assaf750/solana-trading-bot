@@ -6,8 +6,44 @@ import { computeReadiness } from './readiness.mjs';
 import { deriveRunMode, runModesCatalog } from './engine/run-modes.mjs';
 import { assessRisk } from './engine/risk-center.mjs';
 import { runScenario, listScenarios } from './engine/strategy-sim.mjs';
+import { mapProviderEventToRecord } from '../../../packages/storage/src/index.mjs';
 
-export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth }) {
+// ADR-0001 Phase 5B: map a DiagnosticRun readiness (valid/warning/invalid) to an operator-facing
+// summary. `safe_to_run_live` is ADVISORY ONLY — it never arms or activates live trading; it merely
+// reports whether the pre-flight checks all passed.
+function diagSummary(readiness) {
+  const overall = readiness === 'valid' ? 'pass' : readiness === 'warning' ? 'warn' : 'fail';
+  return { overall, safe_to_run_live: readiness === 'valid' };
+}
+
+// ADR-0001 Phase 5C: every diagnostics response declares these guarantees explicitly, so any caller
+// (UI or legacy action routed here) carries the same contract: a diagnostic NEVER sends a
+// transaction, opens a position, or claims an execution intent. These are structural facts about the
+// DiagnosticExecutionAdapter (it accepts only read providers), surfaced for the operator.
+const DIAG_SAFETY = Object.freeze({ diagnostic_only: true, no_transaction_sent: true, no_position_opened: true, no_intent_claimed: true });
+
+export function createApi({ config, wallets, killSwitch, operatingState, vault, signer, audit, broadcast, paperEngine, portfolio, livePortfolio, liveExecutor, rpc, analyzeWallet, analyzeToken, discoverTraders, discoverFromLeaders, tokenMeta, notifier, history, providerHealth, diagnostics = null, hotState = null, eventSink = null, runtimeProbes = null, analytics = null }) {
+  // ADR-0001 Phase 6B: optional hot-state cache for provider-health + readiness ONLY. Hot-state is
+  // never SoT; every access is FAIL-OPEN — a Redis error degrades to a cache-miss and NEVER changes
+  // provider status, readiness, or any trading decision. cacheOp swallows errors and reports degraded.
+  const HOT_CACHE_TTL = { providerHealth: 10_000, readiness: 15_000, idempotency: 120_000 };
+  const cacheOp = async (fn) => { try { return { ok: true, value: await fn() }; } catch { return { ok: false, value: null }; } };
+
+  // ADR-0001 Phase 7B: optional append-only analytics events for NON-CRITICAL surfaces only
+  // (diagnostics + provider-health). Strictly BEST-EFFORT and FAIL-OPEN: a ClickHouse error is
+  // swallowed and NEVER changes a response, status, or trading decision. Payloads are curated summaries
+  // — never secrets / raw tx / keys / auth headers (diagnostics never touch signing material anyway).
+  const eventEnabled = !!(eventSink && eventSink.backend && eventSink.backend !== 'none' && eventSink.writer);
+  async function recordEvent(kind, fields = {}) {
+    if (!eventEnabled) return false;
+    try {
+      const r = await eventSink.writer.writeEvent(mapProviderEventToRecord({ kind, at: fields.at || new Date().toISOString(), ...fields }));
+      return !!(r && r.ok);
+    } catch { return false; } // never let analytics throw into the request path
+  }
+  const _eventThrottle = new Map(); // event_type -> last-write ms; keeps polled GETs from spamming the sink
+  const eventThrottleOk = (key, minMs = 10_000) => { const now = Date.now(); if (now - (_eventThrottle.get(key) || 0) < minMs) return false; _eventThrottle.set(key, now); return true; };
+  const providerStatuses = (snap) => Object.fromEntries(Object.entries(snap || {}).map(([k, v]) => [k, (v && v.status) || 'unknown']));
   const remember = (entry) => { try { history?.record(entry); } catch { /* history is best-effort */ } };
   const emit = typeof broadcast === 'function' ? broadcast : () => {};
   const notify = (kind, text) => { try { notifier?.notify({ kind, text }); } catch { /* best-effort */ } };
@@ -219,9 +255,123 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
         if (path === '/api/status') return { status: 200, body: statusPayload() };
         if (path === '/api/config') return { status: 200, body: config.get() };
         if (path === '/api/readiness') return { status: 200, body: readiness() };
+        if (path === '/api/runtime/readiness') {
+          // ADR-0001 Phase 8A-R: structured, READ-ONLY runtime status. OPEN-BY-DESIGN — this endpoint is
+          // MONITORING, not enforcement: it reports capability status (available / not_configured /
+          // degraded / unavailable), never imposes a lock/gate/hard-stop. A capability is `available`
+          // once its config + dependencies are present; missing setup reads as `not_configured`; a failed
+          // dependency reads as `degraded`/`unavailable`. cache (Redis) / analytics (ClickHouse) outages
+          // never affect other capabilities. Nothing here opens live or mutates state.
+          const status = statusPayload();
+          const rd = readiness();
+          const safeProbe = async (fn, fallback) => { if (typeof fn !== 'function') return fallback; try { return (await fn()) || fallback; } catch { return { ...fallback, status: 'degraded' }; } };
+          const CAP = (s) => ({ ok: 'available', fail: 'unavailable', disabled: 'not_configured' }[s]
+            || (['available', 'unavailable', 'degraded', 'not_configured'].includes(s) ? s : 'available'));
+          const sp = await safeProbe(runtimeProbes && runtimeProbes.storage, { backend: 'json', status: 'ok' });
+          const hp = await safeProbe(runtimeProbes && runtimeProbes.hotState, { backend: 'memory', status: 'ok' });
+          const ep = await safeProbe(runtimeProbes && runtimeProbes.eventSink, { backend: 'none', status: 'disabled' });
+          const storage = { backend: sp.backend, status: CAP(sp.status) };
+          const hot_state = { backend: hp.backend, status: CAP(hp.status) };
+          const event_sink = { backend: ep.backend, status: CAP(ep.status) };
+          const provCap = (s) => ({ healthy: 'available', degraded: 'degraded', down: 'unavailable' }[s] || 'available');
+          const providers = Object.fromEntries(Object.entries(providerStatuses(status.providers)).map(([k, v]) => [k, provCap(v)]));
+
+          // live execution as a CAPABILITY (open-by-design). requirements come from the honest readiness
+          // checks; `missing_config` is the not-yet-configured subset; it becomes available once met.
+          const reqBlockers = (rd.blockers || []).filter((b) => b.blocker !== 'kill_switch_engaged');
+          const missing_config = reqBlockers.map((b) => b.blocker);
+          const requirements = ['hard_risk_limits', 'capital_limit', 'rpc_provider', 'signer_session_bounds', 'signer_ready'];
+          const killEngaged = (rd.blockers || []).some((b) => b.blocker === 'kill_switch_engaged');
+          let liveStatus;
+          if (missing_config.length) liveStatus = 'not_configured';
+          else if (killEngaged || storage.status === 'unavailable' || providers.rpc === 'unavailable') liveStatus = 'unavailable';
+          else if (hot_state.status === 'degraded' || event_sink.status === 'degraded' || Object.values(providers).includes('degraded')) liveStatus = 'degraded';
+          else liveStatus = 'available';
+          const live_execution = { status: liveStatus, requirements, missing_config, can_execute_when_configured: true };
+
+          // signer capability — no locked/unlocked terminology; can_sign is a factual capability check
+          const sg = status.signer || {};
+          const signer = { status: sg.key_imported ? 'available' : 'not_configured', can_sign: !!(sg.key_imported && sg.vault_unlocked && sg.session_active) };
+
+          const degradedAny = [storage.status, hot_state.status, event_sink.status].includes('degraded') || Object.values(providers).includes('degraded');
+          const unavailableCore = storage.status === 'unavailable' || live_execution.status === 'unavailable';
+          const overall = unavailableCore ? 'unavailable' : degradedAny ? 'degraded' : live_execution.status === 'not_configured' ? 'not_configured' : 'ready';
+
+          const unavailable_dependencies = [];
+          if (storage.status === 'unavailable') unavailable_dependencies.push('storage');
+          if (hot_state.status === 'degraded') unavailable_dependencies.push('hot_state');
+          if (event_sink.status === 'degraded') unavailable_dependencies.push('event_sink');
+          for (const [k, v] of Object.entries(providers)) if (v === 'unavailable' || v === 'degraded') unavailable_dependencies.push(`provider:${k}`);
+
+          return { status: 200, body: {
+            overall,
+            mode: status.mode || null,
+            run_mode: status.run_mode || null,
+            operating_state: status.operating_state?.operating_state || null,
+            capability_status: { storage: storage.status, hot_state: hot_state.status, event_sink: event_sink.status, signer: signer.status, live_execution: live_execution.status },
+            storage, hot_state, event_sink, providers, signer,
+            diagnostics: { backend: diagnostics ? 'package' : 'legacy', status: diagnostics ? 'available' : 'not_configured' },
+            live_execution,
+            unavailable_dependencies,
+            read_only: true,                    // monitoring only — this endpoint never executes, mutates, or gates
+            checked_at: new Date().toISOString(),
+          } };
+        }
         if (path === '/api/modes') return { status: 200, body: runModesCatalog(statusPayload()) };
         if (path === '/api/risk') return { status: 200, body: assessRisk({ status: statusPayload(), config: config.get(), portfolioSummary: portfolio ? portfolio.summary() : {} }) };
-        if (path === '/api/providers/health') return { status: 200, body: { providers: providerHealth ? providerHealth.snapshot() : {} } };
+        if (path === '/api/providers/health') {
+          // Live in-process monitor is authoritative + cheap; the hot-state cache is write-through and
+          // (only on a cold/empty monitor) a fallback. A Redis error NEVER changes the reported status.
+          const live = providerHealth ? providerHealth.snapshot() : {};
+          let providers = live;
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          if (hotState) {
+            if (Object.keys(live).length > 0) {
+              const w = await cacheOp(() => hotState.setProviderHealth(live, HOT_CACHE_TTL.providerHealth));
+              hot_state_cache.degraded = !w.ok;
+            } else {
+              const r = await cacheOp(() => hotState.getProviderHealth()); // cold start: serve last cached
+              hot_state_cache.degraded = !r.ok;
+              if (r.ok && r.value && typeof r.value === 'object') { providers = r.value; hot_state_cache.hit = true; }
+            }
+          }
+          // best-effort analytics (throttled — this route is polled). Compact, no secrets.
+          let event_written = false;
+          if (eventEnabled && eventThrottleOk('provider.health')) {
+            event_written = await recordEvent('provider.health', { providers: providerStatuses(providers), degraded: hot_state_cache.degraded });
+          }
+          return { status: 200, body: { providers, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written } } };
+        }
+        // ADR-0001 Phase 5B/6B: read-only live-readiness rollup (connectivity + provider health). The
+        // readiness is always computed LIVE; the hot-state cache is written best-effort and the prior
+        // cached snapshot is returned as `cached_readiness` (ADVISORY ONLY — never an activation decision).
+        if (diagnostics && path === '/api/diagnostics/status') {
+          const r = await diagnostics.runLiveReadinessDiagnostic();
+          const summary = diagSummary(r.readiness);
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          let cached_readiness = null;
+          if (hotState) {
+            const prev = await cacheOp(() => hotState.getReadiness());
+            if (!prev.ok) hot_state_cache.degraded = true;
+            else if (prev.value) { cached_readiness = prev.value; hot_state_cache.hit = true; }
+            const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: r.readiness, checked_at: r.checked_at }, HOT_CACHE_TTL.readiness));
+            if (!w.ok) hot_state_cache.degraded = true;
+          }
+          let event_written = false;
+          if (eventEnabled && eventThrottleOk('diagnostic.status')) { // throttled — status is polled
+            event_written = await recordEvent('diagnostic.status', { at: r.checked_at, readiness: r.readiness, overall: summary.overall, blockers: r.blockers });
+          }
+          return { status: 200, body: { ok: true, ...summary, readiness: r.readiness, blockers: r.blockers, checks: r.checks, checked_at: r.checked_at, safety: DIAG_SAFETY, hot_state_cache, cached_readiness, event_sink: { enabled: eventEnabled, written: event_written } } };
+        }
+        if (path.startsWith('/api/analytics/summary')) {
+          // ADR-0001 Phase 7C: OPTIONAL read-only operator insights from ClickHouse analytics_events.
+          // Always 200 — status carries available|not_configured|unavailable|degraded; never affects
+          // readiness/trading; never SoT. not_configured when EVENT_SINK_BACKEND != clickhouse.
+          if (!analytics || typeof analytics.summary !== 'function') return { status: 200, body: { status: 'not_configured' } };
+          const qs = new URLSearchParams(path.split('?')[1] || '');
+          const windowHours = Number(qs.get('hours')) || 24;
+          return { status: 200, body: await analytics.summary({ windowHours }) };
+        }
         if (path.startsWith('/api/history')) {
           const qs = new URLSearchParams(path.split('?')[1] || '');
           const limit = Number(qs.get('limit')) || 50;
@@ -235,6 +385,10 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
           const { readAuditTail } = await import('./audit-log.mjs');
           return { status: 200, body: { audit: readAuditTail(limit) } };
         }
+        // ADR-0001 Phase 5D: the paper routes below (/api/positions, /api/trades, /api/engine-events,
+        // /api/orders, /api/strategy/simulate) are LOCAL SIMULATION / compatibility surfaces — a sandbox
+        // portfolio model, never a readiness or execution/provider test. Execution + provider testing
+        // lives under /api/diagnostics/* (the DiagnosticExecutionAdapter). Behavior here is unchanged.
         if (path === '/api/positions') {
           const s = portfolio ? portfolio.state() : { positions: [] };
           return { status: 200, body: { simulated: true, positions: s.positions, summary: portfolio ? portfolio.summary() : null } };
@@ -440,6 +594,44 @@ export function createApi({ config, wallets, killSwitch, operatingState, vault, 
             emit({ event_type: 'health_update', kill_switch: res.state });
           }
           return { status: res.ok ? 200 : 400, body: res };
+        }
+        // ADR-0001 Phase 5A/5B: pre-flight diagnostics (read-only; never opens a position, claims an
+        // intent, or broadcasts). Present only when DIAGNOSTIC_BACKEND=package wired the adapter;
+        // otherwise these fall through to 404. `/execution-test` is an explicit alias of `/run`.
+        if (diagnostics && (path === '/api/diagnostics/run' || path === '/api/diagnostics/execution-test')) {
+          // OPTIONAL idempotency (Phase 6C): a repeated request carrying the same idempotency_key replays
+          // the prior result instead of re-running. Best-effort + FAIL-OPEN — if hot-state is down it is a
+          // cache miss and the diagnostic simply runs again; never a gate, never a behavior change.
+          const idemKey = (body && typeof body.idempotency_key === 'string' && body.idempotency_key) ? body.idempotency_key : null;
+          if (hotState && idemKey) {
+            const prior = await cacheOp(() => hotState.readIdempotencyKey(`diag_run:${idemKey}`));
+            if (prior.ok && prior.value) return { status: 200, body: { ...prior.value, idempotent: true } };
+          }
+          const run = await diagnostics.runDiagnosticExecutionTest(body && typeof body === 'object' ? body : {});
+          const summary = diagSummary(run.readiness);
+          const hot_state_cache = { enabled: !!hotState, hit: false, degraded: false };
+          if (hotState) {
+            const w = await cacheOp(() => hotState.setReadiness({ ...summary, readiness: run.readiness, checked_at: run.created_at }, HOT_CACHE_TTL.readiness));
+            hot_state_cache.degraded = !w.ok;
+          }
+          // best-effort analytics: one run summary + a compact sample per quote/route check (no secrets)
+          let event_written = false;
+          if (eventEnabled) {
+            event_written = await recordEvent('diagnostic.run', { at: run.created_at, run_id: run.run_id, run_kind: run.kind, readiness: run.readiness, overall: summary.overall, checks: run.checks.map((c) => ({ name: c.name, status: c.status })) });
+            for (const c of run.checks) {
+              if (c.name === 'quote' || c.name === 'route') {
+                await recordEvent(`diagnostic.${c.name}_check`, { at: c.checked_at, status: c.status, available: c.available, out_amount: c.out_amount, error: c.error });
+              }
+            }
+          }
+          const respBody = { ok: true, run, ...summary, safety: DIAG_SAFETY, hot_state_cache, event_sink: { enabled: eventEnabled, written: event_written }, idempotency_key: idemKey, idempotent: false };
+          if (hotState && idemKey) await cacheOp(() => hotState.claimIdempotencyKey(`diag_run:${idemKey}`, HOT_CACHE_TTL.idempotency, respBody));
+          return { status: 200, body: respBody };
+        }
+        if (diagnostics && path === '/api/diagnostics/provider-test') {
+          const check = await diagnostics.runProviderHealthCheck();
+          const event_written = await recordEvent('provider.health_check', { overall: check.status, degraded: check.degraded, providers: providerStatuses(check.providers) });
+          return { status: 200, body: { ok: true, check, overall: check.status, safety: DIAG_SAFETY, event_sink: { enabled: eventEnabled, written: event_written } } };
         }
         return { status: 404, body: { ok: false, api_error_code: 'RESOURCE_NOT_FOUND' } };
       }
