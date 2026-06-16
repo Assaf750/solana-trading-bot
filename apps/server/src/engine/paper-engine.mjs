@@ -16,7 +16,7 @@ import { proportionalLeaderUsd } from './sizing.mjs';
 import { checkMarketFilters } from './market-filters.mjs';
 import { shouldFire, nextOrderState } from './orders.mjs';
 import { createLatencyTracker } from './latency-tracker.mjs';
-import { deriveDesiredState } from '../../../../packages/trading-engine/src/index.mjs';
+import { deriveDesiredState, recommendLeader, scoreLeader, finalizeLeaderInsights } from '../../../../packages/trading-engine/src/index.mjs';
 import { readJson, writeJson, nowIso } from '../util.mjs';
 
 const EVENTS_FILE = 'engine-events.json';
@@ -838,28 +838,25 @@ export function createPaperEngine({ config, walletsRegistry, killSwitch, operati
     if (!pf || typeof pf.leaderStats !== 'function') return empty;
     const minSample = Number(cfg.ev?.minimum_sample_size);
     const r2 = (n) => Math.round(n * 100) / 100;
+    // Pure recommendation / score / roll-up are OWNED by @soltrade/trading-engine (Phase Engine-3). This
+    // gathers the impure inputs (per-leader stats from the store + the EV-gate verdict, run only when there
+    // is enough sample, exactly as before) and shapes the row; the package decides + ranks + groups.
     const leaders = walletsRegistry.list().map((w) => {
       const leader = w.tracked_wallet_address;
       const s = pf.leaderStats(leader);
-      let recommendation = 'watch';
-      if (Number.isFinite(minSample) && s.trades >= minSample) {
-        recommendation = checkEvGate({ cfg, stats: s }).rejections.length > 0 ? 'drop' : 'follow';
-      } else if (s.trades > 0) {
-        recommendation = s.total_realized < 0 ? 'watch' : 'follow';
-      }
+      const inSample = Number.isFinite(minSample) && s.trades >= minSample;
+      const evGateRejected = inSample ? checkEvGate({ cfg, stats: s }).rejections.length > 0 : false;
       return {
         leader, wallet_id: w.wallet_id, label: w.label || '', follow_enabled: w.follow_enabled,
         trades: s.trades, win_rate: r2(s.win_rate),
         profit_factor: Number.isFinite(s.profit_factor) ? r2(s.profit_factor) : null,
         total_realized_usd: r2(s.total_realized), avg_realized_usd: r2(s.avg_realized),
         consecutive_losses: typeof pf.leaderConsecutiveLosses === 'function' ? pf.leaderConsecutiveLosses(leader) : 0,
-        score: r2(s.total_realized * (0.5 + 0.5 * s.win_rate)),
-        recommendation,
+        score: r2(scoreLeader(s)),
+        recommendation: recommendLeader({ stats: s, minSample, evGateRejected }),
       };
-    }).sort((a, b) => b.score - a.score);
-    const recommendation = { follow: [], drop: [], watch: [] };
-    for (const x of leaders) recommendation[x.recommendation].push(x.leader);
-    return { mode: cfg.mode, leaders, recommendation };
+    });
+    return finalizeLeaderInsights({ mode: cfg.mode, leaders });
   }
 
   return { start, stop, status, events, closePosition, resolvePosition, manualBuy, manualSell, addOrder, listOrders, cancelOrder, latencyReport, leaderInsights, _internal: { onSignature, markPass, reconcilePass, handleLeaderBuy, handleLeaderSell, performExit, pollOrders, resolvePosition, leaderInsights, desiredState } };

@@ -1,4 +1,6 @@
-// @soltrade/trading-engine — type surface (hand-written, ADR-0001 Phase Engine-2).
+// @soltrade/trading-engine — type surface (hand-written, ADR-0001 Phase Engine-2 / Engine-3).
+
+export * from './leader-insights';
 
 export type EngineState =
   | 'stopped'

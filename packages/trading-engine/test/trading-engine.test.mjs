@@ -1,8 +1,11 @@
-// @soltrade/trading-engine tests (ADR-0001 Phase Engine-2). Pure: the lifecycle state machine
-// (deriveDesiredState) and the composition entry (composeTradingEngine over an injected substrate).
+// @soltrade/trading-engine tests (ADR-0001 Phase Engine-2 / Engine-3). Pure: the lifecycle state machine
+// (deriveDesiredState), the composition entry (composeTradingEngine), and the leader-insights logic.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveDesiredState, composeTradingEngine, ENGINE_STATES } from '../src/index.mjs';
+import {
+  deriveDesiredState, composeTradingEngine, ENGINE_STATES,
+  recommendLeader, scoreLeader, finalizeLeaderInsights,
+} from '../src/index.mjs';
 
 const base = { killBlocked: false, vaultUnlocked: true, rpcConfigured: true, followedCount: 1, operatingState: 'ACTIVE' };
 
@@ -45,4 +48,38 @@ test('composeTradingEngine: builds the engine from the injected substrate factor
 test('composeTradingEngine: throws when no substrate factory is injected (pure — never builds its own)', () => {
   assert.throws(() => composeTradingEngine({ deps: {} }), /trading_engine_requires_substrate/);
   assert.throws(() => composeTradingEngine({}), /trading_engine_requires_substrate/);
+});
+
+// ---------- leader insights (Phase Engine-3) ----------
+test('recommendLeader: enough-sample branch keys off the EV-gate verdict', () => {
+  assert.equal(recommendLeader({ stats: { trades: 10, total_realized: 5 }, minSample: 5, evGateRejected: false }), 'follow');
+  assert.equal(recommendLeader({ stats: { trades: 10, total_realized: 5 }, minSample: 5, evGateRejected: true }), 'drop');
+});
+
+test('recommendLeader: below-sample uses net realized; no trades => watch', () => {
+  assert.equal(recommendLeader({ stats: { trades: 2, total_realized: 3 }, minSample: 5 }), 'follow');
+  assert.equal(recommendLeader({ stats: { trades: 2, total_realized: -1 }, minSample: 5 }), 'watch');
+  assert.equal(recommendLeader({ stats: { trades: 0, total_realized: 0 }, minSample: 5 }), 'watch');
+  // non-finite minSample => never the enough-sample branch (falls to the trades>0 rule)
+  assert.equal(recommendLeader({ stats: { trades: 9, total_realized: 4 }, minSample: NaN, evGateRejected: true }), 'follow');
+});
+
+test('scoreLeader: realized PnL weighted by win rate', () => {
+  assert.equal(scoreLeader({ total_realized: 100, win_rate: 1 }), 100);   // 100 * (0.5 + 0.5)
+  assert.equal(scoreLeader({ total_realized: 100, win_rate: 0 }), 50);    // 100 * 0.5
+  assert.equal(scoreLeader({ total_realized: -20, win_rate: 0.5 }), -15); // -20 * 0.75
+});
+
+test('finalizeLeaderInsights: ranks by score (best first) + groups addresses by recommendation', () => {
+  const leaders = [
+    { leader: 'A', score: 10, recommendation: 'follow' },
+    { leader: 'B', score: 50, recommendation: 'drop' },
+    { leader: 'C', score: 30, recommendation: 'follow' },
+    { leader: 'D', score: 5, recommendation: 'watch' },
+  ];
+  const out = finalizeLeaderInsights({ mode: 'paper', leaders });
+  assert.equal(out.mode, 'paper');
+  assert.deepEqual(out.leaders.map((x) => x.leader), ['B', 'C', 'A', 'D']); // sorted by score desc
+  assert.deepEqual(out.recommendation, { follow: ['C', 'A'], drop: ['B'], watch: ['D'] });
+  assert.deepEqual(finalizeLeaderInsights({}), { mode: null, leaders: [], recommendation: { follow: [], drop: [], watch: [] } });
 });

@@ -470,3 +470,27 @@ built by CI/Docker; wiring it (or moving it under a dedicated path) is future wo
 **Docs:** this §18; §16.4 marked done; `merge-readiness.md` updated. The Dockerfile / CI / deploy.md were
 unaffected (they reference only the kept dirs). The ADR / RESTRUCTURE_PLAN architecture-plan docs are left
 as historical records (they describe the target design, not live paths).
+
+## 19. Phase Engine-3 — second pure slice into `packages/trading-engine` (leader insights; no behavior change)
+
+After Engine-2 (the lifecycle state machine), extracted the **leader-insights** pure logic — the
+follow/drop/watch recommendation, the ranking score, and the insights roll-up — byte-for-byte from
+paper-engine's `leaderInsights()`. Pure-first as before: the impure data-gathering (per-leader stats from
+the store, the EV-gate verdict) stays in paper-engine; the package owns the decision/score/roll-up.
+
+- **New `packages/trading-engine/src/leader-insights.mjs`** (+ `.d.ts`, re-exported from `index.mjs`):
+  `recommendLeader({ stats, minSample, evGateRejected })` → 'follow'|'drop'|'watch';
+  `scoreLeader({ total_realized, win_rate })` → number; `finalizeLeaderInsights({ mode, leaders })` →
+  ranks by score (best first) + groups addresses by recommendation. Imports NO mechanisms (passes the
+  package-boundary/mechanism guard).
+- **`paper-engine.mjs`** `leaderInsights()` now gathers the impure inputs (it still runs `checkEvGate`
+  ONLY when there is enough sample, exactly as before) and delegates the recommendation / score / roll-up
+  to the package. Output is identical — guarded by the existing `paper-engine.test` leaderInsights test
+  (recommendation, profit_factor rounding, score sort, grouping) which is unchanged and still green.
+- **Tests:** package test gained `recommendLeader` / `scoreLeader` / `finalizeLeaderInsights` cases;
+  `apps/server/test/trading-engine.test.mjs` gained an Engine-3 ownership guard (paper-engine imports +
+  delegates to the package helpers). `merge-readiness.md` updated.
+
+**Still in paper-engine (mechanism-bound, future slices):** the supervisor loop, the command lifecycle,
+fills/exits, and `status()` assembly — they need rpc / jupiter / stores / liveExecutor injected before they
+can move into the pure package.
